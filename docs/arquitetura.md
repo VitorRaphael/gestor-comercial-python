@@ -2,13 +2,15 @@
 
 > Documento vivo. Atualizar sempre que uma decisão de escopo ou arquitetura mudar — é a fonte de verdade que guia qualquer sessão futura de desenvolvimento (humana ou de IA).
 
-## 1. Contexto e decisão de reestruturação
+## 1. Contexto e relação com o Gestor Comercial (Java)
 
-Este projeto **não é** um PDV novo e independente. É a reestruturação, em Python, do [Gestor Comercial](../../GESTOR%20COMERCIAL) (Java/Spring Boot), cujo backend/frontend web já tem toda a modelagem de domínio, os Casos de Uso e o Diagrama de Classes validados.
+**Gestor Comercial Python é um projeto próprio e independente**: repositório próprio (`gestor-comercial-python`), pasta própria (`Gestor Comercial Python`), código-fonte próprio em Python. Ele **não edita nem depende em runtime** do [Gestor Comercial](../../GESTOR%20COMERCIAL) original (Java/Spring Boot) — aquele projeto continua existindo e intocado.
 
-**Motivação da reestruturação (2026-08-20):** a máquina do food truck é fraca demais para rodar um servidor Spring Boot + PWA em rede local, e o Wi-Fi do local não é confiável. A arquitetura cliente-servidor do Gestor Comercial original está correta como *produto*, mas errada como *deployment* para este ambiente físico. A solução é portar as regras de negócio e a identidade visual para um aplicativo desktop standalone, de máquina única, 100% offline.
+O que este projeto faz é **portar**, para uma stack Python, o conhecimento de domínio já validado no Gestor Comercial Java: as regras de negócio, os Casos de Uso e o Diagrama de Classes, além da identidade visual do front-end web. É um porte de conhecimento e design, não uma modificação do código-fonte Java.
 
-Uma tentativa anterior deste port (pasta `PVD Python`, repositório `pvd-food-truck`) foi descartada porque partiu de um escopo simplificado "inspirado" no Gestor Comercial, em vez de portar o sistema real. Este documento reinicia do zero com esse erro corrigido.
+**Motivação do porte (2026-08-20):** a máquina do food truck é fraca demais para rodar um servidor Spring Boot + PWA em rede local, e o Wi-Fi do local não é confiável. A arquitetura cliente-servidor do Gestor Comercial original está correta como *produto*, mas errada como *deployment* para este ambiente físico. A solução é portar as regras de negócio e a identidade visual para um aplicativo desktop standalone, de máquina única, 100% offline.
+
+Uma tentativa anterior deste porte (pasta `PVD Python`, repositório `pvd-food-truck`) foi descartada porque partiu de um escopo simplificado "inspirado" no Gestor Comercial, em vez de portar o sistema real — e a pasta foi renomeada de `PVD Python` para `Gestor Comercial Python` em 2026-08-20 para eliminar essa ambiguidade de vez. Este documento reinicia do zero com esse erro corrigido.
 
 ## 2. Princípios não-negociáveis (RNFs)
 
@@ -216,3 +218,8 @@ gestor-comercial-python/
 ## 8. Estado do documento
 
 - 2026-08-20 — Documento criado do zero após descarte total da tentativa anterior de `PVD Python`. Escopo, stack e árvore de pastas aprovados por Vitor.
+- 2026-08-20 — Fase 1 iniciada: `domain/enums.py` e as 12 entidades SQLAlchemy criadas 1:1 a partir do Diagrama de Classes do artifact. `repository/base.py` com engine SQLite (`~/.gestor_comercial/gestor_comercial.db`) + sessionmaker. `.venv` criado e projeto instalado em modo editável (`pip install -e .`); `Base.metadata.create_all()` testado e cria as 12 tabelas sem erro.
+- 2026-08-20 — Alembic configurado (`alembic init migrations`, `env.py` apontando para `Base.metadata` e `DB_PATH`). Primeira migration autogerada (`1eb3a1232a49_schema_inicial_v1.py`) e testada com `alembic upgrade head` em banco limpo — as 12 tabelas + `alembic_version` foram criadas.
+- 2026-08-20 — Corrigida ambiguidade de FK em `Funcionario.quitacoes` (`quitacoes_consumo` tem duas FKs para `funcionarios`: `funcionario_id` e `autorizado_por_id`) especificando `foreign_keys` na relationship.
+- 2026-08-20 — `repository/seed.py` criado, portando fielmente o seed do Java (`MesaSeeder`/`FuncionarioSeeder`): 60 mesas numeradas 1–60, e funcionário "Gerente" (perfil GERENTE, PIN padrão `264072`) usando o mesmo esquema de hash SHA-256(salt+pin) com salt aleatório de 16 bytes em Base64. Idempotente (não duplica mesas nem cria admin se já houver funcionário). Testado 2x seguidas — sem duplicação. **Atenção**: PIN padrão `264072` é o mesmo hardcoded do Java, deve ser trocado antes de produção real assim que existir tela de troca de PIN.
+- 2026-08-20 — **Fase 1 concluída.** `tests/conftest.py` (fixture `session` com SQLite em memória) + `tests/integration/test_entidades.py` com 7 testes cobrindo criação/consulta das 12 entidades e seus relacionamentos (inclusive os dois casos de FK dupla: `ComboItem` combo/produto e `QuitacaoConsumo` funcionário/autorizador). `pytest` instalado no `.venv`; 7/7 passando. Próximo: Fase 2 — Services (`auth_service.py` primeiro, pois `cardapio_service`/`comanda_service` dependem de autenticação para ações de Gerente).

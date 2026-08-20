@@ -1,6 +1,8 @@
-# Gestor Comercial — PDV Food Truck (Python)
+# Gestor Comercial Python
 
-PDV desktop standalone, feito para rodar 100% offline em uma máquina fraca no food truck do meu pai. É a reestruturação, em Python, do [Gestor Comercial](../GESTOR%20COMERCIAL) original (Java/Spring Boot) — não um projeto separado, mas o mesmo sistema portado para uma arquitetura de máquina única, sem servidor e sem dependência de Wi-Fi.
+PDV desktop standalone, feito para rodar 100% offline em uma máquina fraca no food truck do meu pai.
+
+**Este é um projeto próprio e independente**, com seu próprio repositório e código-fonte — não é uma alteração do [Gestor Comercial](../GESTOR%20COMERCIAL) original (Java/Spring Boot). O que ele faz é portar as regras de negócio e a identidade visual já validadas do Gestor Comercial para uma stack Python, com arquitetura de máquina única (sem servidor, sem Wi-Fi). O projeto Java/Spring Boot continua existindo e não é tocado por este trabalho.
 
 ## Por quê
 

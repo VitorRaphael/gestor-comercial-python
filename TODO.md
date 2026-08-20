@@ -12,12 +12,12 @@
 - [x] Estrutura de pastas vazia criada (`src/gestor_comercial/...`, `tests/`, `resources/`, `migrations/`)
 
 ## Fase 1 — Núcleo de dados (Model + Repository)
-- [ ] Entidades SQLAlchemy em `domain/`: Funcionario, Mesa, Comanda, ItemComanda, Produto, Categoria, ComboItem, Pagamento, Caixa, MovimentoCaixa, QuitacaoConsumo, Impressora
-- [ ] Enums em `domain/enums.py` (StatusMesa, StatusComanda, FormaPagamento, PerfilFuncionario, TipoMovimento)
-- [ ] `repository/base.py` — engine SQLite + sessionmaker
-- [ ] Configuração inicial do Alembic (`alembic init`, primeira migration com todas as tabelas)
-- [ ] Seed inicial de Mesas (conjunto fixo) e Funcionário admin de teste
-- [ ] Testes de integração: criar/consultar cada entidade via repository
+- [x] Entidades SQLAlchemy em `domain/`: Funcionario, Mesa, Comanda, ItemComanda, Produto, Categoria, ComboItem, Pagamento, Caixa, MovimentoCaixa, QuitacaoConsumo, Impressora
+- [x] Enums em `domain/enums.py` (StatusMesa, StatusComanda, FormaPagamento, PerfilFuncionario, TipoMovimento)
+- [x] `repository/base.py` — engine SQLite + sessionmaker
+- [x] Configuração inicial do Alembic (`alembic init`, primeira migration com todas as tabelas)
+- [x] Seed inicial de Mesas (conjunto fixo) e Funcionário admin de teste
+- [x] Testes de integração: criar/consultar cada entidade via repository
 
 ## Fase 2 — Lógica de negócio (Services)
 - [ ] `auth_service.py` — hash SHA-256+salt, validação de PIN, usuário logado em memória
