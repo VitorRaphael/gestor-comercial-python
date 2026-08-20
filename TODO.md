@@ -7,9 +7,9 @@
 - [x] `README.md`
 - [x] `docs/arquitetura.md`
 - [x] `TODO.md`
-- [ ] `git init` + commit zero (Vitor)
-- [ ] `pyproject.toml` com dependências (PySide6, SQLAlchemy, Alembic, python-escpos, pytest)
-- [ ] Estrutura de pastas vazia criada (`src/gestor_comercial/...`, `tests/`, `resources/`, `migrations/`)
+- [x] `git init` + commit zero (Vitor)
+- [x] `pyproject.toml` com dependências (PySide6, SQLAlchemy, Alembic, python-escpos, pytest)
+- [x] Estrutura de pastas vazia criada (`src/gestor_comercial/...`, `tests/`, `resources/`, `migrations/`)
 
 ## Fase 1 — Núcleo de dados (Model + Repository)
 - [ ] Entidades SQLAlchemy em `domain/`: Funcionario, Mesa, Comanda, ItemComanda, Produto, Categoria, ComboItem, Pagamento, Caixa, MovimentoCaixa, QuitacaoConsumo, Impressora

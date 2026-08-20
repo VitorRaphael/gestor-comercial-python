@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gestor-comercial"
+version = "0.1.0"
+description = "PDV desktop offline em Python — reestruturação do Gestor Comercial para o food truck"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.7",
+    "SQLAlchemy>=2.0",
+    "alembic>=1.13",
+    "python-escpos>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pyinstaller>=6.10",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
