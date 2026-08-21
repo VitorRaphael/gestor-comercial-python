@@ -137,6 +137,9 @@ class AuthService:
     def listar_ativos(self) -> list[Funcionario]:
         return self.uow.funcionarios.listar_ativos()
 
+    def listar_todos(self) -> list[Funcionario]:
+        return self.uow.funcionarios.listar_todos()
+
     def buscar_funcionario(self, funcionario_id: int) -> Funcionario:
         funcionario = self.uow.funcionarios.buscar_por_id(funcionario_id)
         if funcionario is None:
