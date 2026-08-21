@@ -28,10 +28,10 @@
 - [x] Testes unitários de cada service (casos de sucesso + regras de bloqueio) — 319 testes, ver `docs/arquitetura.md` §8 para o resumo da revisão adversarial que corrigiu 9 problemas antes de fechar a fase
 
 ## Fase 3 — Interface PySide6 (Views)
-- [ ] Extrair paleta de cores/CSS do front-end web (`GESTOR COMERCIAL/.../desktop/style.css`) para `resources/qss/`
-- [ ] `login_view.py` — PIN pad
-- [ ] `mesas_view.py` — grid de mesas (livre/ocupada/balcão), espelhando o `grid-mesas` web
-- [ ] `comanda_view.py` — lista de itens + total, modal de adicionar item
+- [x] Extrair paleta de cores/CSS do front-end web (`GESTOR COMERCIAL/.../desktop/style.css`) para `resources/qss/`
+- [x] `login_view.py` — PIN pad
+- [x] `mesas_view.py` — grid de mesas (livre/ocupada/balcão), espelhando o `grid-mesas` web
+- [x] `comanda_view.py` — lista de itens + total, modal de adicionar item
 - [ ] `pagamento_dialog.py` — resumo, forma, valor, troco, consumo interno
 - [ ] `caixa_view.py` — status, abrir/fechar, tabela de movimentos
 - [ ] `cardapio_view.py` — CRUD produto/categoria/combo
