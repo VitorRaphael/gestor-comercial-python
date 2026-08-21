@@ -286,6 +286,21 @@ def test_remover_item_ja_cancelado(comandas, comanda, produto):
         comandas.remover_item(item.id)
 
 
+def test_remover_item_ja_impresso_exige_cancelamento(comandas, comanda, produto, uow):
+    """Item que já foi pra chapa não pode sumir do banco sem PIN, sem motivo e
+    sem quem autorizou — seria desviar comida sem deixar rastro. A partir daí só
+    `cancelar_item`, que registra tudo."""
+    item = comandas.lancar_item(comanda.id, produto.id, 1)
+    item.impresso_em = datetime.now()
+    uow.itens.salvar(item)
+    uow.commit()
+
+    with pytest.raises(RegraDeNegocioError, match="produção"):
+        comandas.remover_item(item.id)
+
+    assert [i.id for i in comandas.listar_itens(comanda.id)] == [item.id]
+
+
 def test_remover_item_inexistente(comandas, gerente):
     with pytest.raises(RecursoNaoEncontradoError):
         comandas.remover_item(4242)

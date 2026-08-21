@@ -166,7 +166,7 @@ class ComandaService:
         return item
 
     def remover_item(self, item_id: int) -> None:
-        """Apaga o item de vez — usado para erro de digitação, antes de imprimir."""
+        """Apaga o item de vez — erro de digitação, só enquanto não foi impresso."""
         self.auth.usuario_atual()
         item = self._buscar_item(item_id)
         comanda = self.buscar(item.comanda_id)
@@ -177,6 +177,18 @@ class ComandaService:
         if item.cancelado:
             raise RegraDeNegocioError(
                 "Este item já foi cancelado e não pode ser removido, para manter o histórico."
+            )
+
+        # A partir da Fase 4 "antes de imprimir" deixou de ser promessa da
+        # docstring e virou fato verificável (`impresso_em`). Item que já foi
+        # para a produção está sendo feito na chapa: apagá-lo aqui sumiria com a
+        # venda do banco sem PIN, sem motivo e sem quem autorizou — o caminho
+        # perfeito para a comida sair pela janela sem registro nenhum. Quem
+        # precisa desfazer isso usa Cancelar, que exige gerente e grava tudo.
+        if item.impresso_em is not None:
+            raise RegraDeNegocioError(
+                "Este item já foi enviado para a produção e não pode ser apagado. "
+                "Use Cancelar, que registra quem autorizou e por quê."
             )
 
         self.uow.itens.remover(item)

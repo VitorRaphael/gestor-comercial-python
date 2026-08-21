@@ -78,8 +78,15 @@ Portado integralmente do Gestor Comercial, **exceto** os itens cortados abaixo (
 - Cadastro (nome, PIN, perfil), listagem de ativos, desativação soft.
 
 ### 3.12 Impressoras e Roteamento
-- Cadastro de impressora; impressão da comanda roteada por categoria via `python-escpos`.
-- Itens sem impressora vinculada caem em um grupo genérico (não bloqueia a impressão).
+- **Cadastro de impressora** (`cardapio_service`, tela de Impressoras, tudo ação de Gerente): nome único, largura da bobina em colunas (32 = 58mm, 48 = 80mm), ativa/inativa, padrão, e os parâmetros de **5 tipos de conexão** — `USB` (vendor/product id), `SERIAL` (porta + baudrate), `REDE` (host + porta), `WINDOWS` (nome da fila instalada) e `ARQUIVO`. O tipo `ARQUIVO` grava o cupom num `.txt` legível e é o padrão de quem cadastra sem informar nada: permite rodar o food truck inteiro antes de a impressora física chegar.
+- **Impressora padrão**: é quem recebe o recibo do cliente, o fechamento de caixa e o fallback de roteamento. O sistema mantém a invariante "havendo impressora ativa, uma delas é a padrão" nos quatro caminhos que podem quebrá-la — criar (a primeira nasce padrão), editar (desativar tira a marca), excluir (elege a próxima ativa) e a própria migration de dados.
+- **Roteamento da comanda de produção** (porte de `RoteamentoImpressaoService.java`): os itens são agrupados por `item.produto.categoria.impressora`, preservando a ordem de lançamento — a cozinha lê o cupom na sequência em que o atendente digitou. Sai um cupom por impressora.
+- **Fallback**: item cuja categoria não tem impressora (ou cuja impressora foi desativada) vai para a **impressora padrão**. Só quando não há padrão nenhuma o grupo vira um aviso acionável na tela ("associe uma impressora a essa categoria no Cardápio"), e mesmo assim os outros grupos imprimem normalmente. *DIVERGÊNCIA do Java*, que apenas logava o grupo órfão e o pedido nunca chegava na cozinha: comida que ninguém faz é pior do que um aviso na tela.
+- **Imprimir só o que é novo (via de acréscimo)**: `ItemComanda.impresso_em` marca o que já foi para a produção. `imprimir_comanda` leva apenas itens não cancelados com `impresso_em IS NULL` — clicar duas vezes não repete o pedido, e nada novo não é erro (devolve lista vazia). O carimbo só é gravado nos grupos que **imprimiram com sucesso**, num commit único no fim: grupo que falhou continua NULL e sai de novo no próximo clique. `reimprimir_comanda` (2ª via) repete a comanda inteira e não mexe em `impresso_em`.
+- Item já impresso não pode mais ser **removido** — só **cancelado**, que exige PIN de gerente e motivo (§3.6). Apagar do banco o que já está na chapa apagaria a venda sem deixar rastro.
+- **Escopo dos cupons**: comanda de produção (cozinha), recibo do cliente (itens, total, pagamentos por forma, troco) e relatório de fechamento de caixa (abertura, total por forma, sangrias/reforços/despesas, saldo esperado — números vindos prontos do `caixa_service`, sem recalcular).
+- **RNF inegociável**: falha de impressora nunca derruba a venda. `ErroDeImpressao` fica presa em `hardware/` + `impressao_service` e vira `ResultadoImpressao(sucesso=False)` com mensagem para o operador; só `RecursoNaoEncontradoError` e `NaoAutorizadoError` sobem.
+- **A impressão roda na thread da UI**, com cursor de espera e timeout curto (3 s), e não em `QThread`: o app usa um único `UnitOfWork`/`Session` por processo, e `Session` do SQLAlchemy não é thread-safe — jogar isso para outra thread trocaria um congelamento de 3 s por corrupção de dados.
 
 ## 4. Diagramas de referência
 
@@ -165,10 +172,11 @@ gestor-comercial-python/
 │       │   ├── pagamento_service.py
 │       │   ├── caixa_service.py
 │       │   ├── cardapio_service.py
-│       │   └── impressao_service.py
+│       │   ├── impressao_service.py
+│       │   └── formatador_cupom.py   # funções puras: centralizar, alinhar preço, quebrar na largura
 │       │
 │       ├── hardware/              # isolamento de periféricos físicos
-│       │   └── impressora_escpos.py
+│       │   └── impressora_escpos.py  # 5 tipos de conexão + BlocoTexto/Documento
 │       │
 │       ├── ui/                    # Controller/View — PySide6, zero SQL
 │       │   ├── main_window.py
@@ -179,7 +187,8 @@ gestor-comercial-python/
 │       │   │   ├── pagamento_dialog.py
 │       │   │   ├── caixa_view.py
 │       │   │   ├── cardapio_view.py
-│       │   │   └── funcionarios_view.py
+│       │   │   ├── funcionarios_view.py
+│       │   │   └── impressoras_view.py
 │       │   └── widgets/
 │       │       ├── mesa_card.py
 │       │       └── pin_dialog.py
@@ -240,3 +249,13 @@ gestor-comercial-python/
 - 2026-08-20 — `login_view.py` criado: pin pad numérico ligado a `AuthService.login()`. Testado com banco SQLite descartável (login correto, PIN errado, apagar/limpar) via smoke test headless (`QT_QPA_PLATFORM=offscreen`).
 - 2026-08-20 — `mesas_view.py` criado: grid responsivo de mesas (recalcula colunas no `resizeEvent`, mesma ideia de `repeat(auto-fill, minmax(120px,1fr))` do CSS original) + botão Balcão, ligados a `ComandaService.abrir_por_mesa`/`abrir_balcao`. `ComandaService` ganhou `listar_mesas()` (view nunca toca repository direto, regra de §6). Revisão adversarial (2 lentes: regras de negócio e correção Qt) achou 1 problema real, corrigido: a view só capturava `RegraDeNegocioError`/`RecursoNaoEncontradoError`, deixando `NaoAutorizadoError` (sem funcionário logado) propagar e derrubar a UI — agora as três são tratadas. Smoke test headless cobre: 60 mesas livres no boot, abrir comanda por mesa, idempotência (2º clique não duplica), mesa **permanece LIVRE** ao abrir comanda (regra §3.4: só fica OCUPADA no 1º item lançado — confirmado contra `test_lancar_item_ocupa_a_mesa`), balcão, e os dois caminhos de erro (sem login / sem caixa aberto). 319 testes da suíte inteira continuam verdes. Próximo: `comanda_view.py`.
 - 2026-08-20 — `comanda_view.py` criado: tabela de itens (descrição/preço/qtd/total + botão remover) com total ao rodapé, e modal `+ Item` (`_AdicionarItemDialog`) com combo de produto ativo, quantidade (`QSpinBox`) e observação livre, ligados a `ComandaService.listar_itens`/`calcular_total`/`lancar_item`/`remover_item`. Fechamento, cancelamento e pagamento ficam fora de propósito (entram em `pagamento_dialog.py` e no modal de cancelamento, próximos itens da Fase 3). Smoke test headless cobre: comanda vazia, item lançado aparece na tabela e no total, dados do modal, remoção de item atualizando tabela/total. 319 testes da suíte inteira continuam verdes. Próximo: `pagamento_dialog.py`.
+- 2026-08-21 — **Fase 4 concluída: impressão de verdade (§3.12).** `domain/enums.py` ganhou `TipoConexaoImpressora` (USB/SERIAL/REDE/WINDOWS/ARQUIVO); `Impressora` deixou de ser só um nome e passou a guardar os parâmetros de conexão + largura da bobina + `ativa`/`padrao` (nome agora UNIQUE, como no Java); `ItemComanda` ganhou `impresso_em`. Migration `06b890e91ef1` (batch_alter_table, NOT NULL em 3 passos, downgrade funcional, testada com upgrade/downgrade sobre impressoras pré-existentes). Novos: `hardware/impressora_escpos.py` (única fronteira com o `python-escpos`, import tardio), `services/formatador_cupom.py` (funções puras de largura), `services/impressao_service.py` (roteamento, fallback, via de acréscimo, 2ª via, recibo, fechamento, teste) e `ui/views/impressoras_view.py`. Revisão adversarial (revisão + refutação) achou 8 problemas reais, todos corrigidos na mesma sessão — suíte final com **487 testes, 100% verde**:
+  - **Crítico**: `_DriverEscpos` ligava o tamanho dobrado (número da mesa) e nunca desligava — o `set()` do python-escpos só emite comando de tamanho quando `normal_textsize`/`double_*` é verdadeiro, e com os três falsos não manda nada. O cupom inteiro, e o cupom seguinte, sairiam dobrados e cortados pela bobina até alguém desligar a impressora da tomada. Corrigido passando `normal_textsize` explicitamente em todo bloco, mais um `hw('INIT')` no começo de cada cupom; coberto com teste que lê os bytes ESC/POS no `Dummy`.
+  - **Alto**: item já enviado para a produção podia ser apagado por qualquer atendente via `remover_item`, sem PIN e sem rastro — desviava comida sem deixar registro, contornando toda a auditoria de `cancelar_item`. `remover_item` agora barra item com `impresso_em`, e o botão "Remover" da comanda fica desabilitado com a explicação.
+  - **Alto**: `SERIAL` era aberta sem `write_timeout` (no pyserial o `timeout` limita só a leitura) e com `dsrdtr=True` — impressora desligada em COM3 bloqueava a escrita para sempre, congelando a janela do PDV, já que a impressão roda na thread da UI. Corrigido impondo `write_timeout` logo após o `open()` e desligando o controle de fluxo por hardware.
+  - **Médio**: no driver `WINDOWS` é o `close()` que faz `EndDocPrinter`, ou seja, é ele que efetiva o job — e o `close` estava sempre dentro de um `suppress(Exception)`, inclusive no caminho feliz. Spooler caído devolvia `sucesso=True`, marcava `impresso_em` e escondia para sempre um pedido que nunca saiu. Agora o `suppress` só vale quando já há exceção em curso.
+  - **Médio**: a migration marcava todas as impressoras existentes como não-padrão e não elegia nenhuma — instalação que já rodava a Fase 3 ficava sem padrão, e recibo, fechamento e fallback paravam em silêncio. Passou a eleger a mais antiga.
+  - **Médio**: `excluir_impressora` apagava a padrão sem eleger outra, quebrando a mesma invariante que criar/editar mantêm.
+  - **Baixo**: nome da impressora ia direto para o cabeçalho do cupom sem passar pelo `formatador_cupom` (campo de 80 caracteres numa bobina de 20–48) — mesma inconsistência corrigida junto na instrução do cupom de teste.
+  - **Baixo**: comentário da migration sobre `impresso_em` ensinava a regra invertida (dizia que NULL impedia o item de aparecer como novo, quando NULL é exatamente o que o faz aparecer).
+  Falta só o teste manual com a impressora física, que depende do hardware que o Vitor ainda não tem — o tipo de conexão `ARQUIVO` cobre o fluxo inteiro até lá. Próximo: Fase 5 — empacotamento (PyInstaller).

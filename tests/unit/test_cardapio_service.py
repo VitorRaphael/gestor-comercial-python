@@ -4,6 +4,12 @@ from decimal import Decimal
 import pytest
 
 from gestor_comercial.domain.comanda import Comanda
+from gestor_comercial.domain.enums import TipoConexaoImpressora
+from gestor_comercial.domain.impressora import (
+    BAUDRATE_PADRAO,
+    COLUNAS_PADRAO,
+    PORTA_REDE_PADRAO,
+)
 from gestor_comercial.domain.item_comanda import ItemComanda
 from gestor_comercial.services.cardapio_service import CardapioService
 from gestor_comercial.services.exceptions import (
@@ -605,3 +611,317 @@ def test_buscar_impressora_por_id(cardapio):
 def test_buscar_impressora_inexistente(cardapio):
     with pytest.raises(RecursoNaoEncontradoError):
         cardapio.buscar_impressora(9999)
+
+
+def test_criar_impressora_sem_informar_nada_nasce_como_arquivo(cardapio):
+    """O modo que deixa o food truck rodar antes de a impressora física chegar."""
+    impressora = cardapio.criar_impressora("Cozinha")
+
+    assert impressora.tipo_conexao is TipoConexaoImpressora.ARQUIVO
+    assert impressora.caminho_arquivo.endswith("Cozinha.txt")
+    assert impressora.colunas == COLUNAS_PADRAO
+    assert impressora.ativa is True
+
+
+def test_criar_impressora_arquivo_respeita_o_caminho_informado(cardapio, tmp_path):
+    destino = str(tmp_path / "cupons.txt")
+
+    impressora = cardapio.criar_impressora("Cozinha", "ARQUIVO", caminho_arquivo=destino)
+
+    assert impressora.caminho_arquivo == destino
+
+
+# ----------------------------------------------------------------------
+# Impressora padrão: o destino do recibo, do fechamento e do fallback
+# ----------------------------------------------------------------------
+
+
+def test_a_primeira_impressora_cadastrada_vira_padrao(cardapio):
+    """Sem isso o dia da instalação exigiria um clique extra pro fallback existir."""
+    primeira = cardapio.criar_impressora("Cozinha")
+    segunda = cardapio.criar_impressora("Bar")
+
+    assert primeira.padrao is True
+    assert segunda.padrao is False
+
+
+def test_a_proxima_impressora_reassume_o_posto_de_padrao_vago(cardapio):
+    padrao = cardapio.criar_impressora("Cozinha")
+    cardapio.excluir_impressora(padrao.id)
+
+    nova = cardapio.criar_impressora("Bar")
+
+    assert nova.padrao is True
+
+
+def test_cadastro_novo_vira_padrao_quando_a_antiga_foi_desativada(cardapio):
+    antiga = cardapio.criar_impressora("Cozinha")
+    cardapio.editar_impressora(antiga.id, "Cozinha", ativa=False)
+
+    nova = cardapio.criar_impressora("Bar")
+
+    assert nova.padrao is True
+    assert antiga.padrao is False
+
+
+def test_definir_padrao_deixa_so_uma_marcada(cardapio, uow):
+    primeira = cardapio.criar_impressora("Cozinha")
+    segunda = cardapio.criar_impressora("Bar")
+
+    cardapio.definir_padrao(segunda.id)
+
+    assert [i.nome for i in cardapio.listar_impressoras() if i.padrao] == ["Bar"]
+    assert primeira.padrao is False
+    assert uow.impressoras.buscar_padrao().id == segunda.id
+
+
+def test_definir_padrao_de_impressora_desativada(cardapio):
+    impressora = cardapio.criar_impressora("Cozinha")
+    cardapio.editar_impressora(impressora.id, "Cozinha", ativa=False)
+
+    with pytest.raises(RegraDeNegocioError, match="desativada"):
+        cardapio.definir_padrao(impressora.id)
+
+
+def test_definir_padrao_de_impressora_inexistente(cardapio):
+    with pytest.raises(RecursoNaoEncontradoError):
+        cardapio.definir_padrao(9999)
+
+
+def test_definir_padrao_exige_gerente(cardapio, como_atendente):
+    with pytest.raises(AcessoNegadoError):
+        cardapio.definir_padrao(9999)
+
+
+def test_desativar_a_padrao_tira_a_marca_dela(cardapio, uow):
+    impressora = cardapio.criar_impressora("Cozinha")
+
+    cardapio.editar_impressora(impressora.id, "Cozinha", ativa=False)
+
+    assert impressora.padrao is False
+    assert uow.impressoras.buscar_padrao() is None
+
+
+def test_listar_impressoras_ativas_ignora_desativadas(cardapio):
+    ativa = cardapio.criar_impressora("Cozinha")
+    desligada = cardapio.criar_impressora("Bar")
+    cardapio.editar_impressora(desligada.id, "Bar", ativa=False)
+
+    assert [i.id for i in cardapio.listar_impressoras_ativas()] == [ativa.id]
+
+
+# ----------------------------------------------------------------------
+# Parâmetros de conexão por tipo
+# ----------------------------------------------------------------------
+
+
+def test_criar_impressora_usb_normaliza_os_ids(cardapio):
+    """O driver faz int(valor, 16): o gerente não pode ter que lembrar do '0x'."""
+    impressora = cardapio.criar_impressora("Cozinha", "USB", vendor_id="04b8", product_id="0X202")
+
+    assert impressora.tipo_conexao is TipoConexaoImpressora.USB
+    assert impressora.vendor_id == "0x04b8"
+    assert impressora.product_id == "0x0202"
+
+
+@pytest.mark.parametrize(
+    ("vendor_id", "product_id"),
+    [(None, "0x0202"), ("0x04b8", None), ("  ", "0x0202")],
+)
+def test_criar_impressora_usb_sem_os_ids(cardapio, vendor_id, product_id):
+    with pytest.raises(RegraDeNegocioError):
+        cardapio.criar_impressora("Cozinha", "USB", vendor_id=vendor_id, product_id=product_id)
+
+
+@pytest.mark.parametrize("vendor_id", ["cabo", "0xZZZZ", "04b8f9"])
+def test_criar_impressora_usb_com_id_que_nao_e_hexadecimal(cardapio, vendor_id):
+    with pytest.raises(RegraDeNegocioError, match="0x04b8"):
+        cardapio.criar_impressora("Cozinha", "USB", vendor_id=vendor_id, product_id="0x0202")
+
+
+def test_criar_impressora_serial_usa_9600_por_padrao(cardapio):
+    impressora = cardapio.criar_impressora("Cozinha", "SERIAL", porta_serial=" COM3 ")
+
+    assert impressora.porta_serial == "COM3"
+    assert impressora.baudrate == BAUDRATE_PADRAO
+
+
+def test_criar_impressora_serial_sem_porta(cardapio):
+    with pytest.raises(RegraDeNegocioError, match="COM3"):
+        cardapio.criar_impressora("Cozinha", "SERIAL")
+
+
+@pytest.mark.parametrize("baudrate", ["rápido", 0, -1, True])
+def test_criar_impressora_serial_com_baudrate_invalido(cardapio, baudrate):
+    with pytest.raises(RegraDeNegocioError):
+        cardapio.criar_impressora("Cozinha", "SERIAL", porta_serial="COM3", baudrate=baudrate)
+
+
+def test_criar_impressora_de_rede_usa_9100_por_padrao(cardapio):
+    impressora = cardapio.criar_impressora("Cozinha", "REDE", host="192.168.0.50")
+
+    assert impressora.host == "192.168.0.50"
+    assert impressora.porta_rede == PORTA_REDE_PADRAO
+
+
+def test_criar_impressora_de_rede_sem_host(cardapio):
+    with pytest.raises(RegraDeNegocioError, match="192.168"):
+        cardapio.criar_impressora("Cozinha", "REDE")
+
+
+@pytest.mark.parametrize("porta", [0, 65536, "99999"])
+def test_criar_impressora_de_rede_com_porta_fora_da_faixa(cardapio, porta):
+    with pytest.raises(RegraDeNegocioError):
+        cardapio.criar_impressora("Cozinha", "REDE", host="192.168.0.50", porta_rede=porta)
+
+
+def test_criar_impressora_do_windows_sem_a_fila(cardapio):
+    with pytest.raises(RegraDeNegocioError, match="Dispositivos e Impressoras"):
+        cardapio.criar_impressora("Cozinha", "WINDOWS")
+
+
+def test_criar_impressora_aceita_o_tipo_como_texto_da_tela(cardapio):
+    impressora = cardapio.criar_impressora("Cozinha", " rede ", host="192.168.0.50")
+
+    assert impressora.tipo_conexao is TipoConexaoImpressora.REDE
+
+
+def test_criar_impressora_com_tipo_que_nao_existe(cardapio):
+    with pytest.raises(RegraDeNegocioError, match="BLUETOOTH"):
+        cardapio.criar_impressora("Cozinha", "BLUETOOTH")
+
+
+def test_criar_impressora_com_tipo_nulo(cardapio):
+    with pytest.raises(RegraDeNegocioError):
+        cardapio.criar_impressora("Cozinha", None)
+
+
+@pytest.mark.parametrize("colunas", [19, 97, "abc", -1])
+def test_criar_impressora_com_largura_de_bobina_fora_da_faixa(cardapio, colunas):
+    with pytest.raises(RegraDeNegocioError, match="bobina"):
+        cardapio.criar_impressora("Cozinha", colunas=colunas)
+
+
+@pytest.mark.parametrize(("entrada", "esperado"), [("32", 32), (48, 48), ("", COLUNAS_PADRAO)])
+def test_criar_impressora_aceita_largura_como_texto(cardapio, entrada, esperado):
+    impressora = cardapio.criar_impressora("Cozinha", colunas=entrada)
+
+    assert impressora.colunas == esperado
+
+
+# ----------------------------------------------------------------------
+# Edição e exclusão
+# ----------------------------------------------------------------------
+
+
+def test_editar_impressora_troca_o_tipo_e_zera_o_que_era_do_tipo_antigo(cardapio):
+    """Substituição, não remendo: parâmetro de conexão morta não pode ficar no banco."""
+    impressora = cardapio.criar_impressora(
+        "Cozinha", "USB", vendor_id="0x04b8", product_id="0x0202"
+    )
+
+    editada = cardapio.editar_impressora(
+        impressora.id, "Cozinha", "REDE", host="192.168.0.50", porta_rede=9100
+    )
+
+    assert editada.tipo_conexao is TipoConexaoImpressora.REDE
+    assert editada.host == "192.168.0.50"
+    assert editada.vendor_id is None
+    assert editada.product_id is None
+
+
+def test_editar_impressora_mantem_a_largura_quando_nao_informada(cardapio):
+    impressora = cardapio.criar_impressora("Cozinha", colunas=32)
+
+    editada = cardapio.editar_impressora(impressora.id, "Cozinha da chapa")
+
+    assert editada.nome == "Cozinha da chapa"
+    assert editada.colunas == 32
+
+
+def test_editar_impressora_aceita_o_proprio_nome(cardapio):
+    impressora = cardapio.criar_impressora("Cozinha")
+
+    assert cardapio.editar_impressora(impressora.id, "Cozinha").nome == "Cozinha"
+
+
+def test_editar_impressora_com_nome_de_outra(cardapio):
+    cardapio.criar_impressora("Cozinha")
+    outra = cardapio.criar_impressora("Bar")
+
+    with pytest.raises(RegraDeNegocioError):
+        cardapio.editar_impressora(outra.id, "Cozinha")
+
+
+def test_editar_impressora_com_nome_vazio(cardapio):
+    impressora = cardapio.criar_impressora("Cozinha")
+
+    with pytest.raises(RegraDeNegocioError):
+        cardapio.editar_impressora(impressora.id, "   ")
+
+
+def test_editar_impressora_inexistente(cardapio):
+    with pytest.raises(RecursoNaoEncontradoError):
+        cardapio.editar_impressora(9999, "Cozinha")
+
+
+def test_editar_impressora_exige_gerente(cardapio, como_atendente):
+    with pytest.raises(AcessoNegadoError):
+        cardapio.editar_impressora(9999, "Cozinha")
+
+
+def test_excluir_impressora_que_ninguem_usa(cardapio):
+    impressora = cardapio.criar_impressora("Cozinha")
+
+    cardapio.excluir_impressora(impressora.id)
+
+    assert cardapio.listar_impressoras() == []
+
+
+def test_excluir_a_padrao_elege_outra_no_lugar(cardapio, uow):
+    """Sem padrão, o recibo do cliente e o fechamento de caixa param de sair e
+    todo item de categoria sem impressora vira aviso órfão. `criar_impressora` e
+    `editar_impressora` mantêm essa invariante; excluir também precisa manter."""
+    padrao = cardapio.criar_impressora("Cozinha")  # a primeira já nasce padrão
+    outra = cardapio.criar_impressora("Balcao")
+
+    cardapio.excluir_impressora(padrao.id)
+
+    assert uow.impressoras.buscar_padrao() is outra
+
+
+def test_excluir_a_ultima_impressora_nao_inventa_padrao(cardapio, uow):
+    impressora = cardapio.criar_impressora("Cozinha")
+
+    cardapio.excluir_impressora(impressora.id)
+
+    assert uow.impressoras.buscar_padrao() is None
+
+
+def test_excluir_impressora_comum_nao_mexe_na_padrao(cardapio, uow):
+    padrao = cardapio.criar_impressora("Cozinha")
+    outra = cardapio.criar_impressora("Balcao")
+
+    cardapio.excluir_impressora(outra.id)
+
+    assert uow.impressoras.buscar_padrao() is padrao
+
+
+def test_excluir_impressora_com_categoria_vinculada(cardapio, categoria):
+    impressora = cardapio.criar_impressora("Cozinha")
+    cardapio.associar_impressora(categoria.id, impressora.id)
+
+    with pytest.raises(RegraDeNegocioError, match="categorias"):
+        cardapio.excluir_impressora(impressora.id)
+
+    assert cardapio.buscar_impressora(impressora.id) is impressora
+
+
+def test_excluir_impressora_inexistente(cardapio):
+    with pytest.raises(RecursoNaoEncontradoError):
+        cardapio.excluir_impressora(9999)
+
+
+def test_excluir_impressora_exige_gerente(cardapio, como_atendente):
+    with pytest.raises(AcessoNegadoError):
+        cardapio.excluir_impressora(9999)

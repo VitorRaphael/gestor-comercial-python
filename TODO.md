@@ -39,10 +39,10 @@
 - [x] Modal de cancelamento (item/comanda) com PIN de Gerente
 - [x] `ui/main_window.py` + `main.py` — integra as telas (login → shell com sidebar → páginas) e é o ponto de entrada de verdade do app (`python -m gestor_comercial.main`)
 
-## Fase 4 — Hardware (Impressão)
-- [ ] `hardware/impressora_escpos.py` — abstração de conexão (USB/Serial)
-- [ ] `impressao_service.py` — roteamento por categoria, fallback para grupo genérico
-- [ ] Teste manual com impressora física do food truck
+## Fase 4 — Hardware (Impressão) — ✅ concluída em 2026-08-21
+- [x] `hardware/impressora_escpos.py` — abstração de conexão (USB/Serial/Rede/Windows/Arquivo)
+- [x] `impressao_service.py` — roteamento por categoria, fallback para a impressora padrão
+- [ ] Teste manual com impressora física do food truck — depende do hardware, que o Vitor ainda não tem. O tipo de conexão **ARQUIVO** grava o cupom num `.txt` legível e permite validar o fluxo inteiro (comanda de produção, via de acréscimo, 2ª via, recibo, fechamento) antes de a impressora chegar; quando ela chegar, só o cadastro muda de tipo.
 
 ## Fase 5 — Empacotamento e Testes de Homologação
 - [ ] `packaging/build.spec` (PyInstaller)

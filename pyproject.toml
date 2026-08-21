@@ -12,6 +12,15 @@ dependencies = [
     "SQLAlchemy>=2.0",
     "alembic>=1.13",
     "python-escpos>=3.1",
+    # Impressão pelo tipo de conexão WINDOWS (fila de impressão instalada) usa
+    # escpos.printer.Win32Raw, que exige pywin32. O marcador de plataforma
+    # existe porque o pacote só instala no Windows — e o app roda em Windows,
+    # mas os testes precisam poder rodar em qualquer lugar. Sem ele instalado,
+    # hardware/impressora_escpos.py degrada com aviso em português em vez de
+    # quebrar. pyusb e pyserial (tipos USB e SERIAL) ficaram de fora de
+    # propósito: são extras opcionais do python-escpos e só entram quando a
+    # impressora física chegar e o cabo dela for conhecido.
+    "pywin32>=306; sys_platform == 'win32'",
 ]
 
 [project.scripts]

@@ -42,10 +42,17 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
+from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 
 _COLUNAS = ["Descrição", "Preço", "Qtd", "Total", ""]
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
+
+_NADA_NOVO_PARA_IMPRIMIR = (
+    "Nada novo para a produção: todos os itens desta comanda já foram enviados. "
+    "Use '2ª via' para repetir o cupom inteiro."
+)
 
 
 class ComandaView(QWidget):
@@ -59,11 +66,13 @@ class ComandaView(QWidget):
         self,
         comanda_service: ComandaService,
         cardapio_service: CardapioService,
+        impressao_service: ImpressaoService,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._comanda_service = comanda_service
         self._cardapio_service = cardapio_service
+        self._impressao_service = impressao_service
         self._comanda: Comanda | None = None
 
         self._montar_layout()
@@ -88,6 +97,18 @@ class ComandaView(QWidget):
         self._botao_add_item.clicked.connect(self._abrir_modal_adicionar_item)
         cabecalho.addWidget(self._botao_add_item)
 
+        self._botao_imprimir = QPushButton("Imprimir")
+        self._botao_imprimir.setProperty("variante", "secundario")
+        self._botao_imprimir.setToolTip("Manda para a produção só o que ainda não foi impresso.")
+        self._botao_imprimir.clicked.connect(self._imprimir_producao)
+        cabecalho.addWidget(self._botao_imprimir)
+
+        self._botao_segunda_via = QPushButton("2ª via")
+        self._botao_segunda_via.setProperty("variante", "secundario")
+        self._botao_segunda_via.setToolTip("Repete a comanda inteira, para cupom rasgado ou perdido.")
+        self._botao_segunda_via.clicked.connect(self._imprimir_segunda_via)
+        cabecalho.addWidget(self._botao_segunda_via)
+
         self._botao_pagamento = QPushButton("Receber pagamento")
         self._botao_pagamento.setProperty("variante", "primario")
         self._botao_pagamento.clicked.connect(self._solicitar_pagamento)
@@ -102,6 +123,9 @@ class ComandaView(QWidget):
         self._label_erro = QLabel("")
         self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
         layout_externo.addWidget(self._label_erro)
+
+        self._aviso_impressao = AvisoDeImpressao()
+        layout_externo.addWidget(self._aviso_impressao)
 
         self._tabela = QTableWidget(0, len(_COLUNAS))
         self._tabela.setHorizontalHeaderLabels(_COLUNAS)
@@ -127,6 +151,10 @@ class ComandaView(QWidget):
         if self._comanda is None:
             return
         self._label_erro.setText("")
+        # Qualquer mudança na comanda — outra mesa, item novo, item cancelado —
+        # envelhece o aviso do último cupom. Mantê-lo faria o operador achar que
+        # a cozinha já viu o item que ele acabou de lançar.
+        self._aviso_impressao.limpar()
         # Recarrega para pegar o status mais recente (ex.: acabou de ser
         # cancelada por este mesmo modal) — o objeto passado a
         # `carregar_comanda` pode estar desatualizado.
@@ -149,6 +177,11 @@ class ComandaView(QWidget):
         self._botao_add_item.setEnabled(aberta)
         self._botao_pagamento.setEnabled(aberta)
         self._botao_cancelar_comanda.setEnabled(aberta)
+        # Via de acréscimo só faz sentido na comanda aberta — a fechada não
+        # recebe mais item. A 2ª via continua liberada: cupom da cozinha some
+        # ou rasga depois do pagamento também.
+        self._botao_imprimir.setEnabled(aberta)
+        self._botao_segunda_via.setEnabled(len(itens_ativos) > 0)
 
     def _preencher_linha(self, linha: int, item: ItemComanda) -> None:
         descricao = item.produto.nome
@@ -168,6 +201,14 @@ class ComandaView(QWidget):
         botao_remover = QPushButton("Remover")
         botao_remover.setProperty("variante", "perigo")
         botao_remover.clicked.connect(lambda _checked=False, i=item: self._remover_item(i))
+        # Item que já foi pra cozinha só sai por Cancelar (com PIN e motivo). O
+        # service barra isso de qualquer jeito; desabilitar aqui é para o
+        # operador entender a regra antes de clicar, e não depois do erro.
+        if item.impresso_em is not None:
+            botao_remover.setEnabled(False)
+            botao_remover.setToolTip(
+                "Já enviado para a produção. Use Cancelar, que exige autorização do gerente."
+            )
         layout_acoes.addWidget(botao_remover)
 
         botao_cancelar = QPushButton("Cancelar")
@@ -217,6 +258,41 @@ class ComandaView(QWidget):
         comanda_id = self._comanda.id
         self.atualizar()
         self.comanda_cancelada.emit(comanda_id)
+
+    def _imprimir_producao(self) -> None:
+        """Via de acréscimo: manda para a cozinha só o que ela ainda não viu."""
+        if self._comanda is None:
+            return
+        comanda_id = self._comanda.id
+
+        self._label_erro.setText("")
+        try:
+            resultados = executar_impressao(
+                lambda: self._impressao_service.imprimir_comanda(comanda_id)
+            )
+        except _ERROS_SERVICE as erro:
+            # Impressora com defeito não passa por aqui: volta dentro de
+            # `resultados` com sucesso=False. Aqui só chega comanda inexistente
+            # ou sessão perdida, que são erro de verdade.
+            self._label_erro.setText(str(erro))
+            return
+        self._aviso_impressao.mostrar(resultados, vazio=_NADA_NOVO_PARA_IMPRIMIR)
+
+    def _imprimir_segunda_via(self) -> None:
+        """Repete a comanda inteira sem mexer no que já foi marcado como impresso."""
+        if self._comanda is None:
+            return
+        comanda_id = self._comanda.id
+
+        self._label_erro.setText("")
+        try:
+            resultados = executar_impressao(
+                lambda: self._impressao_service.reimprimir_comanda(comanda_id)
+            )
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+            return
+        self._aviso_impressao.mostrar(resultados, vazio="Esta comanda não tem itens para reimprimir.")
 
     def _voltar_clicado(self) -> None:
         self.voltar.emit()

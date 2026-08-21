@@ -1,9 +1,9 @@
 """Cardápio: categorias, produtos, combos e impressoras.
 
 Porte de CategoriaService.java, ProdutoService.java, ComboItemService.java e
-ImpressoraService.java (§3.2 e §3.3 da arquitetura). A foto do produto ficou
-de fora: não existe `foto_url` nesta versão — é um app desktop, o cardápio é
-lido de uma lista, não de uma vitrine com imagem.
+ImpressoraService.java (§3.2, §3.3 e §3.12 da arquitetura). A foto do produto
+ficou de fora: não existe `foto_url` nesta versão — é um app desktop, o
+cardápio é lido de uma lista, não de uma vitrine com imagem.
 
 Cadastrar, editar, desativar e excluir são ações administrativas (§3.1) e
 exigem gerente. Listar e buscar não exigem: o atendente precisa do cardápio
@@ -12,16 +12,38 @@ aberto na tela o tempo todo para lançar item na comanda.
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 
 from gestor_comercial.domain.categoria import Categoria
 from gestor_comercial.domain.combo_item import ComboItem
-from gestor_comercial.domain.impressora import Impressora
+from gestor_comercial.domain.enums import TipoConexaoImpressora
+from gestor_comercial.domain.impressora import (
+    BAUDRATE_PADRAO,
+    COLUNAS_PADRAO,
+    PORTA_REDE_PADRAO,
+    Impressora,
+)
 from gestor_comercial.domain.produto import Produto
+from gestor_comercial.repository.base import DB_PATH
 from gestor_comercial.repository.unit_of_work import UnitOfWork
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
 from gestor_comercial.services.exceptions import RecursoNaoEncontradoError, RegraDeNegocioError
+
+# Abaixo de 20 colunas não cabe nem o nome do item; acima de 96 não existe
+# bobina térmica comum. É uma cerca contra digitação errada, não uma regra fiscal.
+COLUNAS_MINIMAS = 20
+COLUNAS_MAXIMAS = 96
+PORTA_REDE_MAXIMA = 65535
+
+# Aceita 04b8 ou 0x04b8 — é como o id aparece no Gerenciador de Dispositivos
+# do Windows e em etiqueta de impressora, e o gerente não tem que saber qual dos dois.
+_ID_USB = re.compile(r"(0[xX])?[0-9a-fA-F]{1,4}")
+
+# Caracteres que o Windows recusa em nome de arquivo. Espaço entra junto porque
+# o caminho do cupom acaba indo parar em linha de comando na hora de depurar.
+_CARACTERES_PROIBIDOS_EM_ARQUIVO = re.compile(r'[<>:"/\\|?*\s]+')
 
 
 class CardapioService:
@@ -37,7 +59,7 @@ class CardapioService:
 
     def criar_categoria(self, nome: str) -> Categoria:
         self.auth.exigir_gerente()
-        nome_limpo = self._nome_obrigatorio(nome, "Informe o nome da categoria.")
+        nome_limpo = self._texto_obrigatorio(nome, "Informe o nome da categoria.")
         self._exigir_nome_de_categoria_livre(nome_limpo, categoria_id=None)
 
         categoria = Categoria(nome=nome_limpo, ativo=True)
@@ -60,7 +82,7 @@ class CardapioService:
     def editar_categoria(self, categoria_id: int, nome: str) -> Categoria:
         self.auth.exigir_gerente()
         categoria = self.buscar_categoria(categoria_id)
-        nome_limpo = self._nome_obrigatorio(nome, "Informe o nome da categoria.")
+        nome_limpo = self._texto_obrigatorio(nome, "Informe o nome da categoria.")
         self._exigir_nome_de_categoria_livre(nome_limpo, categoria.id)
 
         categoria.nome = nome_limpo
@@ -118,7 +140,7 @@ class CardapioService:
         is_combo: bool = False,
     ) -> Produto:
         self.auth.exigir_gerente()
-        nome_limpo = self._nome_obrigatorio(nome, "Informe o nome do produto.")
+        nome_limpo = self._texto_obrigatorio(nome, "Informe o nome do produto.")
         preco_final = self._preco_valido(preco)
         custo_final = self._custo_valido(custo)
         categoria = self.buscar_categoria(categoria_id)
@@ -159,7 +181,7 @@ class CardapioService:
     ) -> Produto:
         self.auth.exigir_gerente()
         produto = self.buscar_produto(produto_id)
-        nome_limpo = self._nome_obrigatorio(nome, "Informe o nome do produto.")
+        nome_limpo = self._texto_obrigatorio(nome, "Informe o nome do produto.")
         preco_final = self._preco_valido(preco)
         custo_final = self._custo_valido(custo)
         categoria = self.buscar_categoria(categoria_id)
@@ -272,22 +294,170 @@ class CardapioService:
         return self.uow.combo_itens.listar_por_combo(combo_id)
 
     # ------------------------------------------------------------------
-    # Impressoras (porte de ImpressoraService.java)
+    # Impressoras (porte de ImpressoraService.java, §3.12)
     # ------------------------------------------------------------------
 
-    def criar_impressora(self, nome: str) -> Impressora:
-        self.auth.exigir_gerente()
-        nome_limpo = self._nome_obrigatorio(nome, "Informe o nome da impressora.")
-        if self.uow.impressoras.buscar_por_nome(nome_limpo) is not None:
-            raise RegraDeNegocioError(f"Já existe uma impressora com o nome '{nome_limpo}'.")
+    def criar_impressora(
+        self,
+        nome: str,
+        tipo_conexao: TipoConexaoImpressora | str = TipoConexaoImpressora.ARQUIVO,
+        *,
+        vendor_id: str | None = None,
+        product_id: str | None = None,
+        porta_serial: str | None = None,
+        baudrate: int | str | None = None,
+        host: str | None = None,
+        porta_rede: int | str | None = None,
+        nome_fila: str | None = None,
+        caminho_arquivo: str | None = None,
+        colunas: int | str | None = None,
+    ) -> Impressora:
+        """Cadastra uma impressora; só o nome é obrigatório.
 
-        impressora = Impressora(nome=nome_limpo)
+        Todo parâmetro de conexão é keyword com default para que a chamada
+        antiga `criar_impressora("Cozinha")` continue valendo. Sem informar
+        nada sai uma impressora ARQUIVO, que grava o cupom num .txt — dá pra
+        rodar o food truck inteiro antes de a impressora física chegar.
+        """
+        self.auth.exigir_gerente()
+        nome_limpo = self._texto_obrigatorio(nome, "Informe o nome da impressora.")
+        self._exigir_nome_de_impressora_livre(nome_limpo, impressora_id=None)
+
+        impressora = Impressora(nome=nome_limpo, ativa=True, padrao=False)
+        impressora.colunas = self._colunas_validas(colunas, COLUNAS_PADRAO)
+        self._aplicar_conexao(
+            impressora,
+            tipo_conexao,
+            vendor_id=vendor_id,
+            product_id=product_id,
+            porta_serial=porta_serial,
+            baudrate=baudrate,
+            host=host,
+            porta_rede=porta_rede,
+            nome_fila=nome_fila,
+            caminho_arquivo=caminho_arquivo,
+        )
+        # Sem padrão ativa, item de categoria sem impressora não tem pra onde ir
+        # e o recibo do cliente não sai. Marcar a primeira (ou a próxima, se a
+        # antiga foi apagada/desativada) faz o dia da instalação funcionar sem
+        # depender de mais um clique do gerente.
+        if self.uow.impressoras.buscar_padrao() is None:
+            impressora.padrao = True
+
+        self.uow.impressoras.salvar(impressora)
+        self.uow.commit()
+        return impressora
+
+    def editar_impressora(
+        self,
+        impressora_id: int,
+        nome: str,
+        tipo_conexao: TipoConexaoImpressora | str = TipoConexaoImpressora.ARQUIVO,
+        *,
+        vendor_id: str | None = None,
+        product_id: str | None = None,
+        porta_serial: str | None = None,
+        baudrate: int | str | None = None,
+        host: str | None = None,
+        porta_rede: int | str | None = None,
+        nome_fila: str | None = None,
+        caminho_arquivo: str | None = None,
+        colunas: int | str | None = None,
+        ativa: bool | None = None,
+    ) -> Impressora:
+        """Grava o formulário inteiro de uma impressora já cadastrada.
+
+        É substituição, não remendo: o que não vier no parâmetro do tipo de
+        conexão escolhido fica NULL. `colunas=None` e `ativa=None` são a
+        exceção — significam "não mexe", porque são campos que a tela pode
+        simplesmente não estar editando.
+        """
+        self.auth.exigir_gerente()
+        impressora = self.buscar_impressora(impressora_id)
+        nome_limpo = self._texto_obrigatorio(nome, "Informe o nome da impressora.")
+        self._exigir_nome_de_impressora_livre(nome_limpo, impressora.id)
+
+        impressora.nome = nome_limpo
+        impressora.colunas = self._colunas_validas(colunas, impressora.colunas)
+        self._aplicar_conexao(
+            impressora,
+            tipo_conexao,
+            vendor_id=vendor_id,
+            product_id=product_id,
+            porta_serial=porta_serial,
+            baudrate=baudrate,
+            host=host,
+            porta_rede=porta_rede,
+            nome_fila=nome_fila,
+            caminho_arquivo=caminho_arquivo,
+        )
+        if ativa is not None:
+            impressora.ativa = bool(ativa)
+        # Impressora desligada pelo gerente não pode continuar sendo a padrão:
+        # o fallback mandaria cupom pra um destino que ele mesmo desativou.
+        # Zerar a marca aqui deixa isso visível na tela em vez de virar
+        # armadilha silenciosa na hora do movimento.
+        if not impressora.ativa:
+            impressora.padrao = False
+
+        self.uow.impressoras.salvar(impressora)
+        self.uow.commit()
+        return impressora
+
+    def excluir_impressora(self, impressora_id: int) -> None:
+        self.auth.exigir_gerente()
+        impressora = self.buscar_impressora(impressora_id)
+        # Apagar deixaria as categorias apontando pro vazio, e os itens delas
+        # passariam a cair no fallback sem ninguém perceber. Trocar a impressora
+        # dessas categorias é decisão do gerente, não nossa.
+        if self.uow.categorias.existe_com_impressora(impressora.id):
+            raise RegraDeNegocioError(
+                f"Não é possível excluir a impressora '{impressora.nome}': "
+                "há categorias do cardápio apontando pra ela. Troque a impressora "
+                "dessas categorias no Cardápio antes, ou apenas desative esta."
+            )
+
+        era_padrao = bool(impressora.padrao)
+        self.uow.impressoras.remover(impressora)
+        # Mesma invariante que `criar_impressora` e `editar_impressora` mantêm:
+        # sempre que houver impressora ativa, uma delas é a padrão. Excluir a
+        # padrão sem eleger outra deixaria o recibo, o fechamento de caixa e o
+        # fallback de categoria sem impressora fora do ar — em silêncio, e sem
+        # nada na tela ligando o efeito à exclusão que acabou de acontecer.
+        if era_padrao:
+            for candidata in self.uow.impressoras.listar_ativas():
+                candidata.padrao = True
+                self.uow.impressoras.salvar(candidata)
+                break
+        self.uow.commit()
+
+    def definir_padrao(self, impressora_id: int) -> Impressora:
+        """Elege a impressora do recibo, do fechamento e do fallback (§3.12)."""
+        self.auth.exigir_gerente()
+        impressora = self.buscar_impressora(impressora_id)
+        if not impressora.ativa:
+            raise RegraDeNegocioError(
+                f"A impressora '{impressora.nome}' está desativada. "
+                "Ative-a antes de defini-la como padrão."
+            )
+
+        # Duas padrão ao mesmo tempo faria o recibo sair em uma e o fechamento
+        # em outra, dependendo da ordem do banco. Derruba a marca das outras.
+        for outra in self.uow.impressoras.listar_todos():
+            if outra.id != impressora.id and outra.padrao:
+                outra.padrao = False
+                self.uow.impressoras.salvar(outra)
+
+        impressora.padrao = True
         self.uow.impressoras.salvar(impressora)
         self.uow.commit()
         return impressora
 
     def listar_impressoras(self) -> list[Impressora]:
         return self.uow.impressoras.listar_todos()
+
+    def listar_impressoras_ativas(self) -> list[Impressora]:
+        return self.uow.impressoras.listar_ativas()
 
     def buscar_impressora(self, impressora_id: int) -> Impressora:
         impressora = self.uow.impressoras.buscar_por_id(impressora_id)
@@ -298,6 +468,163 @@ class CardapioService:
     # ------------------------------------------------------------------
     # Validações
     # ------------------------------------------------------------------
+
+    def _aplicar_conexao(
+        self,
+        impressora: Impressora,
+        tipo_conexao: TipoConexaoImpressora | str,
+        *,
+        vendor_id: str | None,
+        product_id: str | None,
+        porta_serial: str | None,
+        baudrate: int | str | None,
+        host: str | None,
+        porta_rede: int | str | None,
+        nome_fila: str | None,
+        caminho_arquivo: str | None,
+    ) -> None:
+        """Valida os parâmetros do tipo escolhido e escreve só os que ele usa."""
+        tipo = self._tipo_de_conexao_valido(tipo_conexao)
+
+        # Limpa tudo antes de preencher: trocar de USB pra REDE tem que apagar o
+        # vendor_id antigo, senão a linha guarda parâmetro que ninguém mais usa
+        # e a tela de cadastro exibe lixo de uma configuração morta.
+        impressora.tipo_conexao = tipo
+        impressora.vendor_id = None
+        impressora.product_id = None
+        impressora.porta_serial = None
+        impressora.baudrate = None
+        impressora.host = None
+        impressora.porta_rede = None
+        impressora.nome_fila = None
+        impressora.caminho_arquivo = None
+
+        if tipo is TipoConexaoImpressora.USB:
+            impressora.vendor_id = self._id_usb(vendor_id, "vendor id")
+            impressora.product_id = self._id_usb(product_id, "product id")
+        elif tipo is TipoConexaoImpressora.SERIAL:
+            impressora.porta_serial = self._texto_obrigatorio(
+                porta_serial, "Informe a porta serial da impressora (ex: COM3)."
+            )
+            impressora.baudrate = self._inteiro_positivo(
+                baudrate,
+                BAUDRATE_PADRAO,
+                "A velocidade da porta serial (baudrate) deve ser um número "
+                "maior que zero. O valor mais comum é 9600.",
+            )
+        elif tipo is TipoConexaoImpressora.REDE:
+            impressora.host = self._texto_obrigatorio(
+                host, "Informe o endereço de rede da impressora (ex: 192.168.0.50)."
+            )
+            impressora.porta_rede = self._porta_de_rede_valida(porta_rede)
+        elif tipo is TipoConexaoImpressora.WINDOWS:
+            impressora.nome_fila = self._texto_obrigatorio(
+                nome_fila,
+                "Informe o nome da impressora exatamente como ele aparece em "
+                "Dispositivos e Impressoras do Windows.",
+            )
+        else:
+            # ARQUIVO: sem caminho informado a gente escolhe um, senão o modo de
+            # teste exigiria justamente a configuração que ele existe pra evitar.
+            impressora.caminho_arquivo = self._caminho_de_arquivo(
+                caminho_arquivo, impressora.nome
+            )
+
+    def _exigir_nome_de_impressora_livre(self, nome: str, impressora_id: int | None) -> None:
+        existente = self.uow.impressoras.buscar_por_nome(nome)
+        if existente is not None and existente.id != impressora_id:
+            raise RegraDeNegocioError(f"Já existe uma impressora com o nome '{nome}'.")
+
+    @staticmethod
+    def _tipo_de_conexao_valido(
+        tipo_conexao: TipoConexaoImpressora | str | None,
+    ) -> TipoConexaoImpressora:
+        if isinstance(tipo_conexao, TipoConexaoImpressora):
+            return tipo_conexao
+        opcoes = ", ".join(tipo.value for tipo in TipoConexaoImpressora)
+        # A tela entrega o texto do combo box; aceitar str aqui evita repetir a
+        # conversão em cada view.
+        if isinstance(tipo_conexao, str):
+            try:
+                return TipoConexaoImpressora(tipo_conexao.strip().upper())
+            except ValueError as erro:
+                raise RegraDeNegocioError(
+                    f"Tipo de conexão '{tipo_conexao}' não existe. Escolha um destes: {opcoes}."
+                ) from erro
+        raise RegraDeNegocioError(f"Escolha o tipo de conexão da impressora: {opcoes}.")
+
+    @staticmethod
+    def _texto_obrigatorio(valor: str | None, mensagem: str) -> str:
+        texto = valor.strip() if isinstance(valor, str) else ""
+        if not texto:
+            raise RegraDeNegocioError(mensagem)
+        return texto
+
+    @staticmethod
+    def _id_usb(valor: str | None, campo: str) -> str:
+        texto = valor.strip() if isinstance(valor, str) else ""
+        if not texto:
+            raise RegraDeNegocioError(
+                f"Informe o {campo} da impressora USB (ex: 0x04b8). Ele aparece no "
+                "Gerenciador de Dispositivos do Windows, em Detalhes > Ids de hardware."
+            )
+        if not _ID_USB.fullmatch(texto):
+            raise RegraDeNegocioError(
+                f"O {campo} '{texto}' não é válido. Use o número hexadecimal da "
+                "impressora, no formato 0x04b8."
+            )
+        # Grava sempre como 0xXXXX: o driver converte com int(valor, 16) e não
+        # pode depender de o gerente ter digitado o prefixo.
+        return f"0x{int(texto, 16):04x}"
+
+    @staticmethod
+    def _inteiro_positivo(valor: int | str | None, padrao: int, mensagem: str) -> int:
+        if isinstance(valor, str):
+            # QLineEdit devolve texto; converter aqui evita espalhar int() pelas views.
+            texto = valor.strip()
+            if not texto:
+                return padrao
+            if not texto.isdigit():
+                raise RegraDeNegocioError(mensagem)
+            valor = int(texto)
+        if valor is None:
+            return padrao
+        # bool é subclasse de int em Python: sem este isinstance, baudrate=True
+        # entraria como 1.
+        if isinstance(valor, bool) or not isinstance(valor, int) or valor <= 0:
+            raise RegraDeNegocioError(mensagem)
+        return valor
+
+    def _porta_de_rede_valida(self, porta_rede: int | str | None) -> int:
+        mensagem = (
+            "A porta de rede da impressora deve ser um número entre 1 e "
+            f"{PORTA_REDE_MAXIMA}. Quase toda impressora térmica usa {PORTA_REDE_PADRAO}."
+        )
+        porta = self._inteiro_positivo(porta_rede, PORTA_REDE_PADRAO, mensagem)
+        if porta > PORTA_REDE_MAXIMA:
+            raise RegraDeNegocioError(mensagem)
+        return porta
+
+    def _colunas_validas(self, colunas: int | str | None, padrao: int) -> int:
+        mensagem = (
+            "A largura da bobina deve ficar entre "
+            f"{COLUNAS_MINIMAS} e {COLUNAS_MAXIMAS} colunas. "
+            "Use 32 para bobina de 58mm e 48 para bobina de 80mm."
+        )
+        valor = self._inteiro_positivo(colunas, padrao, mensagem)
+        if valor < COLUNAS_MINIMAS or valor > COLUNAS_MAXIMAS:
+            raise RegraDeNegocioError(mensagem)
+        return valor
+
+    @staticmethod
+    def _caminho_de_arquivo(caminho_arquivo: str | None, nome_impressora: str) -> str:
+        if isinstance(caminho_arquivo, str) and caminho_arquivo.strip():
+            return caminho_arquivo.strip()
+        # O .txt cai ao lado do banco — inclusive quando GESTOR_COMERCIAL_DB
+        # aponta pra outro lugar —, então os cupons de teste ficam junto do
+        # resto dos dados do food truck em vez de espalhados pelo disco.
+        arquivo = _CARACTERES_PROIBIDOS_EM_ARQUIVO.sub("_", nome_impressora).strip("_")
+        return str(DB_PATH.parent / "cupons" / f"{arquivo or 'impressora'}.txt")
 
     def _exigir_nome_de_categoria_livre(self, nome: str, categoria_id: int | None) -> None:
         existente = self.uow.categorias.buscar_por_nome(nome)
@@ -330,13 +657,6 @@ class CardapioService:
             raise RegraDeNegocioError(
                 f"O {campo} informado não é um valor válido. Digite algo como 12.50."
             ) from erro
-
-    @staticmethod
-    def _nome_obrigatorio(nome: str, mensagem: str) -> str:
-        nome_limpo = nome.strip() if isinstance(nome, str) else ""
-        if not nome_limpo:
-            raise RegraDeNegocioError(mensagem)
-        return nome_limpo
 
     @staticmethod
     def _descricao_limpa(descricao: str | None) -> str | None:

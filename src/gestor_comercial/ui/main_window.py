@@ -30,19 +30,30 @@ from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.caixa_service import CaixaService
 from gestor_comercial.services.cardapio_service import CardapioService
 from gestor_comercial.services.comanda_service import ComandaService
+from gestor_comercial.services.exceptions import (
+    AcessoNegadoError,
+    NaoAutorizadoError,
+    RecursoNaoEncontradoError,
+    RegraDeNegocioError,
+)
+from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.services.pagamento_service import PagamentoService
 from gestor_comercial.ui.views.caixa_view import CaixaView
 from gestor_comercial.ui.views.cardapio_view import CardapioView
 from gestor_comercial.ui.views.comanda_view import ComandaView
 from gestor_comercial.ui.views.funcionarios_view import FuncionariosView
+from gestor_comercial.ui.views.impressoras_view import ImpressorasView
 from gestor_comercial.ui.views.login_view import LoginView
 from gestor_comercial.ui.views.mesas_view import MesasView
 from gestor_comercial.ui.views.pagamento_dialog import PagamentoDialog
+from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 
 _ROTULOS_PERFIL = {
     PerfilFuncionario.ATENDENTE: "Atendente",
     PerfilFuncionario.GERENTE: "Gerente",
 }
+
+_ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
 
 class MainWindow(QMainWindow):
@@ -55,6 +66,7 @@ class MainWindow(QMainWindow):
         cardapio_service: CardapioService,
         caixa_service: CaixaService,
         pagamento_service: PagamentoService,
+        impressao_service: ImpressaoService,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -64,6 +76,7 @@ class MainWindow(QMainWindow):
 
         self._auth = auth_service
         self._pagamentos = pagamento_service
+        self._impressao = impressao_service
 
         self._pilha_raiz = QStackedWidget()
         self.setCentralWidget(self._pilha_raiz)
@@ -101,14 +114,15 @@ class MainWindow(QMainWindow):
         self._mesas_view = MesasView(comanda_service)
         self._mesas_view.comanda_aberta.connect(self._abrir_comanda)
 
-        self._comanda_view = ComandaView(comanda_service, cardapio_service)
+        self._comanda_view = ComandaView(comanda_service, cardapio_service, self._impressao)
         self._comanda_view.voltar.connect(self._voltar_para_mesas)
         self._comanda_view.comanda_cancelada.connect(self._ao_comanda_cancelada)
         self._comanda_view.pagamento_solicitado.connect(self._abrir_pagamento)
 
-        self._caixa_view = CaixaView(caixa_service)
+        self._caixa_view = CaixaView(caixa_service, self._impressao)
         self._cardapio_view = CardapioView(cardapio_service)
         self._funcionarios_view = FuncionariosView(auth_service, self._pagamentos)
+        self._impressoras_view = ImpressorasView(cardapio_service, self._impressao)
 
         self._paginas = QStackedWidget()
         for pagina in (
@@ -117,6 +131,7 @@ class MainWindow(QMainWindow):
             self._caixa_view,
             self._cardapio_view,
             self._funcionarios_view,
+            self._impressoras_view,
         ):
             self._paginas.addWidget(pagina)
         coluna_direita.addWidget(self._paginas)
@@ -143,6 +158,7 @@ class MainWindow(QMainWindow):
             "Caixa": lambda: (self._caixa_view, self._caixa_view.atualizar),
             "Cardápio": lambda: (self._cardapio_view, self._cardapio_view.atualizar),
             "Funcionários": lambda: (self._funcionarios_view, self._funcionarios_view.atualizar),
+            "Impressoras": lambda: (self._impressoras_view, self._impressoras_view.atualizar),
         }
         self._botoes_nav: dict[str, QPushButton] = {}
         for rotulo in self._destinos_nav:
@@ -167,6 +183,12 @@ class MainWindow(QMainWindow):
         self._label_usuario.setProperty("variante", "fraco")
         barra.addWidget(self._label_usuario)
         barra.addStretch()
+
+        # Barra de status do shell. O recibo do cliente sai depois que a comanda
+        # fecha, e nesse instante a tela já voltou para Mesas — sem um lugar fixo
+        # aqui em cima, o operador nunca saberia se o cupom saiu ou não.
+        self._aviso_impressao = AvisoDeImpressao()
+        barra.addWidget(self._aviso_impressao)
         return barra
 
     # ------------------------------------------------------------------
@@ -206,14 +228,32 @@ class MainWindow(QMainWindow):
         self._voltar_para_mesas()
 
     def _abrir_pagamento(self, comanda_id: int) -> None:
+        self._aviso_impressao.limpar()
         modal = PagamentoDialog(self._pagamentos, self._auth, comanda_id, self)
         modal.exec()
         if modal.comanda_fechada:
+            # Recibo só quando a conta fecha: um cupom por pagamento parcial
+            # gastaria bobina e nenhum deles traria o total final nem o troco.
+            self._imprimir_recibo(comanda_id)
             self._voltar_para_mesas()
         else:
             # Pagamento parcial: a comanda continua aberta, só o total pago
             # e o restante mudaram.
             self._comanda_view.atualizar()
+
+    def _imprimir_recibo(self, comanda_id: int) -> None:
+        """Recibo do cliente, disparado assim que o pagamento fecha a comanda.
+
+        Roda depois de `PagamentoService.registrar` ter feito commit: o dinheiro
+        já entrou. Por isso nada aqui pode escapar como exceção — nem falha de
+        impressora (que volta em `ResultadoImpressao`) nem erro de negócio.
+        """
+        try:
+            resultado = executar_impressao(lambda: self._impressao.imprimir_recibo(comanda_id))
+        except _ERROS_SERVICE as erro:
+            self._aviso_impressao.mostrar_falha(f"Recibo não impresso: {erro}")
+            return
+        self._aviso_impressao.mostrar_um(resultado, contexto="Recibo do cliente")
 
     # ------------------------------------------------------------------
     # Sessão
@@ -222,6 +262,9 @@ class MainWindow(QMainWindow):
     def _ao_logar(self, funcionario: Funcionario) -> None:
         rotulo_perfil = _ROTULOS_PERFIL.get(funcionario.perfil, funcionario.perfil.value)
         self._label_usuario.setText(f"{funcionario.nome} · {rotulo_perfil}")
+        # Aviso de impressão é da sessão anterior; quem entra agora não tem o que
+        # fazer com o cupom de outro turno.
+        self._aviso_impressao.limpar()
         self._pilha_raiz.setCurrentIndex(1)
         self._navegar("Mesas")
 

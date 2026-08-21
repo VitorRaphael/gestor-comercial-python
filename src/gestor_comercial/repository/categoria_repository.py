@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
 from gestor_comercial.domain.categoria import Categoria
 from gestor_comercial.repository.base import Repository
@@ -16,3 +16,8 @@ class CategoriaRepository(Repository[Categoria]):
     def listar_ativas(self) -> list[Categoria]:
         stmt = select(Categoria).where(Categoria.ativo.is_(True)).order_by(Categoria.nome)
         return list(self.session.scalars(stmt))
+
+    def existe_com_impressora(self, impressora_id: int) -> bool:
+        return bool(
+            self.session.scalar(select(exists().where(Categoria.impressora_id == impressora_id)))
+        )

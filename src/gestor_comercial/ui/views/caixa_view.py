@@ -36,6 +36,8 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.services.impressao_service import ImpressaoService
+from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 
 _COLUNAS_MOVIMENTOS = ["Quando", "Tipo", "Descrição", "Valor"]
 
@@ -51,10 +53,20 @@ _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoE
 class CaixaView(QWidget):
     """Status do caixa, abertura/fechamento, movimentos da gaveta e conferência."""
 
-    def __init__(self, caixa_service: CaixaService, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        caixa_service: CaixaService,
+        impressao_service: ImpressaoService,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._caixa_service = caixa_service
+        self._impressao_service = impressao_service
         self._caixa_id: int | None = None
+        # Guarda o último caixa conhecido mesmo depois de fechado: o relatório
+        # de fechamento é justamente o papel que some ou borra na hora errada,
+        # e sem isto o gerente perderia a reimpressão no instante em que fechou.
+        self._ultimo_caixa_id: int | None = None
 
         self._montar_layout()
         self.atualizar()
@@ -73,6 +85,14 @@ class CaixaView(QWidget):
         self._botao_abrir.clicked.connect(self._abrir_caixa)
         cabecalho.addWidget(self._botao_abrir)
 
+        self._botao_imprimir = QPushButton("Imprimir fechamento")
+        self._botao_imprimir.setProperty("variante", "secundario")
+        self._botao_imprimir.setToolTip(
+            "Relatório de conferência da gaveta. Funciona com o caixa ainda aberto."
+        )
+        self._botao_imprimir.clicked.connect(self._imprimir_fechamento)
+        cabecalho.addWidget(self._botao_imprimir)
+
         self._botao_fechar = QPushButton("Fechar caixa")
         self._botao_fechar.setProperty("variante", "perigo")
         self._botao_fechar.clicked.connect(self._fechar_caixa)
@@ -82,6 +102,9 @@ class CaixaView(QWidget):
         self._label_erro = QLabel("")
         self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
         layout_externo.addWidget(self._label_erro)
+
+        self._aviso_impressao = AvisoDeImpressao()
+        layout_externo.addWidget(self._aviso_impressao)
 
         self._label_resumo = QLabel("")
         layout_externo.addWidget(self._label_resumo)
@@ -108,6 +131,7 @@ class CaixaView(QWidget):
 
     def atualizar(self) -> None:
         self._label_erro.setText("")
+        self._aviso_impressao.limpar()
         try:
             caixa = self._caixa_service.buscar_aberto()
         except RegraDeNegocioError:
@@ -119,6 +143,7 @@ class CaixaView(QWidget):
             return
 
         self._caixa_id = caixa.id
+        self._ultimo_caixa_id = caixa.id
         self._label_titulo.setText(f"Caixa {caixa.id} — aberto")
         self._definir_acoes_disponiveis(caixa_aberto=True)
         self._atualizar_resumo()
@@ -127,6 +152,9 @@ class CaixaView(QWidget):
     def _definir_acoes_disponiveis(self, *, caixa_aberto: bool) -> None:
         self._botao_abrir.setEnabled(not caixa_aberto)
         self._botao_fechar.setEnabled(caixa_aberto)
+        # Reimprimir o relatório do caixa recém-fechado continua valendo, então
+        # este botão segue o último caixa conhecido, não o que está aberto.
+        self._botao_imprimir.setEnabled(self._ultimo_caixa_id is not None)
         for botao in self._botoes_movimento_por_tipo.values():
             botao.setEnabled(caixa_aberto)
 
@@ -189,6 +217,29 @@ class CaixaView(QWidget):
             self._label_erro.setText(str(erro))
             return
         self.atualizar()
+        # O relatório sai sozinho no fim do turno — é o momento em que o gerente
+        # confere a gaveta, e esperar que ele lembre de clicar em Imprimir depois
+        # de o caixa já estar fechado é pedir para o papel nunca sair. Vem DEPOIS
+        # do `fechar` porque impressão não pode, em hipótese alguma, impedir o
+        # fechamento: se falhar, vira aviso na tela e o caixa continua fechado.
+        self._imprimir_fechamento()
+
+    def _imprimir_fechamento(self) -> None:
+        """Relatório de conferência da gaveta, na impressora padrão."""
+        caixa_id = self._ultimo_caixa_id
+        if caixa_id is None:
+            return
+
+        try:
+            resultado = executar_impressao(
+                lambda: self._impressao_service.imprimir_fechamento_caixa(caixa_id)
+            )
+        except _ERROS_SERVICE as erro:
+            # Impressora quebrada volta em `resultado`; aqui só chega caixa
+            # inexistente ou sessão perdida.
+            self._label_erro.setText(str(erro))
+            return
+        self._aviso_impressao.mostrar_um(resultado, contexto="Fechamento de caixa")
 
     def _abrir_modal_movimento(self, tipo: TipoMovimento) -> None:
         modal = _MovimentoDialog(_ROTULOS_TIPO_MOVIMENTO[tipo], self)
