@@ -1,0 +1,195 @@
+/*
+ * Tema base do Gestor Comercial Python.
+ * Portado de GESTOR COMERCIAL/src/main/resources/static/desktop/css/style.css
+ * + css/tokens.css. QSS não suporta var()/radial-gradient/box-shadow, então
+ * os valores da paleta (ver ui/theme/tokens.py) estão fixos aqui.
+ *
+ * Convenção de propriedade dinâmica para variantes de botão (ver
+ * QPushButton.setProperty("variante", "primario"|"secundario"|"perigo")):
+ *   qproperty não é usado para estilo -- usamos seletor [variante="..."]
+ */
+
+* {
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+QWidget {
+  background: #0b0d16;
+  color: #f3f4f8;
+}
+
+QMainWindow, #tela-login {
+  background: #0b0d16;
+}
+
+/* ---------- Cartão de login ---------- */
+
+#cartao-login {
+  background: #161a29;
+  border: 1px solid #2a2f47;
+  border-radius: 20px;
+}
+
+#login-subtitulo {
+  color: #9195ac;
+}
+
+QLineEdit {
+  background: #1f2436;
+  border: 1px solid #2a2f47;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #f3f4f8;
+}
+QLineEdit:focus {
+  border: 1px solid #7c5cff;
+}
+
+/* ---------- Sidebar ---------- */
+
+#sidebar {
+  background: #10131f;
+  border-right: 1px solid #2a2f47;
+}
+
+QPushButton[variante="nav"] {
+  background: transparent;
+  border: none;
+  color: #9195ac;
+  text-align: left;
+  padding: 11px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+QPushButton[variante="nav"]:hover {
+  background: #161a29;
+  color: #f3f4f8;
+}
+QPushButton[variante="nav"][ativo="true"] {
+  background: #1f2436;
+  color: #f3f4f8;
+  border-left: 3px solid #7c5cff;
+}
+
+/* ---------- Botões ---------- */
+
+QPushButton {
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+QPushButton[variante="primario"] {
+  background: #6366f1;
+  color: white;
+}
+QPushButton[variante="primario"]:hover {
+  background: #7c5cff;
+}
+QPushButton[variante="primario"]:disabled {
+  background: #2a2f47;
+  color: #6a6f89;
+}
+
+QPushButton[variante="secundario"] {
+  background: #1f2436;
+  color: #f3f4f8;
+  border: 1px solid #2a2f47;
+}
+QPushButton[variante="secundario"]:hover {
+  background: #2a2f47;
+}
+
+QPushButton[variante="perigo"] {
+  background: transparent;
+  color: #f43f5e;
+  border: 1px solid #f43f5e;
+}
+QPushButton[variante="perigo"]:hover {
+  background: rgba(244, 63, 94, 0.12);
+}
+
+/* ---------- Grid de mesas ---------- */
+
+QPushButton[variante="mesa"] {
+  background: #161a29;
+  border: 1px solid #2a2f47;
+  border-top: 3px solid #22c55e;
+  border-radius: 14px;
+  font-size: 20px;
+  font-weight: 700;
+  padding: 16px;
+}
+QPushButton[variante="mesa"]:hover {
+  background: #1f2436;
+}
+QPushButton[variante="mesa"][ocupada="true"] {
+  border-top: 3px solid #ec4899;
+}
+
+/* ---------- Painéis / cartões ---------- */
+
+QFrame[variante="painel"], QFrame[variante="cartao"] {
+  background: #161a29;
+  border: 1px solid #2a2f47;
+  border-radius: 14px;
+}
+
+/* ---------- Tabelas ---------- */
+
+QTableWidget, QTableView {
+  background: #161a29;
+  border: 1px solid #2a2f47;
+  border-radius: 14px;
+  gridline-color: #2a2f47;
+}
+QHeaderView::section {
+  background: #1f2436;
+  color: #9195ac;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid #2a2f47;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+QTableWidget::item, QTableView::item {
+  padding: 8px 12px;
+  border-bottom: 1px solid #2a2f47;
+}
+QTableWidget::item:selected, QTableView::item:selected {
+  background: #1f2436;
+}
+
+/* ---------- Labels auxiliares ---------- */
+
+QLabel[variante="fraco"] {
+  color: #9195ac;
+}
+QLabel[variante="fraquissimo"] {
+  color: #6a6f89;
+}
+QLabel[variante="badge"] {
+  background: #22c55e;
+  color: white;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 10px;
+}
+QLabel[variante="badge"][status="ocupada"] {
+  background: #ec4899;
+}
+QLabel[variante="badge"][status="fechada"], QLabel[variante="badge"][status="inativo"] {
+  background: #2a2f47;
+  color: #9195ac;
+}
+QLabel[variante="badge"][status="cancelada"], QLabel[variante="badge"][status="perigo"] {
+  background: #f43f5e;
+}
+
+/* ---------- Modais ---------- */
+
+QDialog {
+  background: #161a29;
+}
