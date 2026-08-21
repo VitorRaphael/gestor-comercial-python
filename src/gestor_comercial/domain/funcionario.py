@@ -18,7 +18,9 @@ class Funcionario(Base):
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     saldo_devedor: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0, nullable=False)
 
-    comandas: Mapped[list["Comanda"]] = relationship(back_populates="funcionario")
+    comandas: Mapped[list["Comanda"]] = relationship(
+        foreign_keys="Comanda.funcionario_id", back_populates="funcionario"
+    )
     quitacoes: Mapped[list["QuitacaoConsumo"]] = relationship(
         foreign_keys="QuitacaoConsumo.funcionario_id", back_populates="funcionario"
     )

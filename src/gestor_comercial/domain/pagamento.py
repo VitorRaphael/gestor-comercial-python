@@ -14,6 +14,8 @@ class Pagamento(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     forma: Mapped[FormaPagamento] = mapped_column(Enum(FormaPagamento), nullable=False)
     valor: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    troco: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    valor_quitado: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0, nullable=False)
     registrado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     comanda_id: Mapped[int] = mapped_column(ForeignKey("comandas.id"), nullable=False)
     funcionario_consumo_id: Mapped[int | None] = mapped_column(ForeignKey("funcionarios.id"))

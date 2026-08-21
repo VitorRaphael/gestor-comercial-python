@@ -19,13 +19,13 @@
 - [x] Seed inicial de Mesas (conjunto fixo) e Funcionário admin de teste
 - [x] Testes de integração: criar/consultar cada entidade via repository
 
-## Fase 2 — Lógica de negócio (Services)
-- [ ] `auth_service.py` — hash SHA-256+salt, validação de PIN, usuário logado em memória
-- [ ] `cardapio_service.py` — CRUD produto/categoria, montagem de combo (regra de 1 nível)
-- [ ] `comanda_service.py` — abrir por mesa (idempotente), abrir balcão, lançar/remover/cancelar item, fechar, cancelar
-- [ ] `pagamento_service.py` — registrar pagamento parcial/múltiplo, calcular troco, consumo interno, fechamento automático
-- [ ] `caixa_service.py` — abrir/fechar, sangria/reforço/despesa, saldo esperado, total maquininha
-- [ ] Testes unitários de cada service (casos de sucesso + regras de bloqueio)
+## Fase 2 — Lógica de negócio (Services) — ✅ concluída em 2026-08-20
+- [x] `auth_service.py` — hash SHA-256+salt, validação de PIN, usuário logado em memória
+- [x] `cardapio_service.py` — CRUD produto/categoria, montagem de combo (regra de 1 nível)
+- [x] `comanda_service.py` — abrir por mesa (idempotente), abrir balcão, lançar/remover/cancelar item, fechar, cancelar
+- [x] `pagamento_service.py` — registrar pagamento parcial/múltiplo, calcular troco, consumo interno, fechamento automático
+- [x] `caixa_service.py` — abrir/fechar, sangria/reforço/despesa, saldo esperado, total maquininha
+- [x] Testes unitários de cada service (casos de sucesso + regras de bloqueio) — 319 testes, ver `docs/arquitetura.md` §8 para o resumo da revisão adversarial que corrigiu 9 problemas antes de fechar a fase
 
 ## Fase 3 — Interface PySide6 (Views)
 - [ ] Extrair paleta de cores/CSS do front-end web (`GESTOR COMERCIAL/.../desktop/style.css`) para `resources/qss/`

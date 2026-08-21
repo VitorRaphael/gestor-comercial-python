@@ -32,7 +32,7 @@ Portado integralmente do Gestor Comercial, **exceto** os itens cortados abaixo (
 
 ### 3.2 Cardápio — Categorias e Produtos
 - CRUD de categoria (nome único); exclusão bloqueada se houver produtos vinculados; desativação soft.
-- CRUD de produto (nome, preço, custo, categoria, descrição); upload de foto; desativação soft; exclusão bloqueada se já vendido ou é componente de combo.
+- CRUD de produto (nome, preço, custo, categoria, descrição); desativação soft; exclusão bloqueada se já vendido ou é componente de combo.
 - Associação de impressora à categoria (roteamento de impressão).
 
 ### 3.3 Combos
@@ -62,13 +62,13 @@ Portado integralmente do Gestor Comercial, **exceto** os itens cortados abaixo (
 - Formas: `CREDITO`, `DEBITO`, `DINHEIRO`, `PIX`, `CONSUMO_INTERNO`.
 
 ### 3.8 Consumo Interno / Quitação de Funcionários
-- Consulta de saldo devedor por funcionário e histórico de consumos/quitações.
+- Consulta de saldo devedor por funcionário e histórico de consumos/quitações — só gerente (mesma exigência de §3.1).
 - Quitação (total ou parcial, PIN de Gerente), abatendo os consumos mais antigos primeiro (FIFO).
 
 ### 3.9 Caixa
 - Abertura (valor inicial), bloqueia se já houver caixa `ABERTO`.
-- Fechamento (valor contado + observação), bloqueia se já fechado.
-- Cálculo de saldo esperado (abertura + reforços − sangrias − despesas − consumos + dinheiro recebido).
+- Fechamento (valor contado + observação), bloqueia se já fechado ou se houver comanda `ABERTA` com item lançado neste caixa (comanda vazia, sem item, não bloqueia — é rascunho).
+- Cálculo de saldo esperado (abertura + reforços − sangrias − despesas + dinheiro recebido). Consumo interno nunca desconta da gaveta: ele nunca foi dinheiro, é dívida rastreada só em `Pagamento`/`saldo_devedor` (§3.7/§3.8). `TipoMovimento.CONSUMO_FUNCIONARIO` existe no schema mas o registro manual dele é bloqueado, justamente para não descontar essa dívida da gaveta duas vezes.
 - Cálculo do total vendido em maquininha (crédito + débito + PIX).
 
 ### 3.10 Movimentos de Caixa
@@ -95,6 +95,7 @@ Nesta ordem de prioridade, para versões futuras:
 1. **App Mobile do Atendente** — camada de API/sessão remota, para bater pedido fora do caixa central sem sobrecarregar um único ponto.
 2. **Controle de Estoque** — entidades `MateriaPrima` e `MovimentoEstoque`, entrada de compra, ajuste manual.
 3. **Ficha Técnica** — vínculo Produto ↔ MateriaPrima e baixa automática recursiva (direta e via componentes de combo).
+4. **Foto do produto** — o Java tinha upload de foto (`Produto.fotoUrl`); o domain Python não tem esse campo. Cortado da V1 porque o app é uma lista/grid lida de perto no balcão, não uma vitrine para cliente — corte reavaliável se a tela de cardápio pedir imagem.
 
 Cortados deliberadamente da V1 para reduzir a superfície de teste e entregar um sistema real operando o quanto antes — não são "esquecidos", são adiados.
 
@@ -223,3 +224,16 @@ gestor-comercial-python/
 - 2026-08-20 — Corrigida ambiguidade de FK em `Funcionario.quitacoes` (`quitacoes_consumo` tem duas FKs para `funcionarios`: `funcionario_id` e `autorizado_por_id`) especificando `foreign_keys` na relationship.
 - 2026-08-20 — `repository/seed.py` criado, portando fielmente o seed do Java (`MesaSeeder`/`FuncionarioSeeder`): 60 mesas numeradas 1–60, e funcionário "Gerente" (perfil GERENTE, PIN padrão `264072`) usando o mesmo esquema de hash SHA-256(salt+pin) com salt aleatório de 16 bytes em Base64. Idempotente (não duplica mesas nem cria admin se já houver funcionário). Testado 2x seguidas — sem duplicação. **Atenção**: PIN padrão `264072` é o mesmo hardcoded do Java, deve ser trocado antes de produção real assim que existir tela de troca de PIN.
 - 2026-08-20 — **Fase 1 concluída.** `tests/conftest.py` (fixture `session` com SQLite em memória) + `tests/integration/test_entidades.py` com 7 testes cobrindo criação/consulta das 12 entidades e seus relacionamentos (inclusive os dois casos de FK dupla: `ComboItem` combo/produto e `QuitacaoConsumo` funcionário/autorizador). `pytest` instalado no `.venv`; 7/7 passando. Próximo: Fase 2 — Services (`auth_service.py` primeiro, pois `cardapio_service`/`comanda_service` dependem de autenticação para ações de Gerente).
+- 2026-08-20 — Domain ganhou 4 campos que a Fase 2 exigia e o diagrama original não tinha: `Pagamento.troco`/`valor_quitado` (§3.7/§3.8 — quitação FIFO precisa saber quanto de cada consumo já foi pago), `Comanda`/`ItemComanda.cancelado_em`+`cancelado_por_id` (auditoria de quem autorizou o cancelamento, §3.5/§3.6) e `Caixa.aberto_em`/`fechado_em` (ordenar caixas, montar extrato do turno). Migration `a6108ce87d55` — as duas colunas `NOT NULL` novas entram em 3 passos (nullable → backfill → aperta) para não quebrar em banco com venda real; testada com upgrade/downgrade/upgrade sobre linhas pré-existentes. `migrations/env.py` ganhou `render_as_batch=True` (obrigatório pro SQLite aceitar `ALTER COLUMN`).
+- 2026-08-20 — Camada `repository/` criada: classe genérica `Repository[T]` (único lugar que fala SQLAlchemy) + 11 repositories com os finders portados do Java + `UnitOfWork` agrupando todos numa única `Session` (pagamento que fecha comanda e libera mesa é tudo-ou-nada). `services/exceptions.py` com as 4 exceções portadas.
+- 2026-08-20 — **Fase 2 concluída: os 5 services** (`dinheiro.py`, `auth_service.py`, `cardapio_service.py`, `comanda_service.py`, `caixa_service.py`, `pagamento_service.py`) escritos em paralelo contra um contrato de assinaturas fixo, com 306 testes. Revisão adversarial (3 lentes independentes) achou 9 problemas reais, todos corrigidos na mesma sessão — suíte final com **319 testes, 100% verde**:
+  - Escalação de privilégio: `AuthService.criar_funcionario`/`desativar_funcionario` não exigiam gerente (corrigido com exceção de bootstrap pro primeiro cadastro do sistema).
+  - `ComandaService.fechar()` fechava comanda com saldo não pago, perdendo a venda em silêncio (agora exige quitação total ou PIN de gerente pra fechar fiado).
+  - Comanda que zerava o restante por cancelamento de item (não por pagamento) ficava presa — não fechava, não cancelava, travava o fechamento do caixa (resolvido como efeito colateral do fix acima: `fechar()` sem saldo em aberto não exige PIN).
+  - `TipoMovimento.CONSUMO_FUNCIONARIO` descontava a gaveta duas vezes (a dívida já é rastreada só via `Pagamento`/`saldo_devedor`) — registro manual desse tipo agora é bloqueado.
+  - `CaixaService.fechar()` travava com comanda vazia (rascunho invisível em toda tela) — agora só bloqueia comanda `ABERTA` com item.
+  - `dinheiro()` deixava `decimal.InvalidOperation` escapar sem tratamento para valores gigantes — ganhou teto de `99999999.99` (mesmo limite do `NUMERIC(10,2)` do domain).
+  - `CardapioService` tratava preço em `float` como erro de digitação em vez de erro de programação (inconsistente com caixa/pagamento) — alinhado.
+  - Consulta de saldo devedor/extrato de consumo interno não exigia gerente — corrigido (§3.8 atualizado).
+  - `docs/arquitetura.md §3.2` prometia upload de foto que nunca foi implementado — corte movido pro §5 (Backlog).
+  Próximo: Fase 3 — Interface PySide6 (Views), começando por `login_view.py` (PIN pad) e `mesas_view.py`.

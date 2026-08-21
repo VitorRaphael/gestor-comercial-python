@@ -85,7 +85,7 @@ def test_caixa_e_movimento_caixa(session):
     session.add(func)
     session.flush()
 
-    caixa = Caixa(valor_abertura=Decimal("100.00"))
+    caixa = Caixa(valor_abertura=Decimal("100.00"), aberto_em=datetime(2026, 8, 20, 8, 0))
     session.add(caixa)
     session.flush()
 
@@ -108,7 +108,7 @@ def test_caixa_e_movimento_caixa(session):
 def test_comanda_item_e_pagamento(session):
     func = Funcionario(nome="Atendente", pin_hash="h", salt="s", perfil=PerfilFuncionario.ATENDENTE)
     mesa = Mesa(numero=5)
-    caixa = Caixa(valor_abertura=Decimal("100.00"))
+    caixa = Caixa(valor_abertura=Decimal("100.00"), aberto_em=datetime(2026, 8, 20, 8, 0))
     categoria = Categoria(nome="Lanches")
     session.add_all([func, mesa, caixa, categoria])
     session.flush()
@@ -153,7 +153,7 @@ def test_comanda_item_e_pagamento(session):
 def test_pagamento_consumo_interno_e_quitacao_consumo(session):
     atendente = Funcionario(nome="Atendente", pin_hash="h", salt="s", perfil=PerfilFuncionario.ATENDENTE)
     gerente = Funcionario(nome="Gerente", pin_hash="h", salt="s", perfil=PerfilFuncionario.GERENTE)
-    caixa = Caixa(valor_abertura=Decimal("100.00"))
+    caixa = Caixa(valor_abertura=Decimal("100.00"), aberto_em=datetime(2026, 8, 20, 8, 0))
     session.add_all([atendente, gerente, caixa])
     session.flush()
 

@@ -47,6 +47,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        render_as_batch=True,
     )
 
     with context.begin_transaction():
@@ -67,8 +68,13 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        # render_as_batch: o SQLite não suporta ALTER COLUMN/DROP COLUMN.
+        # O modo batch recria a tabela e copia os dados, que é o que permite
+        # evoluir o schema sem perder vendas já registradas.
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            render_as_batch=True,
         )
 
         with context.begin_transaction():

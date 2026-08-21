@@ -1,6 +1,7 @@
+from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Enum, Numeric, String
+from sqlalchemy import DateTime, Enum, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from gestor_comercial.domain.enums import StatusCaixa
@@ -15,6 +16,8 @@ class Caixa(Base):
     valor_abertura: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     valor_contado: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     observacao_fechamento: Mapped[str | None] = mapped_column(String(500))
+    aberto_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    fechado_em: Mapped[datetime | None] = mapped_column(DateTime)
 
     comandas: Mapped[list["Comanda"]] = relationship(back_populates="caixa")
     movimentos: Mapped[list["MovimentoCaixa"]] = relationship(back_populates="caixa")
