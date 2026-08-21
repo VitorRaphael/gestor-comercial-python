@@ -14,6 +14,7 @@ from decimal import Decimal
 from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.enums import StatusComanda, StatusMesa
 from gestor_comercial.domain.item_comanda import ItemComanda
+from gestor_comercial.domain.mesa import Mesa
 from gestor_comercial.repository.unit_of_work import UnitOfWork
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
@@ -107,6 +108,10 @@ class ComandaService:
     def listar_itens(self, comanda_id: int) -> list[ItemComanda]:
         self.buscar(comanda_id)
         return self.uow.itens.listar_por_comanda(comanda_id)
+
+    def listar_mesas(self) -> list[Mesa]:
+        """Mesas cadastradas, na ordem do número — usado pelo grid da tela inicial."""
+        return self.uow.mesas.listar_todos()
 
     def calcular_total(self, comanda_id: int) -> Decimal:
         """Soma dos itens não cancelados, pelo preço congelado no lançamento."""
