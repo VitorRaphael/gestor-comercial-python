@@ -32,7 +32,7 @@
 - [x] `login_view.py` — PIN pad
 - [x] `mesas_view.py` — grid de mesas (livre/ocupada/balcão), espelhando o `grid-mesas` web
 - [x] `comanda_view.py` — lista de itens + total, modal de adicionar item
-- [ ] `pagamento_dialog.py` — resumo, forma, valor, troco, consumo interno
+- [x] `pagamento_dialog.py` — resumo, forma, valor, troco, consumo interno
 - [ ] `caixa_view.py` — status, abrir/fechar, tabela de movimentos
 - [ ] `cardapio_view.py` — CRUD produto/categoria/combo
 - [ ] `funcionarios_view.py` — CRUD básico + saldo devedor
