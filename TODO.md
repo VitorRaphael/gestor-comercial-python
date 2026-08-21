@@ -36,7 +36,7 @@
 - [x] `caixa_view.py` — status, abrir/fechar, tabela de movimentos
 - [x] `cardapio_view.py` — CRUD produto/categoria/combo
 - [x] `funcionarios_view.py` — CRUD básico + saldo devedor
-- [ ] Modal de cancelamento (item/comanda) com PIN de Gerente
+- [x] Modal de cancelamento (item/comanda) com PIN de Gerente
 
 ## Fase 4 — Hardware (Impressão)
 - [ ] `hardware/impressora_escpos.py` — abstração de conexão (USB/Serial)

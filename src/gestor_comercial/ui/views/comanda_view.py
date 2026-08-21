@@ -1,10 +1,10 @@
-"""Detalhe da comanda: lista de itens + total, modal de adicionar item —
-porte visual de `.comanda-detalhe`/`.tabela` e do modal `+ Item` do
-front-end web (`GESTOR COMERCIAL/.../desktop/index.html` + `js/app.js`).
+"""Detalhe da comanda: lista de itens + total, modal de adicionar item,
+cancelamento de item/comanda com PIN de gerente — porte visual de
+`.comanda-detalhe`/`.tabela` e dos modais `+ Item`/`Cancelar` do front-end
+web (`GESTOR COMERCIAL/.../desktop/index.html` + `js/app.js`).
 
-Fechamento, cancelamento e pagamento ficam para `pagamento_dialog.py` e o
-modal de cancelamento (próximos itens da Fase 3) — esta tela cobre só a
-lista de itens e o lançamento de novos.
+Fechamento e pagamento ficam para `pagamento_dialog.py` — esta tela cobre
+lista de itens, lançamento de novos e cancelamento.
 """
 
 from __future__ import annotations
@@ -30,21 +30,27 @@ from PySide6.QtWidgets import (
 )
 
 from gestor_comercial.domain.comanda import Comanda
+from gestor_comercial.domain.enums import StatusComanda
 from gestor_comercial.domain.item_comanda import ItemComanda
 from gestor_comercial.domain.produto import Produto
 from gestor_comercial.services.cardapio_service import CardapioService
 from gestor_comercial.services.comanda_service import ComandaService
 from gestor_comercial.services.exceptions import (
+    AcessoNegadoError,
     NaoAutorizadoError,
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 
 _COLUNAS = ["Descrição", "Preço", "Qtd", "Total", ""]
+_ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
 
 class ComandaView(QWidget):
-    """Lista de itens de uma comanda, com total e lançamento de novos itens."""
+    """Lista de itens de uma comanda, com total, lançamento e cancelamento."""
+
+    comanda_cancelada = Signal(int)
 
     def __init__(
         self,
@@ -72,6 +78,11 @@ class ComandaView(QWidget):
         self._botao_add_item.setProperty("variante", "secundario")
         self._botao_add_item.clicked.connect(self._abrir_modal_adicionar_item)
         cabecalho.addWidget(self._botao_add_item)
+
+        self._botao_cancelar_comanda = QPushButton("Cancelar comanda")
+        self._botao_cancelar_comanda.setProperty("variante", "perigo")
+        self._botao_cancelar_comanda.clicked.connect(self._cancelar_comanda)
+        cabecalho.addWidget(self._botao_cancelar_comanda)
         layout_externo.addLayout(cabecalho)
 
         self._label_erro = QLabel("")
@@ -102,6 +113,10 @@ class ComandaView(QWidget):
         if self._comanda is None:
             return
         self._label_erro.setText("")
+        # Recarrega para pegar o status mais recente (ex.: acabou de ser
+        # cancelada por este mesmo modal) — o objeto passado a
+        # `carregar_comanda` pode estar desatualizado.
+        self._comanda = self._comanda_service.buscar(self._comanda.id)
 
         titulo = f"Mesa {self._comanda.mesa.numero}" if self._comanda.mesa else "Balcão"
         self._label_titulo.setText(f"{titulo} — comanda {self._comanda.id}")
@@ -116,6 +131,10 @@ class ComandaView(QWidget):
         total = self._comanda_service.calcular_total(self._comanda.id)
         self._label_total.setText(_formatar_reais(total))
 
+        aberta = self._comanda.status is StatusComanda.ABERTA
+        self._botao_add_item.setEnabled(aberta)
+        self._botao_cancelar_comanda.setEnabled(aberta)
+
     def _preencher_linha(self, linha: int, item: ItemComanda) -> None:
         descricao = item.produto.nome
         if item.observacao:
@@ -127,19 +146,62 @@ class ComandaView(QWidget):
         self._tabela.setItem(linha, 2, QTableWidgetItem(str(item.quantidade)))
         self._tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(total_item)))
 
+        acoes_item = QWidget()
+        layout_acoes = QHBoxLayout(acoes_item)
+        layout_acoes.setContentsMargins(0, 0, 0, 0)
+
         botao_remover = QPushButton("Remover")
         botao_remover.setProperty("variante", "perigo")
         botao_remover.clicked.connect(lambda _checked=False, i=item: self._remover_item(i))
-        self._tabela.setCellWidget(linha, 4, botao_remover)
+        layout_acoes.addWidget(botao_remover)
+
+        botao_cancelar = QPushButton("Cancelar")
+        botao_cancelar.setProperty("variante", "perigo")
+        botao_cancelar.clicked.connect(lambda _checked=False, i=item: self._cancelar_item(i))
+        layout_acoes.addWidget(botao_cancelar)
+
+        self._tabela.setCellWidget(linha, 4, acoes_item)
 
     def _remover_item(self, item: ItemComanda) -> None:
         self._label_erro.setText("")
         try:
             self._comanda_service.remover_item(item.id)
-        except (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError) as erro:
+        except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
         self._atualizar()
+
+    def _cancelar_item(self, item: ItemComanda) -> None:
+        modal = CancelamentoDialog(f"Cancelar item — {item.produto.nome}", self)
+        if modal.exec() != QDialog.DialogCode.Accepted:
+            return
+        motivo, pin_gerente = modal.resultado()
+
+        self._label_erro.setText("")
+        try:
+            self._comanda_service.cancelar_item(item.id, motivo, pin_gerente)
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+            return
+        self._atualizar()
+
+    def _cancelar_comanda(self) -> None:
+        if self._comanda is None:
+            return
+        modal = CancelamentoDialog(f"Cancelar comanda {self._comanda.id}", self)
+        if modal.exec() != QDialog.DialogCode.Accepted:
+            return
+        motivo, pin_gerente = modal.resultado()
+
+        self._label_erro.setText("")
+        try:
+            self._comanda_service.cancelar(self._comanda.id, motivo, pin_gerente)
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+            return
+        comanda_id = self._comanda.id
+        self._atualizar()
+        self.comanda_cancelada.emit(comanda_id)
 
     def _abrir_modal_adicionar_item(self) -> None:
         if self._comanda is None:
@@ -159,7 +221,7 @@ class ComandaView(QWidget):
             self._comanda_service.lancar_item(
                 self._comanda.id, produto_id, quantidade, observacao
             )
-        except (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError) as erro:
+        except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
         self._atualizar()
