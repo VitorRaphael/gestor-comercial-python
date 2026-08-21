@@ -34,7 +34,7 @@
 - [x] `comanda_view.py` — lista de itens + total, modal de adicionar item
 - [x] `pagamento_dialog.py` — resumo, forma, valor, troco, consumo interno
 - [x] `caixa_view.py` — status, abrir/fechar, tabela de movimentos
-- [ ] `cardapio_view.py` — CRUD produto/categoria/combo
+- [x] `cardapio_view.py` — CRUD produto/categoria/combo
 - [ ] `funcionarios_view.py` — CRUD básico + saldo devedor
 - [ ] Modal de cancelamento (item/comanda) com PIN de Gerente
 
