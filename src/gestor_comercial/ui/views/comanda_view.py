@@ -3,8 +3,9 @@ cancelamento de item/comanda com PIN de gerente — porte visual de
 `.comanda-detalhe`/`.tabela` e dos modais `+ Item`/`Cancelar` do front-end
 web (`GESTOR COMERCIAL/.../desktop/index.html` + `js/app.js`).
 
-Fechamento e pagamento ficam para `pagamento_dialog.py` — esta tela cobre
-lista de itens, lançamento de novos e cancelamento.
+Não conhece `PagamentoDialog` nem navegação: emite `pagamento_solicitado`,
+`voltar` e `comanda_cancelada` e deixa a janela principal decidir o que
+fazer com cada um (o mesmo padrão de `MesasView.comanda_aberta`).
 """
 
 from __future__ import annotations
@@ -50,6 +51,8 @@ _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoE
 class ComandaView(QWidget):
     """Lista de itens de uma comanda, com total, lançamento e cancelamento."""
 
+    voltar = Signal()
+    pagamento_solicitado = Signal(int)
     comanda_cancelada = Signal(int)
 
     def __init__(
@@ -69,6 +72,12 @@ class ComandaView(QWidget):
         layout_externo = QVBoxLayout(self)
 
         cabecalho = QHBoxLayout()
+
+        self._botao_voltar = QPushButton("← Mesas")
+        self._botao_voltar.setProperty("variante", "secundario")
+        self._botao_voltar.clicked.connect(self._voltar_clicado)
+        cabecalho.addWidget(self._botao_voltar)
+
         self._label_titulo = QLabel("")
         self._label_titulo.setStyleSheet("font-weight: 600; font-size: 18px;")
         cabecalho.addWidget(self._label_titulo)
@@ -78,6 +87,11 @@ class ComandaView(QWidget):
         self._botao_add_item.setProperty("variante", "secundario")
         self._botao_add_item.clicked.connect(self._abrir_modal_adicionar_item)
         cabecalho.addWidget(self._botao_add_item)
+
+        self._botao_pagamento = QPushButton("Receber pagamento")
+        self._botao_pagamento.setProperty("variante", "primario")
+        self._botao_pagamento.clicked.connect(self._solicitar_pagamento)
+        cabecalho.addWidget(self._botao_pagamento)
 
         self._botao_cancelar_comanda = QPushButton("Cancelar comanda")
         self._botao_cancelar_comanda.setProperty("variante", "perigo")
@@ -107,9 +121,9 @@ class ComandaView(QWidget):
 
     def carregar_comanda(self, comanda: Comanda) -> None:
         self._comanda = comanda
-        self._atualizar()
+        self.atualizar()
 
-    def _atualizar(self) -> None:
+    def atualizar(self) -> None:
         if self._comanda is None:
             return
         self._label_erro.setText("")
@@ -133,6 +147,7 @@ class ComandaView(QWidget):
 
         aberta = self._comanda.status is StatusComanda.ABERTA
         self._botao_add_item.setEnabled(aberta)
+        self._botao_pagamento.setEnabled(aberta)
         self._botao_cancelar_comanda.setEnabled(aberta)
 
     def _preencher_linha(self, linha: int, item: ItemComanda) -> None:
@@ -169,7 +184,7 @@ class ComandaView(QWidget):
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
-        self._atualizar()
+        self.atualizar()
 
     def _cancelar_item(self, item: ItemComanda) -> None:
         modal = CancelamentoDialog(f"Cancelar item — {item.produto.nome}", self)
@@ -183,7 +198,7 @@ class ComandaView(QWidget):
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
-        self._atualizar()
+        self.atualizar()
 
     def _cancelar_comanda(self) -> None:
         if self._comanda is None:
@@ -200,8 +215,16 @@ class ComandaView(QWidget):
             self._label_erro.setText(str(erro))
             return
         comanda_id = self._comanda.id
-        self._atualizar()
+        self.atualizar()
         self.comanda_cancelada.emit(comanda_id)
+
+    def _voltar_clicado(self) -> None:
+        self.voltar.emit()
+
+    def _solicitar_pagamento(self) -> None:
+        if self._comanda is None:
+            return
+        self.pagamento_solicitado.emit(self._comanda.id)
 
     def _abrir_modal_adicionar_item(self) -> None:
         if self._comanda is None:
@@ -224,7 +247,7 @@ class ComandaView(QWidget):
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
-        self._atualizar()
+        self.atualizar()
 
 
 class _AdicionarItemDialog(QDialog):

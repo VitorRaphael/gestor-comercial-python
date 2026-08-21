@@ -14,6 +14,9 @@ dependencies = [
     "python-escpos>=3.1",
 ]
 
+[project.scripts]
+gestor-comercial = "gestor_comercial.main:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3",

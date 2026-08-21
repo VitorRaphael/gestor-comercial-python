@@ -37,6 +37,7 @@
 - [x] `cardapio_view.py` — CRUD produto/categoria/combo
 - [x] `funcionarios_view.py` — CRUD básico + saldo devedor
 - [x] Modal de cancelamento (item/comanda) com PIN de Gerente
+- [x] `ui/main_window.py` + `main.py` — integra as telas (login → shell com sidebar → páginas) e é o ponto de entrada de verdade do app (`python -m gestor_comercial.main`)
 
 ## Fase 4 — Hardware (Impressão)
 - [ ] `hardware/impressora_escpos.py` — abstração de conexão (USB/Serial)
