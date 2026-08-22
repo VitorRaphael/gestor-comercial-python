@@ -45,10 +45,10 @@
 - [ ] Teste manual com impressora física do food truck — depende do hardware, que o Vitor ainda não tem. O tipo de conexão **ARQUIVO** grava o cupom num `.txt` legível e permite validar o fluxo inteiro (comanda de produção, via de acréscimo, 2ª via, recibo, fechamento) antes de a impressora chegar; quando ela chegar, só o cadastro muda de tipo.
 
 ## Fase 5 — Empacotamento e Testes de Homologação
-- [ ] `packaging/build.spec` (PyInstaller)
-- [ ] Gerar `.exe` e testar em máquina limpa (sem Python instalado)
-- [ ] Simular quedas de energia / fechamento forçado — checar integridade do SQLite
-- [ ] Testes de estresse: inputs inválidos, digitação errada, dupla submissão
+- [x] `packaging/build.spec` (PyInstaller) — build local validado (migrations + seed + QSS rodando dentro do .exe)
+- [ ] Gerar `.exe` e testar em máquina limpa (sem Python instalado) — roteiro em [`docs/checklist-maquina-limpa.md`](docs/checklist-maquina-limpa.md)
+- [x] Simular quedas de energia / fechamento forçado — checar integridade do SQLite — automatizado em `tests/integration/test_resiliencia_queda_energia.py` (mata o processo de verdade no meio da escrita; confirma rollback automático sem commit e persistência com commit)
+- [x] Testes de estresse: inputs inválidos, digitação errada, dupla submissão — coberto pela suíte de services (PIN errado, quantidade 0/negativa, cancelar sem PIN de gerente, fechar sem pagamento, e o novo `test_confirmar_pagamento_duas_vezes_seguidas_e_bloqueado`)
 - [ ] Validação final com o pai antes de ir para produção real
 
 ## Backlog (V2/V3 — não iniciar antes da V1 estar em produção)

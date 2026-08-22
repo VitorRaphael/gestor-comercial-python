@@ -81,6 +81,21 @@ def test_registrar_valor_exato_quita_e_fecha_a_comanda(pagamentos, comandas, con
     assert pagamentos.uow.mesas.buscar_por_id(mesa.id).status is StatusMesa.LIVRE
 
 
+def test_confirmar_pagamento_duas_vezes_seguidas_e_bloqueado(pagamentos, comandas, conta_36):
+    """Dupla submissão: clicar 'Confirmar' duas vezes rápido antes de o botão desabilitar.
+
+    A 1ª chamada paga e fecha a comanda (fechamento automático); a 2ª chegada
+    da mesma ação, com os mesmos parâmetros, não pode gerar um segundo
+    pagamento — tem que ser barrada porque a comanda já está FECHADA.
+    """
+    pagamentos.registrar(conta_36.id, FormaPagamento.DINHEIRO, Decimal("36.00"))
+
+    with pytest.raises(RegraDeNegocioError):
+        pagamentos.registrar(conta_36.id, FormaPagamento.DINHEIRO, Decimal("36.00"))
+
+    assert len(pagamentos.listar_por_comanda(conta_36.id)) == 1
+
+
 def test_registrar_dinheiro_acima_do_restante_gera_troco(pagamentos, conta_36):
     resumo = pagamentos.registrar(conta_36.id, FormaPagamento.DINHEIRO, Decimal("50.00"))
 

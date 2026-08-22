@@ -15,7 +15,22 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-_RAIZ_PROJETO = Path(__file__).resolve().parents[2]
+
+def _raiz_recursos() -> Path:
+    """Raiz de onde ler `alembic.ini`, `migrations/` e `resources/`.
+
+    Em desenvolvimento é a raiz do repositório (2 níveis acima deste
+    arquivo). Empacotado pelo PyInstaller (`packaging/build.spec`), o
+    processo roda a partir de uma pasta temporária de extração
+    (`sys._MEIPASS`) que contém esses mesmos itens copiados pelo `datas`
+    do spec — por isso o caminho não pode ser fixo.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS)  # type: ignore[attr-defined]
+    return Path(__file__).resolve().parents[2]
+
+
+_RAIZ_PROJETO = _raiz_recursos()
 
 
 def _aplicar_migrations() -> None:
