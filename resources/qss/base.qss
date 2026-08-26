@@ -177,6 +177,10 @@ QPushButton[variante="mesa"]:hover {
 QPushButton[variante="mesa"][ocupada="true"] {
   border-top: 3px solid #ec4899;
 }
+QPushButton[variante="mesa"][alerta="true"] {
+  border: 1px solid #eab308;
+  border-top: 3px solid #eab308;
+}
 
 /* ---------- Painéis / cartões ---------- */
 

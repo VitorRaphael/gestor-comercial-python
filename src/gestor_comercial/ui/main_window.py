@@ -42,7 +42,6 @@ from gestor_comercial.ui.views.caixa_view import CaixaView
 from gestor_comercial.ui.views.cardapio_view import CardapioView
 from gestor_comercial.ui.views.comanda_view import ComandaView
 from gestor_comercial.ui.views.funcionarios_view import FuncionariosView
-from gestor_comercial.ui.views.historico_caixa_view import HistoricoCaixaView
 from gestor_comercial.ui.views.impressoras_view import ImpressorasView
 from gestor_comercial.ui.views.login_view import LoginView
 from gestor_comercial.ui.views.mesas_view import MesasView
@@ -121,7 +120,6 @@ class MainWindow(QMainWindow):
         self._comanda_view.pagamento_solicitado.connect(self._abrir_pagamento)
 
         self._caixa_view = CaixaView(caixa_service, self._impressao)
-        self._historico_caixa_view = HistoricoCaixaView(caixa_service, auth_service, self._impressao)
         self._cardapio_view = CardapioView(cardapio_service)
         self._funcionarios_view = FuncionariosView(auth_service, self._pagamentos)
         self._impressoras_view = ImpressorasView(cardapio_service, self._impressao)
@@ -131,7 +129,6 @@ class MainWindow(QMainWindow):
             self._mesas_view,
             self._comanda_view,
             self._caixa_view,
-            self._historico_caixa_view,
             self._cardapio_view,
             self._funcionarios_view,
             self._impressoras_view,
@@ -159,10 +156,12 @@ class MainWindow(QMainWindow):
         self._destinos_nav = {
             "Mesas": lambda: (self._mesas_view, self._mesas_view.carregar_mesas),
             "Caixa": lambda: (self._caixa_view, self._caixa_view.atualizar),
-            "Histórico de Fechamentos": lambda: (
-                self._historico_caixa_view,
-                self._historico_caixa_view.atualizar,
-            ),
+            # "Histórico de Fechamentos" foi tirado do menu de propósito: é
+            # estrutura interna de auditoria, não deve aparecer navegável no
+            # dia a dia (funcionário mal-intencionado ajustando comportamento
+            # ao saber que existe é o cenário que essa tela existe pra pegar).
+            # Os dados de fechamento continuam sendo gravados normalmente —
+            # só não tem UI pra consultar por enquanto. Ver HistoricoCaixaView.
             "Cardápio": lambda: (self._cardapio_view, self._cardapio_view.atualizar),
             "Funcionários": lambda: (self._funcionarios_view, self._funcionarios_view.atualizar),
             "Impressoras": lambda: (self._impressoras_view, self._impressoras_view.atualizar),

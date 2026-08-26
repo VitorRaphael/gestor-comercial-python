@@ -5,6 +5,8 @@ e da lógica de `carregarMesas`/`abrirComandaDaMesa`/`abrirComandaBalcao` (`.../
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QGridLayout,
@@ -16,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from gestor_comercial.domain.enums import StatusMesa
+from gestor_comercial.domain.enums import StatusComanda, StatusMesa
 from gestor_comercial.domain.mesa import Mesa
 from gestor_comercial.services.comanda_service import ComandaService
 from gestor_comercial.services.exceptions import (
@@ -90,9 +92,22 @@ class MesasView(QWidget):
             ocupada = mesa.status is StatusMesa.OCUPADA
             if ocupada:
                 ocupadas += 1
-            botao = QPushButton(f"{mesa.numero}\n{'ocupada' if ocupada else 'livre'}")
+
+            texto = f"{mesa.numero}\n{'ocupada' if ocupada else 'livre'}"
+            alerta = False
+            if ocupada:
+                comanda_aberta = next(
+                    (c for c in mesa.comandas if c.status is StatusComanda.ABERTA), None
+                )
+                if comanda_aberta is not None:
+                    minutos = int((datetime.now() - comanda_aberta.aberta_em).total_seconds() // 60)
+                    texto += f"\n⏱ {minutos} min" if minutos < 60 else f"\n⏱ {minutos // 60}h{minutos % 60:02d}"
+                    alerta = minutos >= 30
+
+            botao = QPushButton(texto)
             botao.setProperty("variante", "mesa")
             botao.setProperty("ocupada", "true" if ocupada else "false")
+            botao.setProperty("alerta", "true" if alerta else "false")
             botao.clicked.connect(lambda _checked=False, m=mesa: self._abrir_mesa(m))
             self._botoes_por_mesa[mesa.id] = botao
 

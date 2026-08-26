@@ -102,6 +102,14 @@ class BuscaProdutoWidget(QWidget):
         self._campo_busca.setFocus()
         self._campo_busca.selectAll()
 
+    def confirmar_selecionado(self) -> None:
+        """Lança o item destacado na lista — equivalente a Enter/duplo clique.
+
+        Existe para quem hospeda o widget oferecer um botão explícito a quem
+        não sabe (ou não quer usar) o atalho de teclado/duplo clique.
+        """
+        self._confirmar_selecionado()
+
     def _tratar_escape(self) -> None:
         # Primeiro Esc só limpa a busca (regra 4); campo já vazio é o sinal
         # para quem hospeda o widget fechar a tela de busca de vez.

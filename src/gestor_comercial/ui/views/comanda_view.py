@@ -11,6 +11,7 @@ fazer com cada um (o mesmo padrão de `MesasView.comanda_aberta`).
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from decimal import Decimal
 
 from PySide6.QtCore import Qt, Signal
@@ -47,7 +48,7 @@ from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
 
-_COLUNAS = ["Descrição", "Preço", "Qtd", "Total", ""]
+_COLUNAS = ["Descrição", "Preço", "Qtd", "Total", "Status", "Ações"]
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
 _NADA_NOVO_PARA_IMPRIMIR = (
@@ -91,6 +92,10 @@ class ComandaView(QWidget):
         self._label_titulo = QLabel("")
         self._label_titulo.setStyleSheet("font-weight: 600; font-size: 18px;")
         cabecalho.addWidget(self._label_titulo)
+
+        self._label_horario = QLabel("")
+        self._label_horario.setStyleSheet("font-size: 13px; margin-left: 8px;")
+        cabecalho.addWidget(self._label_horario)
         cabecalho.addStretch()
 
         self._botao_add_item = QPushButton("+ Item")
@@ -134,6 +139,11 @@ class ComandaView(QWidget):
         self._tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._tabela.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self._tabela.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        # Colunas de status/ação têm texto curto e fixo — ResizeToContents
+        # evita que o Qt encolha a coluna a ponto do texto do botão sumir
+        # (era o caso antes, com a coluna "" caindo pro tamanho mínimo).
+        self._tabela.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self._tabela.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         layout_externo.addWidget(self._tabela)
 
         linha_total = QHBoxLayout()
@@ -162,10 +172,16 @@ class ComandaView(QWidget):
         self._comanda = self._comanda_service.buscar(self._comanda.id)
 
         titulo = f"Mesa {self._comanda.mesa.numero}" if self._comanda.mesa else "Balcão"
-        self._label_titulo.setText(f"{titulo} — comanda {self._comanda.id}")
+        self._label_titulo.setText(titulo)
 
         itens = self._comanda_service.listar_itens(self._comanda.id)
         itens_ativos = [item for item in itens if not item.cancelado]
+
+        # Antes do primeiro item, a comanda é rascunho — nada foi "enviado ao
+        # sistema" ainda, então não faz sentido mostrar relógio correndo.
+        self._label_horario.setText(
+            self._formatar_tempo_aberta(self._comanda.aberta_em) if itens else ""
+        )
 
         self._tabela.setRowCount(len(itens_ativos))
         for linha, item in enumerate(itens_ativos):
@@ -184,6 +200,17 @@ class ComandaView(QWidget):
         self._botao_imprimir.setEnabled(aberta)
         self._botao_segunda_via.setEnabled(len(itens_ativos) > 0)
 
+    def _formatar_tempo_aberta(self, aberta_em: datetime) -> str:
+        minutos = int((datetime.now() - aberta_em).total_seconds() // 60)
+        if minutos >= 60:
+            cor, tempo = "#f43f5e", f"{minutos // 60}h{minutos % 60:02d}"
+        elif minutos >= 30:
+            cor, tempo = "#eab308", f"{minutos} min"
+        else:
+            cor, tempo = "#94a3b8", f"{minutos} min"
+        self._label_horario.setStyleSheet(f"font-size: 13px; margin-left: 8px; color: {cor};")
+        return f"Aberta às {aberta_em.strftime('%H:%M')} · há {tempo}"
+
     def _preencher_linha(self, linha: int, item: ItemComanda) -> None:
         descricao = item.produto.nome
         if item.observacao:
@@ -195,52 +222,75 @@ class ComandaView(QWidget):
         self._tabela.setItem(linha, 2, QTableWidgetItem(str(item.quantidade)))
         self._tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(total_item)))
 
+        # Marca visual do que já foi (ou não) pra cozinha — sem isso o
+        # operador só descobre o status ao tentar remover e levar um erro.
+        if item.impresso_em is None:
+            status = QTableWidgetItem("● Pendente")
+            status.setForeground(Qt.GlobalColor.yellow)
+            status.setToolTip("Ainda não foi enviado à produção — pode ser removido livremente.")
+        else:
+            status = QTableWidgetItem("✓ Enviado")
+            status.setForeground(Qt.GlobalColor.green)
+            status.setToolTip("Já foi enviado à produção — remoção exige cancelamento autorizado.")
+        self._tabela.setItem(linha, 4, status)
+
         acoes_item = QWidget()
         layout_acoes = QHBoxLayout(acoes_item)
         layout_acoes.setContentsMargins(0, 0, 0, 0)
 
-        botao_remover = QPushButton("Remover")
-        botao_remover.setProperty("variante", "perigo")
-        botao_remover.clicked.connect(lambda _checked=False, i=item: self._remover_item(i))
-        # Item que já foi pra cozinha só sai por Cancelar (com PIN e motivo). O
-        # service barra isso de qualquer jeito; desabilitar aqui é para o
-        # operador entender a regra antes de clicar, e não depois do erro.
-        if item.impresso_em is not None:
-            botao_remover.setEnabled(False)
-            botao_remover.setToolTip(
-                "Já enviado para a produção. Use Cancelar, que exige autorização do gerente."
+        # Nunca os dois botões juntos: item ainda não impresso só pode ser
+        # removido direto (rascunho, sem rastro a preservar); depois que vai
+        # pra cozinha, a única saída é Cancelar, com PIN de gerente e motivo,
+        # porque a partir daí é registro de auditoria (ver docs/arquitetura §3.6).
+        if item.impresso_em is None:
+            botao_remover = QPushButton("🗑 Remover")
+            botao_remover.setProperty("variante", "perigo")
+            botao_remover.setToolTip("Remover item da lista (ainda não foi enviado à produção).")
+            botao_remover.clicked.connect(lambda _checked=False, i=item: self._remover_item(i))
+            layout_acoes.addWidget(botao_remover)
+        else:
+            botao_cancelar = QPushButton("⛔ Cancelar")
+            botao_cancelar.setProperty("variante", "perigo")
+            botao_cancelar.setToolTip(
+                "Solicitar cancelamento do item. Já foi enviado à produção — exige senha do gerente."
             )
-        layout_acoes.addWidget(botao_remover)
+            botao_cancelar.clicked.connect(lambda _checked=False, i=item: self._cancelar_item(i))
+            layout_acoes.addWidget(botao_cancelar)
 
-        botao_cancelar = QPushButton("Cancelar")
-        botao_cancelar.setProperty("variante", "perigo")
-        botao_cancelar.clicked.connect(lambda _checked=False, i=item: self._cancelar_item(i))
-        layout_acoes.addWidget(botao_cancelar)
+        self._tabela.setCellWidget(linha, 5, acoes_item)
 
-        self._tabela.setCellWidget(linha, 4, acoes_item)
+    def _mostrar_mensagem(self, texto: str, *, sucesso: bool) -> None:
+        cor = "#22c55e" if sucesso else "#f43f5e"
+        self._label_erro.setStyleSheet(f"color: {cor}; font-size: 12px;")
+        self._label_erro.setText(texto)
 
     def _remover_item(self, item: ItemComanda) -> None:
-        self._label_erro.setText("")
+        nome_produto = item.produto.nome
         try:
             self._comanda_service.remover_item(item.id)
         except _ERROS_SERVICE as erro:
-            self._label_erro.setText(str(erro))
+            self._mostrar_mensagem(str(erro), sucesso=False)
             return
         self.atualizar()
+        self._mostrar_mensagem(f"{nome_produto} removido com sucesso.", sucesso=True)
 
     def _cancelar_item(self, item: ItemComanda) -> None:
         modal = CancelamentoDialog(f"Cancelar item — {item.produto.nome}", self)
         if modal.exec() != QDialog.DialogCode.Accepted:
             return
         motivo, pin_gerente = modal.resultado()
+        nome_produto = item.produto.nome
 
-        self._label_erro.setText("")
         try:
-            self._comanda_service.cancelar_item(item.id, motivo, pin_gerente)
+            item_cancelado = self._comanda_service.cancelar_item(item.id, motivo, pin_gerente)
         except _ERROS_SERVICE as erro:
-            self._label_erro.setText(str(erro))
+            self._mostrar_mensagem(str(erro), sucesso=False)
             return
+        gerente_nome = item_cancelado.cancelado_por.nome if item_cancelado.cancelado_por else "gerente"
         self.atualizar()
+        self._mostrar_mensagem(
+            f"Cancelamento de {nome_produto} autorizado por {gerente_nome}.", sucesso=True
+        )
 
     def _cancelar_comanda(self) -> None:
         if self._comanda is None:
@@ -358,6 +408,10 @@ class _AdicionarItemDialog(QDialog):
         self._busca.busca_cancelada.connect(self.reject)
         layout.addWidget(self._busca)
 
+        dica = QLabel("Duplo clique ou Enter no item lança direto. Ou selecione e use Adicionar.")
+        dica.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        layout.addWidget(dica)
+
         formulario = QFormLayout()
 
         self._campo_quantidade = QSpinBox()
@@ -379,6 +433,11 @@ class _AdicionarItemDialog(QDialog):
         botoes = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         botoes.button(QDialogButtonBox.StandardButton.Close).setText("Fechar")
         botoes.rejected.connect(self.reject)
+
+        self._botao_adicionar = botoes.addButton("Adicionar", QDialogButtonBox.ButtonRole.AcceptRole)
+        self._botao_adicionar.setProperty("variante", "primario")
+        self._botao_adicionar.clicked.connect(self._busca.confirmar_selecionado)
+
         layout.addWidget(botoes)
 
     def _produto_selecionado(self, produto_id: int) -> None:

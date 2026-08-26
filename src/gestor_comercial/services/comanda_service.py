@@ -149,6 +149,12 @@ class ComandaService:
         if quantidade <= 0:
             raise RegraDeNegocioError("A quantidade deve ser maior que zero.")
 
+        # A comanda existe desde o clique na mesa (precisa de linha própria
+        # pra pendurar item nela), mas pro operador ela só "começa" quando o
+        # primeiro item é de fato lançado — é o que marca `aberta_em` (e por
+        # tabela o relógio mostrado na tela) e ocupa a mesa (`_ocupar_mesa`).
+        primeiro_item = not self.uow.itens.existe_na_comanda(comanda.id)
+
         item = ItemComanda(
             comanda_id=comanda.id,
             produto_id=produto.id,
@@ -160,6 +166,10 @@ class ComandaService:
             cancelado=False,
         )
         self.uow.itens.salvar(item)
+
+        if primeiro_item:
+            comanda.aberta_em = datetime.now()
+            self.uow.comandas.salvar(comanda)
 
         self._ocupar_mesa(comanda)
         self.uow.commit()
