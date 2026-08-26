@@ -237,10 +237,10 @@ class PagamentoService:
         consumos = self.uow.pagamentos.listar_consumos_do_funcionario(funcionario_id)
         saldo_devedor = self._somar_pendente(consumos)
         if saldo_devedor <= ZERO:
-            raise RegraDeNegocioError(f"{funcionario.nome} não tem consumo em aberto para quitar.")
+            raise RegraDeNegocioError(f"{funcionario.nome} não tem consumo em aberto para dar baixa.")
         if montante > saldo_devedor:
             raise RegraDeNegocioError(
-                f"O valor a quitar (R$ {montante}) passa do saldo devedor de R$ {saldo_devedor}."
+                f"O valor a quitar (R$ {montante}) passa do consumo em aberto de R$ {saldo_devedor}."
             )
 
         # FIFO (§3.8): o consumo mais antigo é abatido primeiro, para o extrato

@@ -10,11 +10,11 @@ fazer com cada um (o mesmo padrão de `MesasView.comanda_aberta`).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from decimal import Decimal
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -45,6 +45,7 @@ from gestor_comercial.services.exceptions import (
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
+from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
 
 _COLUNAS = ["Descrição", "Preço", "Qtd", "Total", ""]
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
@@ -310,37 +311,54 @@ class ComandaView(QWidget):
             self._label_erro.setText("Não há produtos ativos no cardápio.")
             return
 
-        modal = _AdicionarItemDialog(produtos, self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
-            return
+        modal = _AdicionarItemDialog(produtos, self._lancar_item_do_modal, self)
+        modal.exec()
+        # O modal já lança cada item na hora (fluxo rápido de PDV); ao
+        # fechar, só falta atualizar a tabela com o que ficou de fora dela.
+        self.atualizar()
 
-        produto_id, quantidade, observacao = modal.resultado()
-        self._label_erro.setText("")
-        try:
-            self._comanda_service.lancar_item(
-                self._comanda.id, produto_id, quantidade, observacao
-            )
-        except _ERROS_SERVICE as erro:
-            self._label_erro.setText(str(erro))
-            return
+    def _lancar_item_do_modal(
+        self, produto_id: int, quantidade: int, observacao: str | None
+    ) -> None:
+        """Lança um item vindo do modal de busca e devolve a tabela atualizada.
+
+        Repassa erro de regra de negócio para o modal exibir (ex.: comanda
+        fechada entre um lançamento e outro) — quem decide fechar a tela
+        continua sendo o operador.
+        """
+        assert self._comanda is not None
+        self._comanda_service.lancar_item(self._comanda.id, produto_id, quantidade, observacao)
         self.atualizar()
 
 
 class _AdicionarItemDialog(QDialog):
-    """Modal `+ Item`: produto, quantidade e observação livre."""
+    """Modal `+ Item`: busca instantânea do cardápio + quantidade/observação.
 
-    def __init__(self, produtos: list[Produto], parent: QWidget | None = None) -> None:
+    Fluxo de PDV: `Enter` no item destacado da busca já lança na comanda com
+    a quantidade/observação atuais e limpa só o campo de busca, deixando o
+    modal aberto para o próximo item — o operador lança vários produtos em
+    sequência sem reabrir a tela a cada um. `Esc` com a busca vazia fecha.
+    """
+
+    def __init__(
+        self,
+        produtos: list[Produto],
+        lancar_item: Callable[[int, int, str | None], None],
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Adicionar item")
-        self._produtos = produtos
+        self.setMinimumWidth(420)
+        self._lancar_item = lancar_item
 
         layout = QVBoxLayout(self)
-        formulario = QFormLayout()
 
-        self._combo_produto = QComboBox()
-        for produto in produtos:
-            self._combo_produto.addItem(f"{produto.nome} — {_formatar_reais(produto.preco)}", produto.id)
-        formulario.addRow("Produto", self._combo_produto)
+        self._busca = BuscaProdutoWidget(produtos)
+        self._busca.produto_selecionado.connect(self._produto_selecionado)
+        self._busca.busca_cancelada.connect(self.reject)
+        layout.addWidget(self._busca)
+
+        formulario = QFormLayout()
 
         self._campo_quantidade = QSpinBox()
         self._campo_quantidade.setMinimum(1)
@@ -354,20 +372,31 @@ class _AdicionarItemDialog(QDialog):
 
         layout.addLayout(formulario)
 
-        botoes = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        botoes.button(QDialogButtonBox.StandardButton.Ok).setText("Adicionar")
-        botoes.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
-        botoes.accepted.connect(self.accept)
+        self._label_erro = QLabel("")
+        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
+        layout.addWidget(self._label_erro)
+
+        botoes = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        botoes.button(QDialogButtonBox.StandardButton.Close).setText("Fechar")
         botoes.rejected.connect(self.reject)
         layout.addWidget(botoes)
 
-    def resultado(self) -> tuple[int, int, str | None]:
-        produto_id = self._combo_produto.currentData()
+    def _produto_selecionado(self, produto_id: int) -> None:
         quantidade = self._campo_quantidade.value()
         observacao = self._campo_observacao.text().strip() or None
-        return produto_id, quantidade, observacao
+
+        self._label_erro.setText("")
+        try:
+            self._lancar_item(produto_id, quantidade, observacao)
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+            return
+
+        # Item lançado: reseta para o próximo, mas mantém o modal aberto e o
+        # foco na busca — é aí que está o ganho de velocidade do PDV.
+        self._campo_quantidade.setValue(1)
+        self._campo_observacao.clear()
+        self._busca.foco_busca()
 
 
 def _formatar_reais(valor: Decimal) -> str:

@@ -40,7 +40,7 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.pagamento_service import PagamentoService
 
-_COLUNAS = ["Nome", "Perfil", "Status", "Saldo devedor"]
+_COLUNAS = ["Nome", "Perfil", "Status", "Consumo"]
 
 _ROTULOS_PERFIL = {
     PerfilFuncionario.ATENDENTE: "Atendente",
@@ -51,7 +51,7 @@ _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoE
 
 
 class FuncionariosView(QWidget):
-    """CRUD básico de funcionário e quitação de saldo devedor de consumo interno."""
+    """CRUD básico de funcionário e baixa de consumo interno (descontado do salário)."""
 
     def __init__(
         self,
@@ -94,7 +94,8 @@ class FuncionariosView(QWidget):
         self._botao_desativar.clicked.connect(self._desativar)
         acoes.addWidget(self._botao_desativar)
 
-        self._botao_quitar = QPushButton("Quitar consumo")
+        self._botao_quitar = QPushButton("Dar baixa no Consumo")
+        self._botao_quitar.setProperty("variante", "neutro")
         self._botao_quitar.clicked.connect(self._quitar)
         acoes.addWidget(self._botao_quitar)
         acoes.addStretch()
@@ -166,7 +167,7 @@ class FuncionariosView(QWidget):
             return
         saldo = self._saldos.get(funcionario.id, Decimal("0"))
         if saldo <= 0:
-            self._label_erro.setText(f"{funcionario.nome} não tem saldo devedor em aberto.")
+            self._label_erro.setText(f"{funcionario.nome} não tem consumo em aberto.")
             return
 
         modal = _QuitarConsumoDialog(funcionario.nome, saldo, self)
@@ -227,20 +228,26 @@ class _FuncionarioDialog(QDialog):
 
 
 class _QuitarConsumoDialog(QDialog):
-    """Modal de quitação: valor a abater e PIN de um gerente para autorizar."""
+    """Modal de baixa: valor a abater e PIN de um gerente para autorizar.
+
+    A tela em si já é o controle de acesso pedido — sem PIN de gerente válido,
+    `PagamentoService.quitar()` recusa a baixa (§3.8). Cada confirmação aqui
+    grava um `QuitacaoConsumo` no banco (valor, data/hora, quem autorizou),
+    dado bruto para o `sales_analytics` mais pra frente.
+    """
 
     def __init__(self, nome_funcionario: str, saldo: Decimal, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle(f"Quitar consumo — {nome_funcionario}")
+        self.setWindowTitle(f"Dar baixa no consumo — {nome_funcionario}")
 
         layout = QVBoxLayout(self)
 
-        layout.addWidget(QLabel(f"Saldo devedor atual: {_formatar_reais(saldo)}"))
+        layout.addWidget(QLabel(f"Consumo atual: {_formatar_reais(saldo)}"))
 
         formulario = QFormLayout()
 
         self._campo_valor = QLineEdit(_formatar_campo(saldo))
-        formulario.addRow("Valor a quitar", self._campo_valor)
+        formulario.addRow("Valor descontado do salário", self._campo_valor)
 
         self._campo_pin_gerente = QLineEdit()
         self._campo_pin_gerente.setEchoMode(QLineEdit.EchoMode.Password)
@@ -251,7 +258,7 @@ class _QuitarConsumoDialog(QDialog):
         botoes = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        botoes.button(QDialogButtonBox.StandardButton.Ok).setText("Quitar")
+        botoes.button(QDialogButtonBox.StandardButton.Ok).setText("Dar baixa")
         botoes.accepted.connect(self.accept)
         botoes.rejected.connect(self.reject)
         layout.addWidget(botoes)
