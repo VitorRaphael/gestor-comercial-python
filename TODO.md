@@ -26,6 +26,7 @@
 - [x] `pagamento_service.py` — registrar pagamento parcial/múltiplo, calcular troco, consumo interno, fechamento automático
 - [x] `caixa_service.py` — abrir/fechar, sangria/reforço/despesa, saldo esperado, total maquininha
 - [x] Testes unitários de cada service (casos de sucesso + regras de bloqueio) — 319 testes, ver `docs/arquitetura.md` §8 para o resumo da revisão adversarial que corrigiu 9 problemas antes de fechar a fase
+- [x] Controle de Turnos: `caixas.numero_sequencial_dia` (indexado por `fechado_em`, virada de madrugada), `aberto_por_id`/`fechado_por_id`, `titulo_fechamento`, `listar_historico`, `totais_por_forma` — 2026-08-26, migration `c3f9a7d21b6e`
 
 ## Fase 3 — Interface PySide6 (Views)
 - [x] Extrair paleta de cores/CSS do front-end web (`GESTOR COMERCIAL/.../desktop/style.css`) para `resources/qss/`
@@ -34,6 +35,7 @@
 - [x] `comanda_view.py` — lista de itens + total, modal de adicionar item
 - [x] `pagamento_dialog.py` — resumo, forma, valor, troco, consumo interno
 - [x] `caixa_view.py` — status, abrir/fechar, tabela de movimentos
+- [x] `historico_caixa_view.py` — Histórico de Fechamentos: filtro por período/operador, reimpressão do relatório — 2026-08-26
 - [x] `cardapio_view.py` — CRUD produto/categoria/combo
 - [x] `funcionarios_view.py` — CRUD básico + saldo devedor
 - [x] Modal de cancelamento (item/comanda) com PIN de Gerente

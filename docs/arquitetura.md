@@ -66,10 +66,16 @@ Portado integralmente do Gestor Comercial, **exceto** os itens cortados abaixo (
 - Quitação (total ou parcial, PIN de Gerente), abatendo os consumos mais antigos primeiro (FIFO).
 
 ### 3.9 Caixa
-- Abertura (valor inicial), bloqueia se já houver caixa `ABERTO`.
-- Fechamento (valor contado + observação), bloqueia se já fechado ou se houver comanda `ABERTA` com item lançado neste caixa (comanda vazia, sem item, não bloqueia — é rascunho).
+- Abertura (valor inicial), bloqueia se já houver caixa `ABERTO`. Grava `aberto_por_id` (quem declarou o fundo de troco).
+- Fechamento (valor contado + observação), bloqueia se já fechado ou se houver comanda `ABERTA` com item lançado neste caixa (comanda vazia, sem item, não bloqueia — é rascunho). Grava `fechado_por_id`.
 - Cálculo de saldo esperado (abertura + reforços − sangrias − despesas + dinheiro recebido). Consumo interno nunca desconta da gaveta: ele nunca foi dinheiro, é dívida rastreada só em `Pagamento`/`saldo_devedor` (§3.7/§3.8). `TipoMovimento.CONSUMO_FUNCIONARIO` existe no schema mas o registro manual dele é bloqueado, justamente para não descontar essa dívida da gaveta duas vezes.
-- Cálculo do total vendido em maquininha (crédito + débito + PIX).
+- Cálculo do total vendido em maquininha (crédito + débito + PIX), e `totais_por_forma` para a quebra individual (Dinheiro, PIX, Débito, Crédito) do relatório e da tela de Histórico.
+
+#### 3.9.1 Sequência diária de fechamentos e Histórico
+- `Caixa.numero_sequencial_dia` é a ordem do fechamento dentro do dia **civil de `fechado_em`**, nunca de `aberto_em`: um turno aberto às 17h e fechado 01h do dia seguinte é o **1º fechamento do dia seguinte**, não do dia da abertura. Só existe depois de fechado, calculado uma única vez em `CaixaService.fechar` (contagem antes de sujar o próprio `caixa` no `Session`, senão o autoflush do SQLAlchemy contaria o caixa em fechamento como se já fosse um fechamento anterior) e nunca recalculado — fechar de novo o mesmo caixa já é bloqueado, então o número é imutável desde que gravado.
+- `CaixaService.titulo_fechamento` monta a identificação oficial: `"Xº Fechamento do dia DD/MM/AAAA"`.
+- `CaixaService.listar_historico(inicio, fim, funcionario_id)` alimenta a tela de Histórico de Fechamentos: filtra por `fechado_em` (mesmo eixo da sequência diária) e por operador — casando com `aberto_por_id` OU `fechado_por_id`, porque quem consulta pode não lembrar qual das duas pontas do turno era o funcionário procurado.
+- App single-user/single-processo (mesma premissa de `UnitOfWork`, §"Repository"): não há concorrência real entre dois fechamentos, então a contagem-e-gravação dentro da mesma transação de commit é suficiente sem lock adicional.
 
 ### 3.10 Movimentos de Caixa
 - Registro de `SANGRIA` / `REFORCO` / `DESPESA` / `CONSUMO_FUNCIONARIO`, vinculado ao caixa aberto.

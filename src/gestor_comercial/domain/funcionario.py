@@ -26,3 +26,9 @@ class Funcionario(Base):
     )
     movimentos_caixa: Mapped[list["MovimentoCaixa"]] = relationship(back_populates="funcionario")
     pagamentos_consumo: Mapped[list["Pagamento"]] = relationship(back_populates="funcionario_consumo")
+    caixas_abertos: Mapped[list["Caixa"]] = relationship(
+        foreign_keys="Caixa.aberto_por_id", back_populates="aberto_por"
+    )
+    caixas_fechados: Mapped[list["Caixa"]] = relationship(
+        foreign_keys="Caixa.fechado_por_id", back_populates="fechado_por"
+    )

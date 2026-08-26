@@ -459,9 +459,16 @@ class ImpressaoService:
         """Relatório de conferência da gaveta, com os números do `CaixaService`."""
         largura = cupom.largura_util(impressora.colunas)
 
-        documento: Documento = [
-            BlocoTexto("FECHAMENTO DE CAIXA", negrito=True, centralizado=True),
-            BlocoTexto(f"Caixa {caixa.id}", centralizado=True),
+        documento: Documento = [BlocoTexto("FECHAMENTO DE CAIXA", negrito=True, centralizado=True)]
+        if caixa.numero_sequencial_dia is not None and caixa.fechado_em is not None:
+            # Identificação oficial do fechamento (§ sequência diária): indexada
+            # por `fechado_em`, é o número que a contabilidade usa pra achar
+            # este turno depois — não existe enquanto o caixa está aberto.
+            documento.append(
+                BlocoTexto(self._caixas.titulo_fechamento(caixa.id), centralizado=True)
+            )
+        documento.append(BlocoTexto(f"Caixa {caixa.id}", centralizado=True))
+        documento.extend([
             BlocoTexto(cupom.duas_colunas("Aberto em", cupom.data_hora(caixa.aberto_em), largura)),
             BlocoTexto(
                 cupom.duas_colunas(
@@ -474,7 +481,7 @@ class ImpressaoService:
             BlocoTexto(cupom.linha_de_valor("Valor de abertura", resumo.valor_abertura, largura)),
             BlocoTexto(cupom.separador(largura, titulo="VENDAS")),
             BlocoTexto(cupom.linha_de_valor("Dinheiro", resumo.total_dinheiro, largura)),
-        ]
+        ])
 
         # `resumo` já traz o total da maquininha somado; a quebra por bandeira é
         # detalhe que só existe aqui, porque é o que o gerente confere contra o
@@ -552,6 +559,15 @@ class ImpressaoService:
         documento.append(BlocoTexto(cupom.separador(largura)))
         situacao = "FECHADO" if caixa.status is StatusCaixa.FECHADO else "ABERTO"
         documento.append(BlocoTexto(cupom.duas_colunas("Situação", situacao, largura)))
+        # Os dois operadores do turno: quem declarou o fundo de troco pode não
+        # ser quem conferiu a gaveta no fim, e o histórico depende de mostrar
+        # os dois nomes, não só quem está segurando a impressão agora.
+        if caixa.aberto_por is not None:
+            for linha in cupom.quebrar(f"Aberto por: {caixa.aberto_por.nome}", largura):
+                documento.append(BlocoTexto(linha))
+        if caixa.fechado_por is not None:
+            for linha in cupom.quebrar(f"Fechado por: {caixa.fechado_por.nome}", largura):
+                documento.append(BlocoTexto(linha))
         documento.append(
             BlocoTexto(cupom.duas_colunas("Impresso em", cupom.data_hora(agora), largura))
         )

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from gestor_comercial.domain.caixa import Caixa
@@ -69,7 +69,7 @@ class CaixaService:
     def abrir(self, valor_abertura: Decimal) -> Caixa:
         # §3.1: o Java já documentava "atendente tentando abrir o caixa" como
         # acesso negado — quem declara o fundo de troco é quem responde por ele.
-        self.auth.exigir_gerente()
+        gerente = self.auth.exigir_gerente()
         valor = self._valor_monetario(valor_abertura, "valor de abertura")
         if valor < ZERO:
             raise RegraDeNegocioError("O valor de abertura não pode ser negativo.")
@@ -82,13 +82,14 @@ class CaixaService:
             status=StatusCaixa.ABERTO,
             valor_abertura=valor,
             aberto_em=datetime.now(),
+            aberto_por_id=gerente.id,
         )
         self.uow.caixas.salvar(caixa)
         self.uow.commit()
         return caixa
 
     def fechar(self, caixa_id: int, valor_contado: Decimal, observacao: str | None = None) -> Caixa:
-        self.auth.exigir_gerente()
+        gerente = self.auth.exigir_gerente()
         caixa = self.buscar(caixa_id)
         if caixa.status is StatusCaixa.FECHADO:
             raise RegraDeNegocioError(f"O caixa {caixa_id} já está fechado.")
@@ -118,10 +119,25 @@ class CaixaService:
                 "Receba ou cancele antes de fechar o caixa."
             )
 
+        fechado_em = datetime.now()
+        # Regra da virada de madrugada: indexado por `fechado_em.date()`, nunca
+        # por `aberto_em` — um caixa aberto às 17h e fechado 01h do dia
+        # seguinte é o 1º fechamento do dia seguinte, não do dia da abertura.
+        # Contado ANTES de sujar `caixa` — mudar o status/fechado_em primeiro
+        # faria o autoflush do SQLAlchemy incluir este próprio caixa na
+        # contagem antes de ele ter, de fato, um número. Calculado dentro da
+        # mesma transação do commit do fechamento (app single-user/single-
+        # processo, sem escrita concorrente possível) e nunca mais recalculado:
+        # fechar de novo o mesmo caixa já é bloqueado acima, então este número
+        # é imutável a partir daqui.
+        numero_sequencial_dia = self.uow.caixas.contar_fechados_no_dia(fechado_em.date()) + 1
+
         caixa.status = StatusCaixa.FECHADO
-        caixa.fechado_em = datetime.now()
+        caixa.fechado_em = fechado_em
         caixa.valor_contado = valor
         caixa.observacao_fechamento = self._texto_ou_nulo(observacao)
+        caixa.fechado_por_id = gerente.id
+        caixa.numero_sequencial_dia = numero_sequencial_dia
         self.uow.caixas.salvar(caixa)
         self.uow.commit()
         return caixa
@@ -149,6 +165,37 @@ class CaixaService:
         if caixa is None:
             raise RegraDeNegocioError("Nenhum caixa foi fechado ainda.")
         return caixa
+
+    # ------------------------------------------------------------------
+    # Histórico de fechamentos
+    # ------------------------------------------------------------------
+
+    def listar_historico(
+        self,
+        *,
+        inicio: date | None = None,
+        fim: date | None = None,
+        funcionario_id: int | None = None,
+    ) -> list[Caixa]:
+        """Fechamentos passados para a tela de Histórico, do mais recente pro mais antigo."""
+        return self.uow.caixas.listar_historico(inicio=inicio, fim=fim, funcionario_id=funcionario_id)
+
+    def titulo_fechamento(self, caixa_id: int) -> str:
+        """'3º Fechamento do dia 26/08/2026' — identificação oficial do fechamento (§ sequência diária)."""
+        caixa = self.buscar(caixa_id)
+        if caixa.numero_sequencial_dia is None or caixa.fechado_em is None:
+            raise RegraDeNegocioError(f"O caixa {caixa_id} ainda não foi fechado.")
+        return f"{caixa.numero_sequencial_dia}º Fechamento do dia {caixa.fechado_em:%d/%m/%Y}"
+
+    def totais_por_forma(self, caixa_id: int) -> dict[FormaPagamento, Decimal]:
+        """Quanto entrou em cada forma de pagamento — só as que tiveram venda."""
+        self.buscar(caixa_id)
+        totais: dict[FormaPagamento, Decimal] = {}
+        for forma in FormaPagamento:
+            total = self._somar(self._pagamentos(caixa_id, forma))
+            if total > ZERO:
+                totais[forma] = total
+        return totais
 
     # ------------------------------------------------------------------
     # Movimentos da gaveta (§3.10)

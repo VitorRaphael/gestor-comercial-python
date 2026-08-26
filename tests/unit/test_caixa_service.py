@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
@@ -7,6 +7,7 @@ from gestor_comercial.domain.caixa import Caixa
 from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.enums import (
     FormaPagamento,
+    PerfilFuncionario,
     StatusCaixa,
     StatusComanda,
     TipoMovimento,
@@ -524,3 +525,191 @@ def test_resumo_acusa_sobra_na_gaveta(caixas, gerente, caixa_aberto):
 def test_resumo_de_caixa_inexistente(caixas):
     with pytest.raises(RecursoNaoEncontradoError):
         caixas.resumo(999)
+
+
+# ----------------------------------------------------------------------
+# abrir/fechar gravam quem operou cada ponta do turno
+# ----------------------------------------------------------------------
+
+
+def test_abrir_grava_quem_abriu(caixas, gerente):
+    caixa = caixas.abrir(Decimal("100.00"))
+    assert caixa.aberto_por_id == gerente.id
+
+
+def test_fechar_grava_quem_fechou(caixas, gerente, caixa_aberto):
+    caixa = caixas.fechar(caixa_aberto.id, Decimal("100.00"))
+    assert caixa.fechado_por_id == gerente.id
+
+
+# ----------------------------------------------------------------------
+# sequência diária de fechamentos (indexada por fechado_em, não aberto_em)
+# ----------------------------------------------------------------------
+
+
+def test_fechar_numera_o_primeiro_fechamento_do_dia(caixas, gerente, caixa_aberto):
+    caixa = caixas.fechar(caixa_aberto.id, Decimal("100.00"))
+    assert caixa.numero_sequencial_dia == 1
+
+
+def test_fechar_numera_sequencialmente_dentro_do_mesmo_dia(uow, auth, caixas, gerente):
+    primeiro = caixas.abrir(Decimal("100.00"))
+    caixas.fechar(primeiro.id, Decimal("100.00"))
+    segundo = caixas.abrir(Decimal("50.00"))
+
+    fechado = caixas.fechar(segundo.id, Decimal("50.00"))
+
+    assert fechado.numero_sequencial_dia == 2
+
+
+def test_fechar_nao_recalcula_a_sequencia_de_fechamentos_ja_gravados(
+    uow, auth, caixas, gerente
+):
+    primeiro = caixas.fechar(caixas.abrir(Decimal("100.00")).id, Decimal("100.00"))
+    caixas.fechar(caixas.abrir(Decimal("50.00")).id, Decimal("50.00"))
+
+    # O 1º fechamento do dia continua sendo o 1º mesmo depois de um segundo
+    # caixa ser aberto e fechado — a numeração é imutável assim que gravada.
+    assert uow.caixas.buscar_por_id(primeiro.id).numero_sequencial_dia == 1
+
+
+def test_contar_fechados_no_dia_conta_pela_data_de_fechado_em_nao_de_aberto_em(uow):
+    # Caixa aberto dia 29 às 17h e fechado dia 30 às 01h: é fechamento do dia
+    # 30, não do dia 29 — o exato cenário de virada de madrugada da regra.
+    virada_de_noite = _caixa_fechado(
+        uow,
+        fechado_em=datetime(2026, 8, 30, 1, 0),
+    )
+    _caixa_fechado(uow, fechado_em=datetime(2026, 8, 29, 20, 0))
+
+    assert uow.caixas.contar_fechados_no_dia(date(2026, 8, 30)) == 1
+    assert uow.caixas.contar_fechados_no_dia(date(2026, 8, 29)) == 1
+    assert virada_de_noite.numero_sequencial_dia is None  # não passou por fechar()
+
+
+def test_contar_fechados_no_dia_ignora_caixa_aberto(uow, caixa_aberto):
+    assert uow.caixas.contar_fechados_no_dia(date.today()) == 0
+
+
+# ----------------------------------------------------------------------
+# titulo_fechamento
+# ----------------------------------------------------------------------
+
+
+def test_titulo_fechamento_monta_a_identificacao_oficial(uow):
+    caixa = _caixa_fechado(uow, fechado_em=datetime(2026, 8, 30, 1, 0))
+    caixa.numero_sequencial_dia = 1
+    uow.caixas.salvar(caixa)
+    uow.commit()
+
+    servico = CaixaService(uow, None)
+    assert servico.titulo_fechamento(caixa.id) == "1º Fechamento do dia 30/08/2026"
+
+
+def test_titulo_fechamento_de_caixa_ainda_aberto(caixas, caixa_aberto):
+    with pytest.raises(RegraDeNegocioError):
+        caixas.titulo_fechamento(caixa_aberto.id)
+
+
+def test_titulo_fechamento_de_caixa_inexistente(caixas):
+    with pytest.raises(RecursoNaoEncontradoError):
+        caixas.titulo_fechamento(999)
+
+
+# ----------------------------------------------------------------------
+# listar_historico
+# ----------------------------------------------------------------------
+
+
+def test_listar_historico_traz_so_os_fechados_do_mais_recente_pro_mais_antigo(
+    uow, caixas, caixa_aberto
+):
+    antigo = _caixa_fechado(uow, fechado_em=datetime(2026, 8, 18, 23, 0))
+    recente = _caixa_fechado(uow, fechado_em=datetime(2026, 8, 19, 23, 0))
+
+    historico = caixas.listar_historico()
+
+    assert [c.id for c in historico] == [recente.id, antigo.id]
+    assert caixa_aberto.id not in [c.id for c in historico]
+
+
+def test_listar_historico_filtra_por_periodo(uow, caixas):
+    _caixa_fechado(uow, fechado_em=datetime(2026, 8, 18, 23, 0))
+    dentro = _caixa_fechado(uow, fechado_em=datetime(2026, 8, 19, 23, 0))
+    _caixa_fechado(uow, fechado_em=datetime(2026, 8, 20, 23, 0))
+
+    historico = caixas.listar_historico(
+        inicio=date(2026, 8, 19), fim=date(2026, 8, 19)
+    )
+
+    assert [c.id for c in historico] == [dentro.id]
+
+
+def test_listar_historico_filtra_por_operador_abertura_ou_fechamento(uow, auth, gerente):
+    abriu = auth.criar_funcionario("Quem Abriu", "444444", PerfilFuncionario.ATENDENTE)
+    fechou = auth.criar_funcionario("Quem Fechou", "555555", PerfilFuncionario.ATENDENTE)
+    de_outro = auth.criar_funcionario("Outro", "666666", PerfilFuncionario.ATENDENTE)
+
+    caixa_do_abridor = uow.caixas.salvar(
+        Caixa(
+            status=StatusCaixa.FECHADO,
+            valor_abertura=dinheiro("50.00"),
+            valor_contado=dinheiro("50.00"),
+            aberto_em=datetime(2026, 8, 19, 8, 0),
+            fechado_em=datetime(2026, 8, 19, 23, 0),
+            aberto_por_id=abriu.id,
+            fechado_por_id=de_outro.id,
+        )
+    )
+    caixa_do_fechador = uow.caixas.salvar(
+        Caixa(
+            status=StatusCaixa.FECHADO,
+            valor_abertura=dinheiro("50.00"),
+            valor_contado=dinheiro("50.00"),
+            aberto_em=datetime(2026, 8, 19, 8, 0),
+            fechado_em=datetime(2026, 8, 19, 23, 0),
+            aberto_por_id=de_outro.id,
+            fechado_por_id=fechou.id,
+        )
+    )
+    uow.commit()
+
+    servico = CaixaService(uow, auth)
+    historico_abridor = servico.listar_historico(funcionario_id=abriu.id)
+    historico_fechador = servico.listar_historico(funcionario_id=fechou.id)
+
+    assert [c.id for c in historico_abridor] == [caixa_do_abridor.id]
+    assert [c.id for c in historico_fechador] == [caixa_do_fechador.id]
+
+
+def test_listar_historico_vazio_sem_nenhum_fechamento(caixas, caixa_aberto):
+    assert caixas.listar_historico() == []
+
+
+# ----------------------------------------------------------------------
+# totais_por_forma
+# ----------------------------------------------------------------------
+
+
+def test_totais_por_forma_traz_so_as_formas_com_venda(uow, caixas, gerente, caixa_aberto):
+    comanda = _nova_comanda(uow, caixa_aberto, gerente)
+    _novo_pagamento(uow, comanda, FormaPagamento.DINHEIRO, "36.00")
+    _novo_pagamento(uow, comanda, FormaPagamento.PIX, "25.00")
+    _novo_pagamento(uow, comanda, FormaPagamento.CREDITO, "40.00")
+
+    totais = caixas.totais_por_forma(caixa_aberto.id)
+
+    assert totais == {
+        FormaPagamento.DINHEIRO: Decimal("36.00"),
+        FormaPagamento.PIX: Decimal("25.00"),
+        FormaPagamento.CREDITO: Decimal("40.00"),
+    }
+
+
+def test_totais_por_forma_vazio_sem_venda(caixas, caixa_aberto):
+    assert caixas.totais_por_forma(caixa_aberto.id) == {}
+
+
+def test_totais_por_forma_de_caixa_inexistente(caixas):
+    with pytest.raises(RecursoNaoEncontradoError):
+        caixas.totais_por_forma(999)
