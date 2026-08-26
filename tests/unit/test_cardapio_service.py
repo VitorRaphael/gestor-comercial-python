@@ -160,6 +160,24 @@ def test_desativar_categoria_exige_gerente(cardapio, categoria, como_atendente):
         cardapio.desativar_categoria(categoria.id)
 
 
+def test_ativar_categoria_reverte_soft_delete(cardapio, categoria):
+    cardapio.desativar_categoria(categoria.id)
+    reativada = cardapio.ativar_categoria(categoria.id)
+
+    assert reativada.ativo is True
+    assert [c.nome for c in cardapio.listar_categorias_ativas()] == ["Lanches"]
+
+
+def test_ativar_categoria_ja_ativa(cardapio, categoria):
+    with pytest.raises(RegraDeNegocioError):
+        cardapio.ativar_categoria(categoria.id)
+
+
+def test_ativar_categoria_exige_gerente(cardapio, categoria, como_atendente):
+    with pytest.raises(AcessoNegadoError):
+        cardapio.ativar_categoria(categoria.id)
+
+
 def test_excluir_categoria_sem_produtos(cardapio, categoria):
     bebidas = cardapio.criar_categoria("Bebidas")
     cardapio.excluir_categoria(bebidas.id)
@@ -385,6 +403,23 @@ def test_desativar_produto_ja_desativado(cardapio, produto):
 def test_desativar_produto_exige_gerente(cardapio, produto, como_atendente):
     with pytest.raises(AcessoNegadoError):
         cardapio.desativar_produto(produto.id)
+
+
+def test_ativar_produto_reverte_soft_delete(cardapio, produto):
+    cardapio.desativar_produto(produto.id)
+    reativado = cardapio.ativar_produto(produto.id)
+
+    assert reativado.ativo is True
+
+
+def test_ativar_produto_ja_ativo(cardapio, produto):
+    with pytest.raises(RegraDeNegocioError):
+        cardapio.ativar_produto(produto.id)
+
+
+def test_ativar_produto_exige_gerente(cardapio, produto, como_atendente):
+    with pytest.raises(AcessoNegadoError):
+        cardapio.ativar_produto(produto.id)
 
 
 def test_excluir_produto_nunca_vendido(cardapio, categoria):

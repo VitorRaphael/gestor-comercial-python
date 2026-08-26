@@ -11,6 +11,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QSplitter,
@@ -127,16 +129,19 @@ class _CategoriasPainel(QWidget):
         self._botao_impressora = QPushButton("Impressora")
         self._botao_impressora.clicked.connect(self._associar_impressora)
         barra2.addWidget(self._botao_impressora)
-        self._botao_desativar = QPushButton("Desativar")
-        self._botao_desativar.setProperty("variante", "perigo")
-        self._botao_desativar.clicked.connect(self._desativar)
-        barra2.addWidget(self._botao_desativar)
+        self._botao_status = QPushButton("Desativar")
+        self._botao_status.setProperty("variante", "perigo")
+        self._botao_status.clicked.connect(self._alternar_status)
+        barra2.addWidget(self._botao_status)
         layout.addLayout(barra2)
 
         botao_excluir = QPushButton("Excluir categoria")
         botao_excluir.setProperty("variante", "perigo")
         botao_excluir.clicked.connect(self._excluir)
         layout.addWidget(botao_excluir)
+
+        QShortcut(QKeySequence("Ctrl+N"), self, self._criar)
+        QShortcut(QKeySequence(Qt.Key.Key_F2), self, self._editar)
 
     def atualizar(self) -> None:
         self._atualizar(manter_selecao=False)
@@ -151,10 +156,10 @@ class _CategoriasPainel(QWidget):
         self._lista.blockSignals(True)
         self._lista.clear()
         for categoria in self._categorias:
-            texto = categoria.nome if categoria.ativo else f"{categoria.nome} (desativada)"
-            item = QListWidgetItem(texto)
+            item = QListWidgetItem()
             item.setData(_ID_CATEGORIA, categoria.id)
             self._lista.addItem(item)
+            self._lista.setItemWidget(item, _criar_linha_categoria(categoria))
         self._lista.blockSignals(False)
 
         indice = 0
@@ -183,6 +188,12 @@ class _CategoriasPainel(QWidget):
 
     def _emitir_selecao(self, linha: int) -> None:
         categoria = self._categoria_atual() if linha >= 0 else None
+        self._botao_status.setEnabled(categoria is not None)
+        self._botao_status.setText(
+            "Ativar" if categoria is not None and not categoria.ativo else "Desativar"
+        )
+        self._botao_editar.setEnabled(categoria is not None)
+        self._botao_impressora.setEnabled(categoria is not None)
         self.categoria_selecionada.emit(categoria)
 
     def _criar(self) -> None:
@@ -233,13 +244,16 @@ class _CategoriasPainel(QWidget):
             return
         self.atualizar_mantendo_selecao()
 
-    def _desativar(self) -> None:
+    def _alternar_status(self) -> None:
         categoria = self._categoria_atual()
         if categoria is None:
             return
         self._mostrar_erro("")
         try:
-            self._service.desativar_categoria(categoria.id)
+            if categoria.ativo:
+                self._service.desativar_categoria(categoria.id)
+            else:
+                self._service.ativar_categoria(categoria.id)
         except _ERROS_SERVICE as erro:
             self._mostrar_erro(str(erro))
             return
@@ -249,6 +263,15 @@ class _CategoriasPainel(QWidget):
     def _excluir(self) -> None:
         categoria = self._categoria_atual()
         if categoria is None:
+            return
+        resposta = QMessageBox.question(
+            self,
+            "Excluir categoria",
+            f"Excluir a categoria '{categoria.nome}' permanentemente? Esta ação não pode ser desfeita.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if resposta != QMessageBox.StandardButton.Yes:
             return
         self._mostrar_erro("")
         try:
@@ -283,7 +306,15 @@ class _ProdutosPainel(QWidget):
         self._tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._tabela.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        cabecalho = self._tabela.horizontalHeader()
+        cabecalho.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for coluna in (1, 2, 3, 4):
+            cabecalho.setSectionResizeMode(coluna, QHeaderView.ResizeMode.Fixed)
+        self._tabela.setColumnWidth(1, 90)
+        self._tabela.setColumnWidth(2, 90)
+        self._tabela.setColumnWidth(3, 90)
+        self._tabela.setColumnWidth(4, 110)
+        self._tabela.verticalHeader().setDefaultSectionSize(36)
         self._tabela.currentCellChanged.connect(lambda *_: self._atualizar_botoes())
         layout.addWidget(self._tabela, stretch=1)
 
@@ -301,17 +332,21 @@ class _ProdutosPainel(QWidget):
         self._botao_combo.clicked.connect(self._gerenciar_combo)
         acoes.addWidget(self._botao_combo)
 
-        self._botao_desativar = QPushButton("Desativar")
-        self._botao_desativar.setProperty("variante", "perigo")
-        self._botao_desativar.clicked.connect(self._desativar)
-        acoes.addWidget(self._botao_desativar)
+        self._botao_status = QPushButton("Desativar")
+        self._botao_status.setProperty("variante", "perigo")
+        self._botao_status.clicked.connect(self._alternar_status)
+        acoes.addWidget(self._botao_status)
 
         self._botao_excluir = QPushButton("Excluir")
         self._botao_excluir.setProperty("variante", "perigo")
+        self._botao_excluir.setShortcut(QKeySequence(Qt.Key.Key_Delete))
         self._botao_excluir.clicked.connect(self._excluir)
         acoes.addWidget(self._botao_excluir)
         acoes.addStretch()
         layout.addLayout(acoes)
+
+        QShortcut(QKeySequence("Ctrl+N"), self, self._criar)
+        QShortcut(QKeySequence(Qt.Key.Key_F2), self, self._editar)
 
         self._atualizar_botoes()
 
@@ -342,8 +377,7 @@ class _ProdutosPainel(QWidget):
             self._tabela.setCellWidget(linha, 1, _criar_badge_tipo(produto.is_combo))
             self._tabela.setItem(linha, 2, QTableWidgetItem(_formatar_reais(produto.preco)))
             self._tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(produto.custo)))
-            status = "Ativo" if produto.ativo else "Desativado"
-            self._tabela.setItem(linha, 4, QTableWidgetItem(status))
+            self._tabela.setCellWidget(linha, 4, _criar_badge_status(produto.ativo))
 
         self._atualizar_botoes()
 
@@ -357,7 +391,8 @@ class _ProdutosPainel(QWidget):
         produto = self._produto_selecionado()
         self._botao_novo.setEnabled(self._categoria is not None)
         self._botao_editar.setEnabled(produto is not None)
-        self._botao_desativar.setEnabled(produto is not None)
+        self._botao_status.setEnabled(produto is not None)
+        self._botao_status.setText("Ativar" if produto is not None and not produto.ativo else "Desativar")
         self._botao_excluir.setEnabled(produto is not None)
         self._botao_combo.setEnabled(produto is not None)
 
@@ -431,13 +466,16 @@ class _ProdutosPainel(QWidget):
         self.atualizar()
         self.alterado.emit()
 
-    def _desativar(self) -> None:
+    def _alternar_status(self) -> None:
         produto = self._produto_selecionado()
         if produto is None:
             return
         self._mostrar_erro("")
         try:
-            self._service.desativar_produto(produto.id)
+            if produto.ativo:
+                self._service.desativar_produto(produto.id)
+            else:
+                self._service.ativar_produto(produto.id)
         except _ERROS_SERVICE as erro:
             self._mostrar_erro(str(erro))
             return
@@ -447,6 +485,15 @@ class _ProdutosPainel(QWidget):
     def _excluir(self) -> None:
         produto = self._produto_selecionado()
         if produto is None:
+            return
+        resposta = QMessageBox.question(
+            self,
+            "Excluir produto",
+            f"Excluir o produto '{produto.nome}' permanentemente? Esta ação não pode ser desfeita.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if resposta != QMessageBox.StandardButton.Yes:
             return
         self._mostrar_erro("")
         try:
@@ -708,10 +755,58 @@ class _ComponenteDialog(QDialog):
         return self._seletor_produto.currentData(), self._campo_quantidade.value()
 
 
-def _criar_badge_tipo(is_combo: bool) -> QLabel:
+def _criar_linha_categoria(categoria: Categoria) -> QWidget:
+    """Linha da lista de categorias: nome à esquerda, badge de status à direita."""
+    linha = QWidget()
+    layout = QHBoxLayout(linha)
+    layout.setContentsMargins(4, 0, 4, 0)
+    layout.addWidget(QLabel(categoria.nome), stretch=1)
+    layout.addWidget(_criar_badge_status(categoria.ativo))
+    return linha
+
+
+def _celula_centralizada(widget: QWidget) -> QWidget:
+    """Envolve um badge para uso em `setCellWidget`.
+
+    `setCellWidget` estica o widget pra ocupar a célula inteira; sem isso o
+    QLabel do badge herdaria o fundo escuro padrão de QWidget (base.qss) e
+    pintaria a célula toda, virando uma barra sólida em vez de um selo
+    compacto centralizado.
+    """
+    celula = QWidget()
+    celula.setStyleSheet("background: transparent;")
+    layout = QHBoxLayout(celula)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    layout.addWidget(widget)
+    return celula
+
+
+def _criar_badge_status(ativo: bool) -> QWidget:
+    """Etiqueta de status: verde para ATIVO, cinza/vermelho para DESATIVADO."""
+    label = QLabel("ATIVO" if ativo else "DESATIVADO")
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    if ativo:
+        cor_fundo, cor_texto = "#16a34a", "#f0fdf4"
+    else:
+        cor_fundo, cor_texto = "#57534e", "#fafaf9"
+    label.setStyleSheet(
+        f"background-color: {cor_fundo};"
+        f"color: {cor_texto};"
+        "font-weight: 700;"
+        "font-size: 11px;"
+        "border-radius: 4px;"
+        "padding: 3px 10px;"
+        "margin: 0px;"
+    )
+    return _celula_centralizada(label)
+
+
+def _criar_badge_tipo(is_combo: bool) -> QWidget:
     """Etiqueta "COMBO" (âmbar/contrastante) na coluna Tipo; produto comum fica em branco."""
     label = QLabel("COMBO" if is_combo else "")
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    label.setStyleSheet("background: transparent;")
     if is_combo:
         label.setStyleSheet(
             "background-color: #f59e0b;"
@@ -719,10 +814,10 @@ def _criar_badge_tipo(is_combo: bool) -> QLabel:
             "font-weight: 700;"
             "font-size: 11px;"
             "border-radius: 4px;"
-            "padding: 2px 8px;"
-            "margin: 3px;"
+            "padding: 3px 10px;"
+            "margin: 0px;"
         )
-    return label
+    return _celula_centralizada(label)
 
 
 def _formatar_reais(valor: Decimal) -> str:

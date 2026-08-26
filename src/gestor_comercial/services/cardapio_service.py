@@ -101,6 +101,17 @@ class CardapioService:
         self.uow.commit()
         return categoria
 
+    def ativar_categoria(self, categoria_id: int) -> Categoria:
+        self.auth.exigir_gerente()
+        categoria = self.buscar_categoria(categoria_id)
+        if categoria.ativo:
+            raise RegraDeNegocioError(f"A categoria '{categoria.nome}' já está ativa.")
+
+        categoria.ativo = True
+        self.uow.categorias.salvar(categoria)
+        self.uow.commit()
+        return categoria
+
     def excluir_categoria(self, categoria_id: int) -> None:
         self.auth.exigir_gerente()
         categoria = self.buscar_categoria(categoria_id)
@@ -204,6 +215,17 @@ class CardapioService:
             raise RegraDeNegocioError(f"O produto '{produto.nome}' já está desativado.")
 
         produto.ativo = False
+        self.uow.produtos.salvar(produto)
+        self.uow.commit()
+        return produto
+
+    def ativar_produto(self, produto_id: int) -> Produto:
+        self.auth.exigir_gerente()
+        produto = self.buscar_produto(produto_id)
+        if produto.ativo:
+            raise RegraDeNegocioError(f"O produto '{produto.nome}' já está ativo.")
+
+        produto.ativo = True
         self.uow.produtos.salvar(produto)
         self.uow.commit()
         return produto
