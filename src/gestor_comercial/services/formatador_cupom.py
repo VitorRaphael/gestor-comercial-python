@@ -158,6 +158,34 @@ def linha_de_item(
     return linhas
 
 
+def linha_de_venda(
+    quantidade: int, nome: str, valor_unitario: Decimal | int | str, largura: int
+) -> list[str]:
+    """'12x Coca-Cola Lata' com '(un: R$ 7,00) = R$ 84,00' encostado na direita.
+
+    Diferente de `linha_de_item` (que só mostra o total), esta linha existe
+    para a seção "ITENS VENDIDOS NO TURNO", onde o operador confere tanto o
+    preço praticado quanto o subtotal do produto sem precisar fazer conta.
+
+    Numa bobina larga o nome e o detalhe cabem na mesma linha. Numa bobina
+    estreita (32 colunas, a mais comum), truncar o nome pra abrir espaço pro
+    detalhe deixaria "X-Burger Espec" ilegível — em vez disso o nome quebra
+    inteiro e o detalhe desce pra linha(s) seguinte(s), recuado como uma
+    observação de item.
+    """
+    titulo = f"{quantidade}x {nome}".strip()
+    unitario = moeda(valor_unitario)
+    subtotal = moeda(dinheiro(dinheiro(valor_unitario) * quantidade))
+    detalhe = f"(un: R$ {unitario}) = R$ {subtotal}"
+
+    if len(titulo) + 1 + len(detalhe) <= int(largura):
+        return [duas_colunas(titulo, detalhe, largura)]
+
+    linhas = quebrar(titulo, largura) or [titulo]
+    linhas.extend(quebrar(detalhe, largura, recuo=RECUO))
+    return linhas
+
+
 def linha_secundaria(texto: str | None, largura: int, prefixo: str = "") -> list[str]:
     """Observação ou descrição pendurada no item, recuada e quebrada na largura.
 

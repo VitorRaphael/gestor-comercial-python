@@ -848,3 +848,87 @@ def test_resumo_cancelamentos_ignora_cancelamentos_de_outro_caixa(
 def test_resumo_cancelamentos_de_caixa_inexistente(caixas):
     with pytest.raises(RecursoNaoEncontradoError):
         caixas.resumo_cancelamentos(999)
+
+
+# ----------------------------------------------------------------------
+# resumo_vendas (ITENS VENDIDOS NO TURNO)
+# ----------------------------------------------------------------------
+
+
+def test_resumo_vendas_sem_nenhuma_venda(caixas, caixa_aberto):
+    assert caixas.resumo_vendas(caixa_aberto.id) == []
+
+
+def test_resumo_vendas_traz_quantidade_valor_unitario_e_subtotal(
+    uow, caixas, gerente, caixa_aberto, produto
+):
+    comanda = _nova_comanda(uow, caixa_aberto, gerente)
+    _novo_item(uow, comanda, produto, quantidade=3)
+
+    resumo = caixas.resumo_vendas(caixa_aberto.id)
+
+    assert len(resumo) == 1
+    item = resumo[0]
+    assert item.produto_nome == produto.nome
+    assert item.quantidade == 3
+    assert item.valor_unitario == produto.preco
+    assert item.valor_total == dinheiro(produto.preco * 3)
+
+
+def test_resumo_vendas_consolida_por_produto(uow, caixas, gerente, caixa_aberto, categoria):
+    from gestor_comercial.domain.produto import Produto
+
+    x_burger = uow.produtos.salvar(
+        Produto(nome="X-Burger Especial", preco=Decimal("28.00"), categoria_id=categoria.id)
+    )
+    coca = uow.produtos.salvar(
+        Produto(nome="Coca-Cola Lata", preco=Decimal("7.00"), categoria_id=categoria.id)
+    )
+    comanda = _nova_comanda(uow, caixa_aberto, gerente)
+    _novo_item(uow, comanda, x_burger, quantidade=8)
+    _novo_item(uow, comanda, coca, quantidade=12)
+
+    resumo = caixas.resumo_vendas(caixa_aberto.id)
+
+    por_nome = {item.produto_nome: item for item in resumo}
+    assert por_nome["X-Burger Especial"].quantidade == 8
+    assert por_nome["X-Burger Especial"].valor_total == Decimal("224.00")
+    assert por_nome["Coca-Cola Lata"].quantidade == 12
+    assert por_nome["Coca-Cola Lata"].valor_total == Decimal("84.00")
+
+
+def test_resumo_vendas_soma_o_mesmo_produto_lancado_em_pedidos_separados(
+    uow, caixas, gerente, caixa_aberto, produto
+):
+    comanda = _nova_comanda(uow, caixa_aberto, gerente)
+    _novo_item(uow, comanda, produto, quantidade=1)
+    _novo_item(uow, comanda, produto, quantidade=2)
+
+    resumo = caixas.resumo_vendas(caixa_aberto.id)
+
+    assert len(resumo) == 1
+    assert resumo[0].quantidade == 3
+
+
+def test_resumo_vendas_ignora_itens_cancelados(uow, caixas, gerente, caixa_aberto, produto):
+    comanda = _nova_comanda(uow, caixa_aberto, gerente)
+    _item_cancelado(uow, comanda, produto, gerente, cancelado_em=datetime(2026, 8, 20, 19, 0))
+
+    resumo = caixas.resumo_vendas(caixa_aberto.id)
+
+    assert resumo == []
+
+
+def test_resumo_vendas_ignora_vendas_de_outro_caixa(uow, caixas, gerente, caixa_aberto, produto):
+    outro = _caixa_fechado(uow)
+    comanda_alheia = _nova_comanda(uow, outro, gerente, status=StatusComanda.FECHADA)
+    _novo_item(uow, comanda_alheia, produto)
+
+    resumo = caixas.resumo_vendas(caixa_aberto.id)
+
+    assert resumo == []
+
+
+def test_resumo_vendas_de_caixa_inexistente(caixas):
+    with pytest.raises(RecursoNaoEncontradoError):
+        caixas.resumo_vendas(999)

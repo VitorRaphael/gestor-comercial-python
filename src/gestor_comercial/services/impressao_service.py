@@ -42,6 +42,7 @@ from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.caixa_service import (
     FORMAS_MAQUININHA,
     CaixaService,
+    ItemVendidoPorProduto,
     ResumoCaixa,
     ResumoCancelamentos,
 )
@@ -189,9 +190,10 @@ class ImpressaoService:
         # forma, movimentos da gaveta, saldo esperado e diferença. Recalcular
         # qualquer uma delas aqui criaria um relatório que diverge da tela.
         resumo = self._caixas.resumo(caixa.id)
+        resumo_vendas = self._caixas.resumo_vendas(caixa.id)
         resumo_cancelamentos = self._caixas.resumo_cancelamentos(caixa.id)
         documento = self._documento_fechamento(
-            caixa, resumo, resumo_cancelamentos, padrao, datetime.now()
+            caixa, resumo, resumo_vendas, resumo_cancelamentos, padrao, datetime.now()
         )
         return self._enviar(padrao, documento, 0)
 
@@ -461,6 +463,7 @@ class ImpressaoService:
         self,
         caixa: Caixa,
         resumo: ResumoCaixa,
+        resumo_vendas: list[ItemVendidoPorProduto],
         resumo_cancelamentos: ResumoCancelamentos,
         impressora: Impressora,
         agora: datetime,
@@ -565,6 +568,7 @@ class ImpressaoService:
             ):
                 documento.append(BlocoTexto(linha))
 
+        documento.extend(self._secao_vendas(resumo_vendas, largura))
         documento.extend(self._secao_cancelamentos(resumo_cancelamentos, largura))
 
         documento.append(BlocoTexto(cupom.separador(largura)))
@@ -586,6 +590,26 @@ class ImpressaoService:
             f"Conferido por: {self.auth.usuario_atual().nome}", largura
         ):
             documento.append(BlocoTexto(linha))
+        return documento
+
+    @staticmethod
+    def _secao_vendas(itens: list[ItemVendidoPorProduto], largura: int) -> Documento:
+        """'ITENS VENDIDOS NO TURNO': quantidade, preço unitário praticado e subtotal por produto."""
+        documento: Documento = [
+            BlocoTexto(cupom.separador(largura, titulo="ITENS VENDIDOS NO TURNO"))
+        ]
+
+        if not itens:
+            for linha in cupom.quebrar("Nenhum item vendido neste turno.", largura):
+                documento.append(BlocoTexto(linha))
+            return documento
+
+        for item in itens:
+            for linha in cupom.linha_de_venda(
+                item.quantidade, item.produto_nome, item.valor_unitario, largura
+            ):
+                documento.append(BlocoTexto(linha))
+
         return documento
 
     @staticmethod

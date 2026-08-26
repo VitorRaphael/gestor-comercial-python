@@ -52,6 +52,22 @@ def test_linha_de_item_sem_preco_e_o_cupom_da_cozinha():
     assert cupom.linha_de_item(3, "Coca-Cola", 32) == ["3x Coca-Cola"]
 
 
+def test_linha_de_venda_mostra_unitario_e_subtotal():
+    linhas = cupom.linha_de_venda(12, "Coca-Cola Lata", Decimal("7.00"), 48)
+
+    assert linhas == ["12x Coca-Cola Lata      (un: R$ 7,00) = R$ 84,00"]
+
+
+def test_linha_de_venda_em_bobina_estreita_manda_o_detalhe_pra_linha_de_baixo():
+    linhas = cupom.linha_de_venda(
+        1, "Combo Especial da Casa com Fritas Grandes", Decimal("39.90"), 32
+    )
+
+    assert all(len(linha) <= 32 for linha in linhas)
+    assert linhas[-1].endswith("39,90")
+    assert len(linhas) > 1
+
+
 def test_linha_secundaria_recua_e_ignora_texto_vazio():
     assert cupom.linha_secundaria("sem cebola", 32, prefixo="obs: ") == ["  obs: sem cebola"]
     assert cupom.linha_secundaria(None, 32) == []

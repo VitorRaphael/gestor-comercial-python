@@ -909,6 +909,33 @@ def item_cancelado(uow, comanda, produto, gerente, *, quantidade=1, cancelado_em
     )
 
 
+def test_fechamento_sem_venda_mostra_indicacao(uow, impressao, driver, gerente, caixa_aberto):
+    nova_impressora(uow, "Balcão", padrao=True)
+
+    impressao.imprimir_fechamento_caixa(caixa_aberto.id)
+    texto = driver.texto_de("Balcão")
+
+    assert "ITENS VENDIDOS NO TURNO" in texto
+    assert "Nenhum item vendido" in texto
+
+
+def test_fechamento_mostra_quantidade_unitario_e_subtotal_por_produto(
+    uow, impressao, driver, gerente, caixa_aberto, mesa
+):
+    nova_impressora(uow, "Balcão", padrao=True)
+    lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger Especial", "28.00")
+    comanda = nova_comanda(uow, caixa_aberto, gerente, mesa)
+    novo_item(uow, comanda, lanche, quantidade=8)
+
+    impressao.imprimir_fechamento_caixa(caixa_aberto.id)
+    texto = driver.texto_de("Balcão")
+
+    assert "ITENS VENDIDOS NO TURNO" in texto
+    assert "8x X-Burger Especial" in texto
+    assert "28,00" in texto
+    assert "224,00" in texto
+
+
 def test_fechamento_sem_cancelamento_mostra_indicacao(uow, impressao, driver, gerente, caixa_aberto):
     nova_impressora(uow, "Balcão", padrao=True)
 

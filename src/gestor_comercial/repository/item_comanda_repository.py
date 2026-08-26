@@ -23,6 +23,22 @@ class ItemComandaRepository(Repository[ItemComanda]):
         )
         return list(self.session.scalars(stmt))
 
+    def listar_vendidos_por_caixa(self, caixa_id: int) -> list[ItemComanda]:
+        """Itens não cancelados de qualquer comanda deste caixa, na ordem de lançamento.
+
+        Espelha `listar_cancelados_por_caixa`: mesmo join com `Comanda` porque
+        `ItemComanda` não guarda `caixa_id` diretamente. Usado pela seção
+        "ITENS VENDIDOS NO TURNO" do fechamento — só o que efetivamente vendeu,
+        por isso o filtro oposto ao de cancelados.
+        """
+        stmt = (
+            select(ItemComanda)
+            .join(Comanda, ItemComanda.comanda_id == Comanda.id)
+            .where(Comanda.caixa_id == caixa_id, ItemComanda.cancelado.is_(False))
+            .order_by(ItemComanda.id)
+        )
+        return list(self.session.scalars(stmt))
+
     def listar_por_comanda(self, comanda_id: int) -> list[ItemComanda]:
         stmt = select(ItemComanda).where(ItemComanda.comanda_id == comanda_id).order_by(ItemComanda.id)
         return list(self.session.scalars(stmt))

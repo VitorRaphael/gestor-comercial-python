@@ -82,6 +82,16 @@ class CancelamentoPorProduto:
 
 
 @dataclass(frozen=True)
+class ItemVendidoPorProduto:
+    """Total vendido de um produto no turno, para a seção 'ITENS VENDIDOS NO TURNO'."""
+
+    produto_nome: str
+    quantidade: int
+    valor_unitario: Decimal
+    valor_total: Decimal
+
+
+@dataclass(frozen=True)
 class ResumoCancelamentos:
     """Fotografia dos itens cancelados de um caixa, nos três níveis do relatório."""
 
@@ -340,6 +350,44 @@ class CaixaService:
             valor_contado=valor_contado,
             diferenca=None if valor_contado is None else dinheiro(valor_contado - saldo_esperado),
         )
+
+    # ------------------------------------------------------------------
+    # Itens vendidos no turno
+    # ------------------------------------------------------------------
+
+    def resumo_vendas(self, caixa_id: int) -> list[ItemVendidoPorProduto]:
+        """Itens vendidos no turno, consolidados por produto e preço praticado.
+
+        Chave é (produto, preço unitário congelado) e não só produto: se o
+        preço mudou no meio do turno, misturar as duas vendas numa linha só
+        mostraria um "valor unitário" que não corresponde a nenhuma venda real.
+        """
+        self.buscar(caixa_id)
+        itens = self.uow.itens.listar_vendidos_por_caixa(caixa_id)
+
+        por_produto: dict[tuple[int, Decimal], ItemVendidoPorProduto] = {}
+        for item in itens:
+            preco_unit = dinheiro(item.preco_unit_congelado)
+            chave = (item.produto_id, preco_unit)
+            valor = dinheiro(preco_unit * item.quantidade)
+
+            acumulado = por_produto.get(chave)
+            if acumulado is None:
+                por_produto[chave] = ItemVendidoPorProduto(
+                    produto_nome=item.produto.nome,
+                    quantidade=item.quantidade,
+                    valor_unitario=preco_unit,
+                    valor_total=valor,
+                )
+            else:
+                por_produto[chave] = ItemVendidoPorProduto(
+                    produto_nome=acumulado.produto_nome,
+                    quantidade=acumulado.quantidade + item.quantidade,
+                    valor_unitario=preco_unit,
+                    valor_total=dinheiro(acumulado.valor_total + valor),
+                )
+
+        return list(por_produto.values())
 
     # ------------------------------------------------------------------
     # Auditoria de itens cancelados (§ Auditoria de Itens Cancelados)
