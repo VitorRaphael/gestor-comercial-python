@@ -44,6 +44,7 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
 
 _COLUNAS_PRODUTOS = ["Produto", "Tipo", "Preço", "Custo", "Status"]
 _COLUNAS_COMPONENTES = ["Componente", "Quantidade"]
@@ -722,19 +723,22 @@ class _ProdutoDialog(QDialog):
 
 
 class _ComponenteDialog(QDialog):
-    """Modal de associação de componente a um combo: produto e quantidade."""
+    """Modal de associação de componente a um combo: busca instantânea de produto + quantidade."""
 
     def __init__(self, candidatos: list[Produto], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Adicionar componente")
+        self.setMinimumWidth(420)
+        self._produto_id: int | None = None
 
         layout = QVBoxLayout(self)
-        formulario = QFormLayout()
 
-        self._seletor_produto = QComboBox()
-        for produto in candidatos:
-            self._seletor_produto.addItem(produto.nome, produto.id)
-        formulario.addRow("Produto", self._seletor_produto)
+        self._busca = BuscaProdutoWidget(candidatos)
+        self._busca.produto_selecionado.connect(self._produto_selecionado)
+        self._busca.busca_cancelada.connect(self.reject)
+        layout.addWidget(self._busca)
+
+        formulario = QFormLayout()
 
         self._campo_quantidade = QSpinBox()
         self._campo_quantidade.setMinimum(1)
@@ -744,15 +748,21 @@ class _ComponenteDialog(QDialog):
 
         layout.addLayout(formulario)
 
-        botoes = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        botoes.accepted.connect(self.accept)
+        botoes = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
         botoes.rejected.connect(self.reject)
+
+        self._botao_adicionar = botoes.addButton("Adicionar", QDialogButtonBox.ButtonRole.AcceptRole)
+        self._botao_adicionar.setProperty("variante", "primario")
+        self._botao_adicionar.clicked.connect(self._busca.confirmar_selecionado)
+
         layout.addWidget(botoes)
 
+    def _produto_selecionado(self, produto_id: int) -> None:
+        self._produto_id = produto_id
+        self.accept()
+
     def resultado(self) -> tuple[int, int]:
-        return self._seletor_produto.currentData(), self._campo_quantidade.value()
+        return self._produto_id, self._campo_quantidade.value()
 
 
 def _criar_linha_categoria(categoria: Categoria) -> QWidget:
