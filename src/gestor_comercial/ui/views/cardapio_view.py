@@ -1,18 +1,18 @@
-"""Cardápio: CRUD de categorias, produtos e combos — porte visual da tela de
-cardápio do front-end web (`GESTOR COMERCIAL/.../desktop/js/app.js`, funções
-`salvarProduto`/`salvarCategoria`/`montarCombo`).
-
-Cadastrar, editar, desativar e excluir exigem gerente logado — quem barra
-isso é `CardapioService` (via `AuthService.exigir_gerente`); aqui só se
-mostra o erro que o service levantar.
+"""Cardápio: tela única com Categorias (esquerda) e Produtos da categoria
+selecionada (direita), ambos em ordem alfabética. Combo não é mais uma aba
+separada — é um Produto normal com `is_combo=True`, ligado a ele
+automaticamente pelo service assim que ganha o primeiro componente (ver
+`CardapioService.associar_componente`). Aqui só exibimos a badge "COMBO" e
+damos o botão "Gerenciar combo" pra abrir esse cadastro de componentes.
 """
 
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -21,9 +21,11 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QSpinBox,
-    QTabWidget,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -41,15 +43,21 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 
-_COLUNAS_CATEGORIAS = ["Nome", "Impressora", "Status"]
-_COLUNAS_PRODUTOS = ["Nome", "Categoria", "Preço", "Custo", "Combo", "Status"]
+_COLUNAS_PRODUTOS = ["Produto", "Tipo", "Preço", "Custo", "Status"]
 _COLUNAS_COMPONENTES = ["Componente", "Quantidade"]
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
+_ID_CATEGORIA = Qt.ItemDataRole.UserRole
+
+
+def _por_nome(itens: list) -> list:
+    """Ordem alfabética (A-Z) case-insensitive, como pedido na tela."""
+    return sorted(itens, key=lambda item: item.nome.lower())
+
 
 class CardapioView(QWidget):
-    """CRUD de categoria, produto e combo, em abas."""
+    """Cardápio unificado: categorias à esquerda, produtos da categoria à direita."""
 
     def __init__(self, cardapio_service: CardapioService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -61,35 +69,34 @@ class CardapioView(QWidget):
         self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
         layout.addWidget(self._label_erro)
 
-        self._abas = QTabWidget()
-        layout.addWidget(self._abas)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        layout.addWidget(splitter, stretch=1)
 
-        self._aba_categorias = _CategoriasTab(self._service, self._mostrar_erro)
-        self._aba_produtos = _ProdutosTab(self._service, self._mostrar_erro)
-        self._aba_combos = _CombosTab(self._service, self._mostrar_erro)
+        self._painel_categorias = _CategoriasPainel(self._service, self._mostrar_erro)
+        self._painel_produtos = _ProdutosPainel(self._service, self._mostrar_erro)
+        splitter.addWidget(self._painel_categorias)
+        splitter.addWidget(self._painel_produtos)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
 
-        self._abas.addTab(self._aba_categorias, "Categorias")
-        self._abas.addTab(self._aba_produtos, "Produtos")
-        self._abas.addTab(self._aba_combos, "Combos")
-
-        # Categoria/produto mudando numa aba pode afetar as combos de outra
-        # (nome exibido, lista de produtos disponíveis).
-        self._aba_categorias.alterado.connect(self._aba_produtos.atualizar)
-        self._aba_produtos.alterado.connect(self._aba_combos.atualizar)
+        self._painel_categorias.categoria_selecionada.connect(self._painel_produtos.exibir_categoria)
+        self._painel_categorias.alterado.connect(self._painel_produtos.atualizar)
+        self._painel_produtos.alterado.connect(self._painel_categorias.atualizar_mantendo_selecao)
 
         self.atualizar()
 
     def atualizar(self) -> None:
         self._label_erro.setText("")
-        self._aba_categorias.atualizar()
-        self._aba_produtos.atualizar()
-        self._aba_combos.atualizar()
+        self._painel_categorias.atualizar()
 
     def _mostrar_erro(self, mensagem: str) -> None:
         self._label_erro.setText(mensagem)
 
 
-class _CategoriasTab(QWidget):
+class _CategoriasPainel(QWidget):
+    """Bloco da esquerda: lista de categorias em ordem alfabética."""
+
+    categoria_selecionada = Signal(object)  # Categoria | None
     alterado = Signal()
 
     def __init__(self, service: CardapioService, mostrar_erro, parent: QWidget | None = None) -> None:
@@ -99,60 +106,84 @@ class _CategoriasTab(QWidget):
         self._categorias: list[Categoria] = []
 
         layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("<b>Categorias</b>"))
 
-        barra = QHBoxLayout()
-        barra.addStretch()
+        self._lista = QListWidget()
+        self._lista.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._lista.currentRowChanged.connect(self._emitir_selecao)
+        layout.addWidget(self._lista, stretch=1)
+
+        barra1 = QHBoxLayout()
         botao_nova = QPushButton("Nova categoria")
         botao_nova.setProperty("variante", "primario")
         botao_nova.clicked.connect(self._criar)
-        barra.addWidget(botao_nova)
-        layout.addLayout(barra)
-
-        self._tabela = QTableWidget(0, len(_COLUNAS_CATEGORIAS))
-        self._tabela.setHorizontalHeaderLabels(_COLUNAS_CATEGORIAS)
-        self._tabela.verticalHeader().setVisible(False)
-        self._tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._tabela.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self._tabela)
-
-        acoes = QHBoxLayout()
+        barra1.addWidget(botao_nova)
         self._botao_editar = QPushButton("Editar")
         self._botao_editar.clicked.connect(self._editar)
-        acoes.addWidget(self._botao_editar)
+        barra1.addWidget(self._botao_editar)
+        layout.addLayout(barra1)
 
-        self._botao_impressora = QPushButton("Associar impressora")
+        barra2 = QHBoxLayout()
+        self._botao_impressora = QPushButton("Impressora")
         self._botao_impressora.clicked.connect(self._associar_impressora)
-        acoes.addWidget(self._botao_impressora)
-
+        barra2.addWidget(self._botao_impressora)
         self._botao_desativar = QPushButton("Desativar")
         self._botao_desativar.setProperty("variante", "perigo")
         self._botao_desativar.clicked.connect(self._desativar)
-        acoes.addWidget(self._botao_desativar)
+        barra2.addWidget(self._botao_desativar)
+        layout.addLayout(barra2)
 
-        self._botao_excluir = QPushButton("Excluir")
-        self._botao_excluir.setProperty("variante", "perigo")
-        self._botao_excluir.clicked.connect(self._excluir)
-        acoes.addWidget(self._botao_excluir)
-        acoes.addStretch()
-        layout.addLayout(acoes)
+        botao_excluir = QPushButton("Excluir categoria")
+        botao_excluir.setProperty("variante", "perigo")
+        botao_excluir.clicked.connect(self._excluir)
+        layout.addWidget(botao_excluir)
 
     def atualizar(self) -> None:
-        self._categorias = self._service.listar_categorias()
-        self._tabela.setRowCount(len(self._categorias))
-        for linha, categoria in enumerate(self._categorias):
-            self._tabela.setItem(linha, 0, QTableWidgetItem(categoria.nome))
-            nome_impressora = categoria.impressora.nome if categoria.impressora else "—"
-            self._tabela.setItem(linha, 1, QTableWidgetItem(nome_impressora))
-            status = "Ativa" if categoria.ativo else "Desativada"
-            self._tabela.setItem(linha, 2, QTableWidgetItem(status))
+        self._atualizar(manter_selecao=False)
 
-    def _categoria_selecionada(self) -> Categoria | None:
-        linha = self._tabela.currentRow()
-        if linha < 0 or linha >= len(self._categorias):
+    def atualizar_mantendo_selecao(self) -> None:
+        self._atualizar(manter_selecao=True)
+
+    def _atualizar(self, *, manter_selecao: bool) -> None:
+        categoria_id_atual = self.categoria_selecionada_id() if manter_selecao else None
+        self._categorias = _por_nome(self._service.listar_categorias())
+
+        self._lista.blockSignals(True)
+        self._lista.clear()
+        for categoria in self._categorias:
+            texto = categoria.nome if categoria.ativo else f"{categoria.nome} (desativada)"
+            item = QListWidgetItem(texto)
+            item.setData(_ID_CATEGORIA, categoria.id)
+            self._lista.addItem(item)
+        self._lista.blockSignals(False)
+
+        indice = 0
+        if categoria_id_atual is not None:
+            for linha, categoria in enumerate(self._categorias):
+                if categoria.id == categoria_id_atual:
+                    indice = linha
+                    break
+        if self._categorias:
+            self._lista.setCurrentRow(indice)
+        else:
+            self._emitir_selecao(-1)
+
+    def categoria_selecionada_id(self) -> int | None:
+        item = self._lista.currentItem()
+        return item.data(_ID_CATEGORIA) if item is not None else None
+
+    def _categoria_atual(self) -> Categoria | None:
+        categoria_id = self.categoria_selecionada_id()
+        if categoria_id is None:
             return None
-        return self._categorias[linha]
+        for categoria in self._categorias:
+            if categoria.id == categoria_id:
+                return categoria
+        return None
+
+    def _emitir_selecao(self, linha: int) -> None:
+        categoria = self._categoria_atual() if linha >= 0 else None
+        self.categoria_selecionada.emit(categoria)
 
     def _criar(self) -> None:
         modal = _CategoriaDialog("Nova categoria", self)
@@ -168,7 +199,7 @@ class _CategoriasTab(QWidget):
         self.alterado.emit()
 
     def _editar(self) -> None:
-        categoria = self._categoria_selecionada()
+        categoria = self._categoria_atual()
         if categoria is None:
             return
         modal = _CategoriaDialog("Editar categoria", self, nome_inicial=categoria.nome)
@@ -180,11 +211,11 @@ class _CategoriasTab(QWidget):
         except _ERROS_SERVICE as erro:
             self._mostrar_erro(str(erro))
             return
-        self.atualizar()
+        self.atualizar_mantendo_selecao()
         self.alterado.emit()
 
     def _associar_impressora(self) -> None:
-        categoria = self._categoria_selecionada()
+        categoria = self._categoria_atual()
         if categoria is None:
             return
         impressoras = self._service.listar_impressoras()
@@ -200,10 +231,10 @@ class _CategoriasTab(QWidget):
         except _ERROS_SERVICE as erro:
             self._mostrar_erro(str(erro))
             return
-        self.atualizar()
+        self.atualizar_mantendo_selecao()
 
     def _desativar(self) -> None:
-        categoria = self._categoria_selecionada()
+        categoria = self._categoria_atual()
         if categoria is None:
             return
         self._mostrar_erro("")
@@ -212,11 +243,11 @@ class _CategoriasTab(QWidget):
         except _ERROS_SERVICE as erro:
             self._mostrar_erro(str(erro))
             return
-        self.atualizar()
+        self.atualizar_mantendo_selecao()
         self.alterado.emit()
 
     def _excluir(self) -> None:
-        categoria = self._categoria_selecionada()
+        categoria = self._categoria_atual()
         if categoria is None:
             return
         self._mostrar_erro("")
@@ -229,24 +260,22 @@ class _CategoriasTab(QWidget):
         self.alterado.emit()
 
 
-class _ProdutosTab(QWidget):
+class _ProdutosPainel(QWidget):
+    """Bloco da direita: produtos da categoria selecionada, em ordem alfabética."""
+
     alterado = Signal()
 
     def __init__(self, service: CardapioService, mostrar_erro, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._service = service
         self._mostrar_erro = mostrar_erro
+        self._categoria: Categoria | None = None
         self._produtos: list[Produto] = []
 
         layout = QVBoxLayout(self)
 
-        barra = QHBoxLayout()
-        barra.addStretch()
-        botao_novo = QPushButton("Novo produto")
-        botao_novo.setProperty("variante", "primario")
-        botao_novo.clicked.connect(self._criar)
-        barra.addWidget(botao_novo)
-        layout.addLayout(barra)
+        self._titulo = QLabel("<b>Produtos</b>")
+        layout.addWidget(self._titulo)
 
         self._tabela = QTableWidget(0, len(_COLUNAS_PRODUTOS))
         self._tabela.setHorizontalHeaderLabels(_COLUNAS_PRODUTOS)
@@ -255,12 +284,22 @@ class _ProdutosTab(QWidget):
         self._tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._tabela.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self._tabela)
+        self._tabela.currentCellChanged.connect(lambda *_: self._atualizar_botoes())
+        layout.addWidget(self._tabela, stretch=1)
 
         acoes = QHBoxLayout()
+        self._botao_novo = QPushButton("Novo produto")
+        self._botao_novo.setProperty("variante", "primario")
+        self._botao_novo.clicked.connect(self._criar)
+        acoes.addWidget(self._botao_novo)
+
         self._botao_editar = QPushButton("Editar")
         self._botao_editar.clicked.connect(self._editar)
         acoes.addWidget(self._botao_editar)
+
+        self._botao_combo = QPushButton("Gerenciar combo")
+        self._botao_combo.clicked.connect(self._gerenciar_combo)
+        acoes.addWidget(self._botao_combo)
 
         self._botao_desativar = QPushButton("Desativar")
         self._botao_desativar.setProperty("variante", "perigo")
@@ -274,17 +313,39 @@ class _ProdutosTab(QWidget):
         acoes.addStretch()
         layout.addLayout(acoes)
 
+        self._atualizar_botoes()
+
+    def exibir_categoria(self, categoria: Categoria | None) -> None:
+        self._categoria = categoria
+        self.atualizar()
+
     def atualizar(self) -> None:
-        self._produtos = self._service.listar_produtos()
+        categoria = self._categoria
+        if categoria is not None:
+            # Categoria pode ter sido renomeada/desativada por fora; pega a versão atual.
+            todas = {c.id: c for c in self._service.listar_categorias()}
+            categoria = todas.get(categoria.id)
+            self._categoria = categoria
+
+        if categoria is None:
+            self._titulo.setText("<b>Produtos</b> — selecione uma categoria")
+            self._produtos = []
+        else:
+            self._titulo.setText(f"<b>Produtos de {categoria.nome}</b>")
+            self._produtos = _por_nome(
+                [p for p in self._service.listar_produtos() if p.categoria_id == categoria.id]
+            )
+
         self._tabela.setRowCount(len(self._produtos))
         for linha, produto in enumerate(self._produtos):
             self._tabela.setItem(linha, 0, QTableWidgetItem(produto.nome))
-            self._tabela.setItem(linha, 1, QTableWidgetItem(produto.categoria.nome))
+            self._tabela.setCellWidget(linha, 1, _criar_badge_tipo(produto.is_combo))
             self._tabela.setItem(linha, 2, QTableWidgetItem(_formatar_reais(produto.preco)))
             self._tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(produto.custo)))
-            self._tabela.setItem(linha, 4, QTableWidgetItem("Sim" if produto.is_combo else "Não"))
             status = "Ativo" if produto.ativo else "Desativado"
-            self._tabela.setItem(linha, 5, QTableWidgetItem(status))
+            self._tabela.setItem(linha, 4, QTableWidgetItem(status))
+
+        self._atualizar_botoes()
 
     def _produto_selecionado(self) -> Produto | None:
         linha = self._tabela.currentRow()
@@ -292,15 +353,24 @@ class _ProdutosTab(QWidget):
             return None
         return self._produtos[linha]
 
+    def _atualizar_botoes(self) -> None:
+        produto = self._produto_selecionado()
+        self._botao_novo.setEnabled(self._categoria is not None)
+        self._botao_editar.setEnabled(produto is not None)
+        self._botao_desativar.setEnabled(produto is not None)
+        self._botao_excluir.setEnabled(produto is not None)
+        self._botao_combo.setEnabled(produto is not None)
+
     def _categorias_ativas(self) -> list[Categoria]:
-        return self._service.listar_categorias_ativas()
+        return _por_nome(self._service.listar_categorias_ativas())
 
     def _criar(self) -> None:
         categorias = self._categorias_ativas()
         if not categorias:
             self._mostrar_erro("Cadastre uma categoria ativa antes de criar um produto.")
             return
-        modal = _ProdutoDialog("Novo produto", categorias, self)
+        categoria_inicial_id = self._categoria.id if self._categoria else None
+        modal = _ProdutoDialog("Novo produto", categorias, self, categoria_id_inicial=categoria_inicial_id)
         if modal.exec() != QDialog.DialogCode.Accepted:
             return
         try:
@@ -350,6 +420,17 @@ class _ProdutosTab(QWidget):
         self.atualizar()
         self.alterado.emit()
 
+    def _gerenciar_combo(self) -> None:
+        produto = self._produto_selecionado()
+        if produto is None:
+            return
+        candidatos = [p for p in self._service.listar_produtos_ativos() if p.id != produto.id]
+        modal = _ComboComponentesDialog(self._service, produto, candidatos, self)
+        modal.exec()
+        self._mostrar_erro("")
+        self.atualizar()
+        self.alterado.emit()
+
     def _desativar(self) -> None:
         produto = self._produto_selecionado()
         if produto is None:
@@ -377,22 +458,28 @@ class _ProdutosTab(QWidget):
         self.alterado.emit()
 
 
-class _CombosTab(QWidget):
-    def __init__(self, service: CardapioService, mostrar_erro, parent: QWidget | None = None) -> None:
+class _ComboComponentesDialog(QDialog):
+    """Cadastro de componentes de um combo (o produto já selecionado no painel)."""
+
+    def __init__(
+        self,
+        service: CardapioService,
+        combo: Produto,
+        candidatos: list[Produto],
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._service = service
-        self._mostrar_erro = mostrar_erro
-        self._combos: list[Produto] = []
+        self._combo = combo
+        self._candidatos = candidatos
         self._componentes: list[ComboItem] = []
+        self.setWindowTitle(f"Combo: {combo.nome}")
 
         layout = QVBoxLayout(self)
 
-        barra_combo = QHBoxLayout()
-        barra_combo.addWidget(QLabel("Combo"))
-        self._seletor_combo = QComboBox()
-        self._seletor_combo.currentIndexChanged.connect(self._atualizar_componentes)
-        barra_combo.addWidget(self._seletor_combo, stretch=1)
-        layout.addLayout(barra_combo)
+        self._label_erro = QLabel("")
+        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
+        layout.addWidget(self._label_erro)
 
         self._tabela = QTableWidget(0, len(_COLUNAS_COMPONENTES))
         self._tabela.setHorizontalHeaderLabels(_COLUNAS_COMPONENTES)
@@ -416,35 +503,19 @@ class _CombosTab(QWidget):
         acoes.addStretch()
         layout.addLayout(acoes)
 
-    def atualizar(self) -> None:
-        combo_selecionado_id = self._combo_id_selecionado()
-        self._combos = self._service.listar_produtos_ativos()
-        self._seletor_combo.blockSignals(True)
-        self._seletor_combo.clear()
-        for produto in self._combos:
-            self._seletor_combo.addItem(produto.nome, produto.id)
-        self._seletor_combo.blockSignals(False)
+        fechar = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        fechar.rejected.connect(self.accept)
+        fechar.button(QDialogButtonBox.StandardButton.Close).clicked.connect(self.accept)
+        layout.addWidget(fechar)
 
-        if combo_selecionado_id is not None:
-            indice = self._seletor_combo.findData(combo_selecionado_id)
-            if indice >= 0:
-                self._seletor_combo.setCurrentIndex(indice)
         self._atualizar_componentes()
 
-    def _combo_id_selecionado(self) -> int | None:
-        return self._seletor_combo.currentData()
-
     def _atualizar_componentes(self) -> None:
-        combo_id = self._combo_id_selecionado()
-        if combo_id is None:
-            self._componentes = []
-            self._tabela.setRowCount(0)
-            return
-        self._mostrar_erro("")
+        self._label_erro.setText("")
         try:
-            self._componentes = self._service.listar_componentes(combo_id)
+            self._componentes = self._service.listar_componentes(self._combo.id)
         except _ERROS_SERVICE as erro:
-            self._mostrar_erro(str(erro))
+            self._label_erro.setText(str(erro))
             self._componentes = []
         self._tabela.setRowCount(len(self._componentes))
         for linha, item in enumerate(self._componentes):
@@ -452,24 +523,20 @@ class _CombosTab(QWidget):
             self._tabela.setItem(linha, 1, QTableWidgetItem(str(item.quantidade)))
 
     def _adicionar_componente(self) -> None:
-        combo_id = self._combo_id_selecionado()
-        if combo_id is None:
-            self._mostrar_erro("Selecione um combo.")
-            return
-        candidatos = [produto for produto in self._combos if produto.id != combo_id]
+        candidatos = [p for p in self._candidatos if p.id != self._combo.id]
         if not candidatos:
-            self._mostrar_erro("Não há outro produto disponível para virar componente.")
+            self._label_erro.setText("Não há outro produto disponível para virar componente.")
             return
         modal = _ComponenteDialog(candidatos, self)
         if modal.exec() != QDialog.DialogCode.Accepted:
             return
         produto_id, quantidade = modal.resultado()
 
-        self._mostrar_erro("")
+        self._label_erro.setText("")
         try:
-            self._service.associar_componente(combo_id, produto_id, quantidade)
+            self._service.associar_componente(self._combo.id, produto_id, quantidade)
         except _ERROS_SERVICE as erro:
-            self._mostrar_erro(str(erro))
+            self._label_erro.setText(str(erro))
             return
         self._atualizar_componentes()
 
@@ -478,11 +545,11 @@ class _CombosTab(QWidget):
         if linha < 0 or linha >= len(self._componentes):
             return
         item = self._componentes[linha]
-        self._mostrar_erro("")
+        self._label_erro.setText("")
         try:
             self._service.remover_componente(item.id)
         except _ERROS_SERVICE as erro:
-            self._mostrar_erro(str(erro))
+            self._label_erro.setText(str(erro))
             return
         self._atualizar_componentes()
 
@@ -541,7 +608,11 @@ class _AssociarImpressoraDialog(QDialog):
 
 
 class _ProdutoDialog(QDialog):
-    """Modal de criação/edição de produto: nome, preço, custo, categoria e descrição."""
+    """Modal de criação/edição de produto: nome, preço, custo, categoria e descrição.
+
+    Não tem campo "é combo": isso o service decide sozinho, a partir de o
+    produto ter ou não componentes (ver `_ComboComponentesDialog`).
+    """
 
     def __init__(
         self,
@@ -635,6 +706,23 @@ class _ComponenteDialog(QDialog):
 
     def resultado(self) -> tuple[int, int]:
         return self._seletor_produto.currentData(), self._campo_quantidade.value()
+
+
+def _criar_badge_tipo(is_combo: bool) -> QLabel:
+    """Etiqueta "COMBO" (âmbar/contrastante) na coluna Tipo; produto comum fica em branco."""
+    label = QLabel("COMBO" if is_combo else "")
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    if is_combo:
+        label.setStyleSheet(
+            "background-color: #f59e0b;"
+            "color: #1c1917;"
+            "font-weight: 700;"
+            "font-size: 11px;"
+            "border-radius: 4px;"
+            "padding: 2px 8px;"
+            "margin: 3px;"
+        )
+    return label
 
 
 def _formatar_reais(valor: Decimal) -> str:
