@@ -12,6 +12,8 @@ from decimal import Decimal
 
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -25,7 +27,7 @@ from PySide6.QtWidgets import (
 
 from gestor_comercial.domain.caixa import Caixa
 from gestor_comercial.services.auth_service import AuthService
-from gestor_comercial.services.caixa_service import CaixaService
+from gestor_comercial.services.caixa_service import CaixaService, ResumoCancelamentos
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
     NaoAutorizadoError,
@@ -34,6 +36,7 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
+from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
 
 _COLUNAS = ["Fechamento", "Aberto em", "Fechado em", "Aberto por", "Fechado por", "Diferença"]
 
@@ -113,6 +116,11 @@ class HistoricoCaixaView(QWidget):
 
         rodape = QHBoxLayout()
         rodape.addStretch()
+        self._botao_cancelamentos = QPushButton("Ver cancelamentos")
+        self._botao_cancelamentos.setProperty("variante", "secundario")
+        self._botao_cancelamentos.clicked.connect(self._ver_cancelamentos)
+        rodape.addWidget(self._botao_cancelamentos)
+
         self._botao_reimprimir = QPushButton("Reimprimir fechamento")
         self._botao_reimprimir.setProperty("variante", "primario")
         self._botao_reimprimir.clicked.connect(self._reimprimir)
@@ -202,12 +210,50 @@ class HistoricoCaixaView(QWidget):
             return
         self._aviso_impressao.mostrar_um(resultado, contexto="Fechamento de caixa")
 
+    def _ver_cancelamentos(self) -> None:
+        self._label_erro.setText("")
+        caixa = self._caixa_selecionado()
+        if caixa is None:
+            self._label_erro.setText("Selecione um fechamento na lista para ver os cancelamentos.")
+            return
+
+        try:
+            titulo = self._caixas.titulo_fechamento(caixa.id)
+        except _ERROS_SERVICE:
+            titulo = f"Caixa {caixa.id}"
+        resumo = self._caixas.resumo_cancelamentos(caixa.id)
+
+        modal = _CancelamentosDialog(titulo, resumo, self)
+        modal.exec()
+
     @staticmethod
     def _ler_data(texto: str) -> date | None:
         limpo = texto.strip()
         if not limpo:
             return None
         return datetime.strptime(limpo, "%d/%m/%Y").date()
+
+
+class _CancelamentosDialog(QDialog):
+    """Modal com a auditoria de itens cancelados de um fechamento passado."""
+
+    def __init__(
+        self, titulo_fechamento: str, resumo: ResumoCancelamentos, parent: QWidget | None = None
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Itens cancelados — {titulo_fechamento}")
+        self.resize(640, 480)
+
+        layout = QVBoxLayout(self)
+        secao = SecaoCancelamentos()
+        secao.carregar(resumo)
+        layout.addWidget(secao)
+
+        botoes = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        botoes.rejected.connect(self.reject)
+        botoes.accepted.connect(self.accept)
+        botoes.button(QDialogButtonBox.StandardButton.Close).clicked.connect(self.accept)
+        layout.addWidget(botoes)
 
 
 def _formatar_data_hora(momento: datetime | None) -> str:

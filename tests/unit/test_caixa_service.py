@@ -713,3 +713,138 @@ def test_totais_por_forma_vazio_sem_venda(caixas, caixa_aberto):
 def test_totais_por_forma_de_caixa_inexistente(caixas):
     with pytest.raises(RecursoNaoEncontradoError):
         caixas.totais_por_forma(999)
+
+
+# ----------------------------------------------------------------------
+# resumo_cancelamentos (§ Auditoria de Itens Cancelados)
+# ----------------------------------------------------------------------
+
+
+def _item_cancelado(uow, comanda, produto, gerente, *, quantidade=1, cancelado_em, motivo="Erro de lançamento"):
+    return uow.itens.salvar(
+        ItemComanda(
+            quantidade=quantidade,
+            preco_unit_congelado=produto.preco,
+            cancelado=True,
+            cancelado_em=cancelado_em,
+            motivo_cancelamento=motivo,
+            cancelado_por_id=gerente.id,
+            comanda_id=comanda.id,
+            produto_id=produto.id,
+        )
+    )
+
+
+def test_resumo_cancelamentos_sem_nenhum_cancelamento(caixas, caixa_aberto):
+    resumo = caixas.resumo_cancelamentos(caixa_aberto.id)
+
+    assert resumo.caixa_id == caixa_aberto.id
+    assert resumo.quantidade_total == 0
+    assert resumo.valor_total == Decimal("0.00")
+    assert resumo.por_produto == []
+    assert resumo.detalhado == []
+
+
+def test_resumo_cancelamentos_totaliza_quantidade_e_valor(uow, caixas, gerente, caixa_aberto, produto):
+    comanda = _nova_comanda(uow, caixa_aberto, gerente)
+    _item_cancelado(uow, comanda, produto, gerente, quantidade=2, cancelado_em=datetime(2026, 8, 20, 19, 0))
+    _item_cancelado(uow, comanda, produto, gerente, quantidade=1, cancelado_em=datetime(2026, 8, 20, 19, 5))
+
+    resumo = caixas.resumo_cancelamentos(caixa_aberto.id)
+
+    # produto custa 10.00: 2 + 1 unidades cancelada = 3 un, 30.00 em impacto.
+    assert resumo.quantidade_total == 3
+    assert resumo.valor_total == Decimal("30.00")
+
+
+def test_resumo_cancelamentos_consolida_por_produto(uow, caixas, gerente, caixa_aberto, categoria):
+    from gestor_comercial.domain.produto import Produto
+
+    x_burger = uow.produtos.salvar(Produto(nome="X-Burger Especial", preco=Decimal("28.00"), categoria_id=categoria.id))
+    coca = uow.produtos.salvar(Produto(nome="Coca-Cola Lata", preco=Decimal("7.00"), categoria_id=categoria.id))
+    comanda = _nova_comanda(uow, caixa_aberto, gerente)
+    _item_cancelado(uow, comanda, x_burger, gerente, quantidade=2, cancelado_em=datetime(2026, 8, 20, 19, 0))
+    _item_cancelado(uow, comanda, coca, gerente, quantidade=4, cancelado_em=datetime(2026, 8, 20, 19, 10))
+
+    resumo = caixas.resumo_cancelamentos(caixa_aberto.id)
+
+    por_nome = {item.produto_nome: item for item in resumo.por_produto}
+    assert por_nome["X-Burger Especial"].quantidade == 2
+    assert por_nome["X-Burger Especial"].valor == Decimal("56.00")
+    assert por_nome["Coca-Cola Lata"].quantidade == 4
+    assert por_nome["Coca-Cola Lata"].valor == Decimal("28.00")
+
+
+def test_resumo_cancelamentos_soma_o_mesmo_produto_cancelado_em_ocorrencias_separadas(
+    uow, caixas, gerente, caixa_aberto, produto
+):
+    comanda = _nova_comanda(uow, caixa_aberto, gerente)
+    _item_cancelado(uow, comanda, produto, gerente, cancelado_em=datetime(2026, 8, 20, 19, 0))
+    _item_cancelado(uow, comanda, produto, gerente, cancelado_em=datetime(2026, 8, 20, 19, 30))
+
+    resumo = caixas.resumo_cancelamentos(caixa_aberto.id)
+
+    assert len(resumo.por_produto) == 1
+    assert resumo.por_produto[0].quantidade == 2
+
+
+def test_resumo_cancelamentos_detalhado_traz_origem_horario_e_autorizacao(
+    uow, caixas, gerente, caixa_aberto, produto, mesa
+):
+    comanda_mesa = _nova_comanda(uow, caixa_aberto, gerente)
+    comanda_mesa.mesa_id = mesa.id
+    uow.comandas.salvar(comanda_mesa)
+    _item_cancelado(
+        uow, comanda_mesa, produto, gerente,
+        cancelado_em=datetime(2026, 8, 20, 19, 42),
+        motivo="Desistência do cliente",
+    )
+    comanda_balcao = _nova_comanda(uow, caixa_aberto, gerente)
+    _item_cancelado(uow, comanda_balcao, produto, gerente, cancelado_em=datetime(2026, 8, 20, 20, 0))
+
+    resumo = caixas.resumo_cancelamentos(caixa_aberto.id)
+
+    assert len(resumo.detalhado) == 2
+    da_mesa = resumo.detalhado[0]
+    assert da_mesa.quando == datetime(2026, 8, 20, 19, 42)
+    assert da_mesa.origem == "Mesa 01"
+    assert da_mesa.produto_nome == produto.nome
+    assert da_mesa.autorizado_por == "Gerente"
+    assert da_mesa.motivo == "Desistência do cliente"
+    assert resumo.detalhado[1].origem == f"Balcão #{comanda_balcao.id}"
+
+
+def test_resumo_cancelamentos_ordena_cronologicamente(uow, caixas, gerente, caixa_aberto, produto):
+    comanda = _nova_comanda(uow, caixa_aberto, gerente)
+    _item_cancelado(uow, comanda, produto, gerente, cancelado_em=datetime(2026, 8, 20, 20, 0), motivo="Segundo")
+    _item_cancelado(uow, comanda, produto, gerente, cancelado_em=datetime(2026, 8, 20, 19, 0), motivo="Primeiro")
+
+    resumo = caixas.resumo_cancelamentos(caixa_aberto.id)
+
+    assert [item.motivo for item in resumo.detalhado] == ["Primeiro", "Segundo"]
+
+
+def test_resumo_cancelamentos_ignora_itens_nao_cancelados(uow, caixas, gerente, caixa_aberto, produto):
+    comanda = _nova_comanda(uow, caixa_aberto, gerente)
+    _novo_item(uow, comanda, produto)
+
+    resumo = caixas.resumo_cancelamentos(caixa_aberto.id)
+
+    assert resumo.quantidade_total == 0
+
+
+def test_resumo_cancelamentos_ignora_cancelamentos_de_outro_caixa(
+    uow, caixas, gerente, caixa_aberto, produto
+):
+    outro = _caixa_fechado(uow)
+    comanda_alheia = _nova_comanda(uow, outro, gerente, status=StatusComanda.FECHADA)
+    _item_cancelado(uow, comanda_alheia, produto, gerente, cancelado_em=datetime(2026, 8, 19, 20, 0))
+
+    resumo = caixas.resumo_cancelamentos(caixa_aberto.id)
+
+    assert resumo.quantidade_total == 0
+
+
+def test_resumo_cancelamentos_de_caixa_inexistente(caixas):
+    with pytest.raises(RecursoNaoEncontradoError):
+        caixas.resumo_cancelamentos(999)

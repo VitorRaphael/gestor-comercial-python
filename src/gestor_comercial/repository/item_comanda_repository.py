@@ -1,11 +1,27 @@
 from sqlalchemy import exists, select
 
+from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.item_comanda import ItemComanda
 from gestor_comercial.repository.base import Repository
 
 
 class ItemComandaRepository(Repository[ItemComanda]):
     modelo = ItemComanda
+
+    def listar_cancelados_por_caixa(self, caixa_id: int) -> list[ItemComanda]:
+        """Itens cancelados de qualquer comanda deste caixa, na ordem em que foram cancelados.
+
+        Usado pela auditoria de cancelamentos do fechamento (§3.9.2): junta com
+        `Comanda` porque `ItemComanda` não guarda `caixa_id` diretamente — quem
+        pertence a um caixa é a comanda, o item só herda isso por tabela.
+        """
+        stmt = (
+            select(ItemComanda)
+            .join(Comanda, ItemComanda.comanda_id == Comanda.id)
+            .where(Comanda.caixa_id == caixa_id, ItemComanda.cancelado.is_(True))
+            .order_by(ItemComanda.cancelado_em)
+        )
+        return list(self.session.scalars(stmt))
 
     def listar_por_comanda(self, comanda_id: int) -> list[ItemComanda]:
         stmt = select(ItemComanda).where(ItemComanda.comanda_id == comanda_id).order_by(ItemComanda.id)

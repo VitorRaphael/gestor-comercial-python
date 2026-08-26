@@ -43,6 +43,7 @@ from gestor_comercial.services.caixa_service import (
     FORMAS_MAQUININHA,
     CaixaService,
     ResumoCaixa,
+    ResumoCancelamentos,
 )
 from gestor_comercial.services.comanda_service import ComandaService
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
@@ -188,7 +189,10 @@ class ImpressaoService:
         # forma, movimentos da gaveta, saldo esperado e diferença. Recalcular
         # qualquer uma delas aqui criaria um relatório que diverge da tela.
         resumo = self._caixas.resumo(caixa.id)
-        documento = self._documento_fechamento(caixa, resumo, padrao, datetime.now())
+        resumo_cancelamentos = self._caixas.resumo_cancelamentos(caixa.id)
+        documento = self._documento_fechamento(
+            caixa, resumo, resumo_cancelamentos, padrao, datetime.now()
+        )
         return self._enviar(padrao, documento, 0)
 
     # ------------------------------------------------------------------
@@ -454,7 +458,12 @@ class ImpressaoService:
         return documento
 
     def _documento_fechamento(
-        self, caixa: Caixa, resumo: ResumoCaixa, impressora: Impressora, agora: datetime
+        self,
+        caixa: Caixa,
+        resumo: ResumoCaixa,
+        resumo_cancelamentos: ResumoCancelamentos,
+        impressora: Impressora,
+        agora: datetime,
     ) -> Documento:
         """Relatório de conferência da gaveta, com os números do `CaixaService`."""
         largura = cupom.largura_util(impressora.colunas)
@@ -556,6 +565,8 @@ class ImpressaoService:
             ):
                 documento.append(BlocoTexto(linha))
 
+        documento.extend(self._secao_cancelamentos(resumo_cancelamentos, largura))
+
         documento.append(BlocoTexto(cupom.separador(largura)))
         situacao = "FECHADO" if caixa.status is StatusCaixa.FECHADO else "ABERTO"
         documento.append(BlocoTexto(cupom.duas_colunas("Situação", situacao, largura)))
@@ -575,6 +586,55 @@ class ImpressaoService:
             f"Conferido por: {self.auth.usuario_atual().nome}", largura
         ):
             documento.append(BlocoTexto(linha))
+        return documento
+
+    @staticmethod
+    def _secao_cancelamentos(resumo: ResumoCancelamentos, largura: int) -> Documento:
+        """'ITENS CANCELADOS NO TURNO': totalizador, consolidado por produto e log cronológico.
+
+        Os três níveis da auditoria de estornos (§ Auditoria de Itens
+        Cancelados): quanto sumiu no total, o que sumiu por produto, e quem
+        autorizou cada ocorrência — nesta ordem, do resumo pro detalhe.
+        """
+        documento: Documento = [
+            BlocoTexto(cupom.separador(largura, titulo="ITENS CANCELADOS NO TURNO"))
+        ]
+
+        if resumo.quantidade_total == 0:
+            for linha in cupom.quebrar("Nenhum item cancelado neste turno.", largura):
+                documento.append(BlocoTexto(linha))
+            return documento
+
+        documento.append(
+            BlocoTexto(
+                cupom.duas_colunas("Qtd cancelada", f"{resumo.quantidade_total} un", largura)
+            )
+        )
+        documento.append(
+            BlocoTexto(cupom.linha_de_valor("Valor cancelado", resumo.valor_total, largura), negrito=True)
+        )
+
+        documento.append(BlocoTexto(cupom.separador(largura, titulo="Por produto")))
+        for produto in resumo.por_produto:
+            for linha in cupom.linha_de_item(
+                produto.quantidade, produto.produto_nome, largura, valor=produto.valor
+            ):
+                documento.append(BlocoTexto(linha))
+
+        documento.append(BlocoTexto(cupom.separador(largura, titulo="Detalhado")))
+        for ocorrencia in resumo.detalhado:
+            documento.append(
+                BlocoTexto(cupom.duas_colunas(cupom.hora(ocorrencia.quando), ocorrencia.origem, largura))
+            )
+            for linha in cupom.linha_de_item(ocorrencia.quantidade, ocorrencia.produto_nome, largura):
+                documento.append(BlocoTexto(linha))
+            for linha in cupom.linha_secundaria(
+                f"Autorizado por: {ocorrencia.autorizado_por}", largura
+            ):
+                documento.append(BlocoTexto(linha))
+            for linha in cupom.linha_secundaria(ocorrencia.motivo, largura, prefixo="Motivo: "):
+                documento.append(BlocoTexto(linha))
+
         return documento
 
     def _documento_teste(self, impressora: Impressora, agora: datetime) -> Documento:

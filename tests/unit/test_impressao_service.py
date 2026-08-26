@@ -890,6 +890,62 @@ def test_fechamento_separa_as_bandeiras_da_maquininha(
 
 
 # ----------------------------------------------------------------------
+# Auditoria de itens cancelados no cupom de fechamento
+# ----------------------------------------------------------------------
+
+
+def item_cancelado(uow, comanda, produto, gerente, *, quantidade=1, cancelado_em, motivo="Erro de lançamento"):
+    return uow.itens.salvar(
+        ItemComanda(
+            quantidade=quantidade,
+            preco_unit_congelado=produto.preco,
+            cancelado=True,
+            cancelado_em=cancelado_em,
+            motivo_cancelamento=motivo,
+            cancelado_por_id=gerente.id,
+            comanda_id=comanda.id,
+            produto_id=produto.id,
+        )
+    )
+
+
+def test_fechamento_sem_cancelamento_mostra_indicacao(uow, impressao, driver, gerente, caixa_aberto):
+    nova_impressora(uow, "Balcão", padrao=True)
+
+    impressao.imprimir_fechamento_caixa(caixa_aberto.id)
+    texto = driver.texto_de("Balcão")
+
+    assert "ITENS CANCELADOS NO TURNO" in texto
+    assert "Nenhum item cancelado" in texto
+
+
+def test_fechamento_mostra_auditoria_de_cancelamentos(
+    uow, impressao, driver, gerente, caixa_aberto, mesa
+):
+    nova_impressora(uow, "Balcão", padrao=True)
+    lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger Especial", "28.00")
+    comanda = nova_comanda(uow, caixa_aberto, gerente, mesa)
+    item_cancelado(
+        uow, comanda, lanche, gerente,
+        quantidade=2,
+        cancelado_em=datetime(2026, 8, 21, 19, 42),
+        motivo="Desistência do cliente",
+    )
+
+    impressao.imprimir_fechamento_caixa(caixa_aberto.id)
+    texto = driver.texto_de("Balcão")
+
+    assert "ITENS CANCELADOS NO TURNO" in texto
+    assert "Qtd cancelada" in texto and "2 un" in texto
+    assert "Valor cancelado" in texto and "56,00" in texto
+    assert "X-Burger Especial" in texto
+    assert "19:42" in texto
+    assert "MESA 01" in texto.upper()
+    assert "Gerente" in texto
+    assert "Desistência do cliente" in texto
+
+
+# ----------------------------------------------------------------------
 # Teste de impressora e exceções que sobem
 # ----------------------------------------------------------------------
 

@@ -38,6 +38,7 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
+from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
 
 _COLUNAS_MOVIMENTOS = ["Quando", "Tipo", "Descrição", "Valor"]
 
@@ -129,6 +130,9 @@ class CaixaView(QWidget):
         self._tabela.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         layout_externo.addWidget(self._tabela)
 
+        self._secao_cancelamentos = SecaoCancelamentos()
+        layout_externo.addWidget(self._secao_cancelamentos)
+
     def atualizar(self) -> None:
         self._label_erro.setText("")
         self._aviso_impressao.limpar()
@@ -148,6 +152,7 @@ class CaixaView(QWidget):
         self._definir_acoes_disponiveis(caixa_aberto=True)
         self._atualizar_resumo()
         self._atualizar_movimentos()
+        self._atualizar_cancelamentos()
 
     def _definir_acoes_disponiveis(self, *, caixa_aberto: bool) -> None:
         self._botao_abrir.setEnabled(not caixa_aberto)
@@ -171,6 +176,13 @@ class CaixaView(QWidget):
         self._tabela.setRowCount(len(movimentos))
         for linha, movimento in enumerate(movimentos):
             self._preencher_linha(linha, movimento)
+
+    def _atualizar_cancelamentos(self) -> None:
+        if self._caixa_id is None:
+            return
+        self._secao_cancelamentos.carregar(
+            self._caixa_service.resumo_cancelamentos(self._caixa_id)
+        )
 
     def _preencher_linha(self, linha: int, movimento: MovimentoCaixa) -> None:
         quando = movimento.registrado_em.strftime("%d/%m %H:%M")

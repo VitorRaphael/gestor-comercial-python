@@ -55,6 +55,43 @@ class ResumoCaixa:
     diferenca: Decimal | None
 
 
+@dataclass(frozen=True)
+class ItemCanceladoDetalhe:
+    """Uma ocorrência individual de cancelamento (§ Auditoria de Itens Cancelados).
+
+    Nível 3 do relatório: o log cronológico linha a linha.
+    """
+
+    item_id: int
+    quando: datetime
+    origem: str
+    quantidade: int
+    produto_nome: str
+    valor: Decimal
+    autorizado_por: str
+    motivo: str | None
+
+
+@dataclass(frozen=True)
+class CancelamentoPorProduto:
+    """Nível 2 do relatório: total cancelado de um produto no turno."""
+
+    produto_nome: str
+    quantidade: int
+    valor: Decimal
+
+
+@dataclass(frozen=True)
+class ResumoCancelamentos:
+    """Fotografia dos itens cancelados de um caixa, nos três níveis do relatório."""
+
+    caixa_id: int
+    quantidade_total: int
+    valor_total: Decimal
+    por_produto: list[CancelamentoPorProduto]
+    detalhado: list[ItemCanceladoDetalhe]
+
+
 class CaixaService:
     """Abertura/fechamento do caixa, movimentos da gaveta e conferência (§3.9, §3.10)."""
 
@@ -303,6 +340,72 @@ class CaixaService:
             valor_contado=valor_contado,
             diferenca=None if valor_contado is None else dinheiro(valor_contado - saldo_esperado),
         )
+
+    # ------------------------------------------------------------------
+    # Auditoria de itens cancelados (§ Auditoria de Itens Cancelados)
+    # ------------------------------------------------------------------
+
+    def resumo_cancelamentos(self, caixa_id: int) -> ResumoCancelamentos:
+        """Itens cancelados no turno, nos três níveis: totalizador, por produto e detalhado.
+
+        Só considera itens de comandas deste caixa, o que já garante o
+        intervalo `aberto_em`–`fechado_em`: uma comanda só existe dentro do
+        caixa em que foi aberta (`Comanda.caixa_id`), então não há como um
+        cancelamento de outro turno vazar para aqui.
+        """
+        self.buscar(caixa_id)
+        itens = self.uow.itens.listar_cancelados_por_caixa(caixa_id)
+
+        quantidade_total = 0
+        valor_total = ZERO
+        por_produto: dict[int, CancelamentoPorProduto] = {}
+        detalhado: list[ItemCanceladoDetalhe] = []
+
+        for item in itens:
+            valor = dinheiro(dinheiro(item.preco_unit_congelado) * item.quantidade)
+            quantidade_total += item.quantidade
+            valor_total += valor
+
+            acumulado = por_produto.get(item.produto_id)
+            if acumulado is None:
+                por_produto[item.produto_id] = CancelamentoPorProduto(
+                    produto_nome=item.produto.nome, quantidade=item.quantidade, valor=valor
+                )
+            else:
+                por_produto[item.produto_id] = CancelamentoPorProduto(
+                    produto_nome=acumulado.produto_nome,
+                    quantidade=acumulado.quantidade + item.quantidade,
+                    valor=dinheiro(acumulado.valor + valor),
+                )
+
+            detalhado.append(
+                ItemCanceladoDetalhe(
+                    item_id=item.id,
+                    quando=item.cancelado_em,
+                    origem=self._origem_da_comanda(item.comanda),
+                    quantidade=item.quantidade,
+                    produto_nome=item.produto.nome,
+                    valor=valor,
+                    autorizado_por=item.cancelado_por.nome if item.cancelado_por else "—",
+                    motivo=item.motivo_cancelamento,
+                )
+            )
+
+        return ResumoCancelamentos(
+            caixa_id=caixa_id,
+            quantidade_total=quantidade_total,
+            valor_total=dinheiro(valor_total),
+            por_produto=list(por_produto.values()),
+            detalhado=detalhado,
+        )
+
+    @staticmethod
+    def _origem_da_comanda(comanda) -> str:
+        """'Mesa 04' ou 'Balcão #12' — de onde veio o item cancelado."""
+        mesa = getattr(comanda, "mesa", None)
+        if mesa is None:
+            return f"Balcão #{comanda.id}"
+        return f"Mesa {mesa.numero:02d}"
 
     # ------------------------------------------------------------------
 
