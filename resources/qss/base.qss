@@ -45,6 +45,46 @@ QLineEdit:focus {
   border: 1px solid #7c5cff;
 }
 
+/* ---------- Combo Box ---------- */
+
+QComboBox {
+  background: #1f2436;
+  border: 1px solid #2a2f47;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #f3f4f8;
+  font-size: 13px;
+}
+QComboBox:focus {
+  border: 1px solid #7c5cff;
+}
+QComboBox::drop-down {
+  border: none;
+  width: 24px;
+  background: transparent;
+}
+QComboBox::down-arrow {
+  image: none;
+  width: 0px;
+  height: 0px;
+}
+
+QComboBox QAbstractItemView {
+  background: #1f2436;
+  border: 1px solid #2a2f47;
+  border-radius: 8px;
+  color: #f3f4f8;
+  selection-background-color: #7c5cff;
+  selection-color: white;
+}
+QComboBox QAbstractItemView::item {
+  padding: 8px 12px;
+  border: none;
+}
+QComboBox QAbstractItemView::item:hover {
+  background: #2a2f47;
+}
+
 /* ---------- Sidebar ---------- */
 
 #sidebar {
