@@ -410,6 +410,8 @@ class _ProdutosPainel(QWidget):
         self._mostrar_erro("")
         while modal.exec() == QDialog.DialogCode.Accepted:
             nome, preco, custo, categoria_id, descricao = modal.resultado()
+            if self._produto_duplicado(nome) and not self._confirmar_duplicidade(nome):
+                continue
             try:
                 self._service.criar_produto(nome, preco, categoria_id, custo, descricao)
             except _ERROS_SERVICE as erro:
@@ -437,6 +439,8 @@ class _ProdutosPainel(QWidget):
         self._mostrar_erro("")
         while modal.exec() == QDialog.DialogCode.Accepted:
             nome, preco, custo, categoria_id, descricao = modal.resultado()
+            if self._produto_duplicado(nome, ignorar_id=produto.id) and not self._confirmar_duplicidade(nome):
+                continue
             try:
                 self._service.atualizar_produto(produto.id, nome, preco, custo, categoria_id, descricao)
             except _ERROS_SERVICE as erro:
@@ -445,6 +449,41 @@ class _ProdutosPainel(QWidget):
             self.atualizar()
             self.alterado.emit()
             return
+
+    def _produto_duplicado(self, nome: str, *, ignorar_id: int | None = None) -> bool:
+        """Compara nomes ignorando maiúsculas/minúsculas e espaços nas pontas.
+
+        Abrange ativos e desativados (`listar_produtos`, não só os ativos) —
+        um item desativado ainda representa o mesmo produto no catálogo.
+        """
+        alvo = nome.strip().casefold()
+        return any(
+            produto.nome.strip().casefold() == alvo
+            for produto in self._service.listar_produtos()
+            if produto.id != ignorar_id
+        )
+
+    def _confirmar_duplicidade(self, nome: str) -> bool:
+        """Soft-warning: pergunta se o cadastro duplicado é intencional.
+
+        Retorna True só se o usuário escolher "Criar Mesmo Assim". O modal de
+        cadastro por trás não é tocado — quem chama decide se reabre (mesma
+        instância, mesmos dados) ou segue com o salvamento.
+        """
+        caixa = QMessageBox(self)
+        caixa.setWindowTitle("Item Já Cadastrado")
+        caixa.setIcon(QMessageBox.Icon.Warning)
+        caixa.setText(
+            f"Já existe um item cadastrado com o nome \"{nome}\". "
+            "Deseja cadastrar este item duplicado mesmo assim?"
+        )
+        botao_voltar = caixa.addButton("Voltar e Editar", QMessageBox.ButtonRole.RejectRole)
+        botao_forcar = caixa.addButton("Criar Mesmo Assim", QMessageBox.ButtonRole.AcceptRole)
+        # Enter confirma o caminho seguro; só um clique deliberado força a duplicidade.
+        caixa.setDefaultButton(botao_voltar)
+        caixa.setEscapeButton(botao_voltar)
+        caixa.exec()
+        return caixa.clickedButton() is botao_forcar
 
     def _gerenciar_combo(self) -> None:
         produto = self._produto_selecionado()
