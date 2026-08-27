@@ -113,6 +113,20 @@ class ComandaService:
         """Mesas cadastradas, na ordem do número — usado pelo grid da tela inicial."""
         return self.uow.mesas.listar_todos()
 
+    @staticmethod
+    def hora_primeiro_envio(itens: list[ItemComanda]) -> datetime | None:
+        """Instante em que a cozinha viu o primeiro item da comanda.
+
+        Usado pela UI (grade de mesas e detalhe da comanda) para não fazer o
+        relógio de "tempo de espera" correr enquanto o pedido ainda é
+        rascunho — numa mesa grande, lançar todos os itens pode levar
+        minutos, e isso não é atraso de cozinha nenhum.
+        """
+        enviados = [
+            item.impresso_em for item in itens if not item.cancelado and item.impresso_em is not None
+        ]
+        return min(enviados) if enviados else None
+
     def calcular_total(self, comanda_id: int) -> Decimal:
         """Soma dos itens não cancelados, pelo preço congelado no lançamento."""
         self.buscar(comanda_id)

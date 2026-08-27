@@ -105,6 +105,36 @@ class ResumoCancelamentos:
 
 
 @dataclass(frozen=True)
+class LinhaConferenciaPagamento:
+    """Uma linha do 'Cabeçalho Financeiro' do comprovante de fechamento.
+
+    `esperado` é o que o sistema registrou como vendido naquela forma;
+    `conferido` é o que foi de fato contado na conferência. Hoje só o
+    Dinheiro tem contagem manual própria (a da gaveta) — Cartão/PIX não têm
+    uma conferência independente no sistema, então `conferido` é igual a
+    `esperado` para elas e a diferença sai sempre zero. É uma limitação
+    conhecida, não um bug: se um dia existir conferência de maquininha por
+    forma, é aqui que ela entra.
+    """
+
+    forma: FormaPagamento | None  # None só na linha "Total".
+    rotulo: str
+    esperado: Decimal
+    conferido: Decimal | None
+    diferenca: Decimal | None
+
+
+@dataclass(frozen=True)
+class GrupoVendaCategoria:
+    """Itens vendidos de uma categoria no turno, com totalizador do grupo."""
+
+    categoria_nome: str
+    quantidade_total: int
+    valor_total: Decimal
+    itens: list[ItemVendidoPorProduto]
+
+
+@dataclass(frozen=True)
 class TotalPorFormaMensal:
     """Uma linha do breakdown de formas de pagamento do Dashboard Mensal."""
 
@@ -267,6 +297,16 @@ class CaixaService:
         """Fechamentos passados para a tela de Histórico, do mais recente pro mais antigo."""
         return self.uow.caixas.listar_historico(inicio=inicio, fim=fim, funcionario_id=funcionario_id)
 
+    def listar_historico_mensal(self, ano: int, mes: int) -> list[Caixa]:
+        """Fechamentos cuja COMPETÊNCIA (§ virada de noite) é o mês `ano`/`mes`.
+
+        Diferente de `listar_historico`: aqui o eixo é `aberto_em`, não
+        `fechado_em` — um caixa aberto às 23h e fechado de madrugada no dia
+        seguinte é reportado no dia (e mês) em que foi aberto. Usado pela
+        aba "Histórico Diário" da tela de Relatórios.
+        """
+        return self.uow.caixas.listar_por_mes_abertura(ano, mes)
+
     def titulo_fechamento(self, caixa_id: int) -> str:
         """'3º Fechamento do dia 26/08/2026' — identificação oficial do fechamento (§ sequência diária)."""
         caixa = self.buscar(caixa_id)
@@ -283,6 +323,66 @@ class CaixaService:
             if total > ZERO:
                 totais[forma] = total
         return totais
+
+    def conferencia_pagamentos(self, caixa_id: int) -> list[LinhaConferenciaPagamento]:
+        """Cabeçalho financeiro do comprovante: esperado x conferido x diferença.
+
+        Só o Dinheiro tem contagem manual própria (a da gaveta). A diferença
+        apurada em `resumo().diferenca` é toda atribuída à linha de Dinheiro
+        porque abertura, reforços, sangrias e despesas já entram exatas no
+        cálculo do saldo esperado — qualquer sobra/falta na gaveta só pode
+        vir do dinheiro em espécie que foi contado à mão. Cartão/PIX não têm
+        conferência manual independente hoje: `conferido` repete `esperado`
+        e a diferença sai zero.
+        """
+        resumo = self.resumo(caixa_id)
+        conferido_fechado = resumo.valor_contado is not None
+
+        linhas: list[LinhaConferenciaPagamento] = []
+        dinheiro_conferido = (
+            dinheiro(resumo.total_dinheiro + (resumo.diferenca or ZERO))
+            if conferido_fechado
+            else None
+        )
+        linhas.append(
+            LinhaConferenciaPagamento(
+                forma=FormaPagamento.DINHEIRO,
+                rotulo="Dinheiro",
+                esperado=resumo.total_dinheiro,
+                conferido=dinheiro_conferido,
+                diferenca=resumo.diferenca,
+            )
+        )
+
+        totais_forma = self.totais_por_forma(caixa_id)
+        for forma, rotulo in ((FormaPagamento.CREDITO, "Cartão Crédito"),
+                               (FormaPagamento.DEBITO, "Cartão Débito"),
+                               (FormaPagamento.PIX, "PIX")):
+            valor = totais_forma.get(forma, ZERO)
+            linhas.append(
+                LinhaConferenciaPagamento(
+                    forma=forma,
+                    rotulo=rotulo,
+                    esperado=valor,
+                    conferido=valor if conferido_fechado else None,
+                    diferenca=ZERO if conferido_fechado else None,
+                )
+            )
+
+        esperado_total = dinheiro(sum((linha.esperado for linha in linhas), ZERO))
+        conferido_total = (
+            dinheiro(sum((linha.conferido for linha in linhas), ZERO)) if conferido_fechado else None
+        )
+        linhas.append(
+            LinhaConferenciaPagamento(
+                forma=None,
+                rotulo="Total",
+                esperado=esperado_total,
+                conferido=conferido_total,
+                diferenca=resumo.diferenca,
+            )
+        )
+        return linhas
 
     # ------------------------------------------------------------------
     # Movimentos da gaveta (§3.10)
@@ -428,6 +528,55 @@ class CaixaService:
                 )
 
         return list(por_produto.values())
+
+    def resumo_vendas_por_categoria(self, caixa_id: int) -> list[GrupoVendaCategoria]:
+        """Itens vendidos no turno, agrupados por Categoria, para o comprovante digital.
+
+        Mesma consolidação de `resumo_vendas` (chave produto + preço
+        congelado), só que organizada em grupos por `Produto.categoria` para
+        a seção 'Produtos Vendidos' do comprovante. Categorias e produtos
+        saem em ordem alfabética — não há regra de negócio de destaque de
+        categoria, só previsibilidade na tela e no TXT exportado.
+        """
+        self.buscar(caixa_id)
+        itens = self.uow.itens.listar_vendidos_por_caixa(caixa_id)
+
+        por_categoria: dict[str, dict[tuple[int, Decimal], ItemVendidoPorProduto]] = {}
+        for item in itens:
+            categoria_nome = item.produto.categoria.nome
+            preco_unit = dinheiro(item.preco_unit_congelado)
+            chave = (item.produto_id, preco_unit)
+            valor = dinheiro(preco_unit * item.quantidade)
+
+            grupo = por_categoria.setdefault(categoria_nome, {})
+            acumulado = grupo.get(chave)
+            if acumulado is None:
+                grupo[chave] = ItemVendidoPorProduto(
+                    produto_nome=item.produto.nome,
+                    quantidade=item.quantidade,
+                    valor_unitario=preco_unit,
+                    valor_total=valor,
+                )
+            else:
+                grupo[chave] = ItemVendidoPorProduto(
+                    produto_nome=acumulado.produto_nome,
+                    quantidade=acumulado.quantidade + item.quantidade,
+                    valor_unitario=preco_unit,
+                    valor_total=dinheiro(acumulado.valor_total + valor),
+                )
+
+        grupos: list[GrupoVendaCategoria] = []
+        for categoria_nome in sorted(por_categoria):
+            itens_categoria = sorted(por_categoria[categoria_nome].values(), key=lambda i: i.produto_nome)
+            grupos.append(
+                GrupoVendaCategoria(
+                    categoria_nome=categoria_nome,
+                    quantidade_total=sum(i.quantidade for i in itens_categoria),
+                    valor_total=dinheiro(sum((i.valor_total for i in itens_categoria), ZERO)),
+                    itens=itens_categoria,
+                )
+            )
+        return grupos
 
     # ------------------------------------------------------------------
     # Auditoria de itens cancelados (§ Auditoria de Itens Cancelados)

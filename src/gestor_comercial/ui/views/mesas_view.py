@@ -100,9 +100,17 @@ class MesasView(QWidget):
                     (c for c in mesa.comandas if c.status is StatusComanda.ABERTA), None
                 )
                 if comanda_aberta is not None:
-                    minutos = int((datetime.now() - comanda_aberta.aberta_em).total_seconds() // 60)
-                    texto += f"\n⏱ {minutos} min" if minutos < 60 else f"\n⏱ {minutos // 60}h{minutos % 60:02d}"
-                    alerta = minutos >= 30
+                    # O relógio só corre a partir do primeiro item que a
+                    # cozinha de fato viu — enquanto o operador ainda está
+                    # lançando os itens (mesa grande, comanda em rascunho),
+                    # isso não é atraso nenhum.
+                    primeiro_envio = ComandaService.hora_primeiro_envio(comanda_aberta.itens)
+                    if primeiro_envio is not None:
+                        minutos = int((datetime.now() - primeiro_envio).total_seconds() // 60)
+                        texto += (
+                            f"\n⏱ {minutos} min" if minutos < 60 else f"\n⏱ {minutos // 60}h{minutos % 60:02d}"
+                        )
+                        alerta = minutos >= 30
 
             botao = QPushButton(texto)
             botao.setProperty("variante", "mesa")

@@ -13,8 +13,16 @@ dinheiro se estiverem erradas:
 
 1. Item de categoria sem impressora não pode sumir — vai pra padrão, e se não
    houver padrão vira aviso na tela, não silêncio.
-2. `impresso_em` só é marcado no que realmente saiu no papel, senão o item
-   some da via de acréscimo sem a cozinha nunca ter visto o pedido.
+2. `impresso_em` é marcado no clique de "Enviar Pedido", não no sucesso do
+   papel: persistência do pedido (o item sair de "Pendentes" e virar venda de
+   verdade) é a regra principal, e não pode depender de impressora ligada.
+   DIVERGÊNCIA de uma versão anterior deste service, que só marcava o que
+   saiu no papel — isso deixava o item preso em "Pendentes" para sempre
+   sempre que a categoria não tinha impressora configurada, travando o PDV
+   por causa de um problema de hardware/cadastro. Falha de impressão agora é
+   só o `ResultadoImpressao.sucesso=False` que vira aviso âmbar na tela; quem
+   quer repapelar usa "2ª via" (`reimprimir_comanda`), que não olha
+   `impresso_em` e não depende do pedido ainda estar pendente.
 3. Impressora quebrada não derruba a venda (RNF inegociável de §2): o cliente
    paga e vai embora mesmo que a cozinha tenha que ouvir o pedido gritado.
 """
@@ -127,16 +135,17 @@ class ImpressaoService:
             return []
 
         agora = datetime.now()
-        resultados, impressos = self._imprimir_grupos(comanda, itens, agora, segunda_via=False)
+        resultados = self._imprimir_grupos(comanda, itens, agora, segunda_via=False)
 
-        # `impresso_em` só nos grupos que saíram no papel. O grupo que falhou
-        # continua NULL e sai de novo no próximo clique — marcar antes de saber
-        # o resultado esconderia o item da cozinha para sempre.
-        if impressos:
-            for item in impressos:
-                item.impresso_em = agora
-                self.uow.itens.salvar(item)
-            self.uow.commit()  # commit único, depois de todos os grupos
+        # `impresso_em` marca TODOS os itens do lote, sucesso ou não: a
+        # confirmação do pedido (sair de "Pendentes") não pode ficar refém de
+        # impressora configurada/ligada. O item que não imprimiu já aparece
+        # em `resultados` com `sucesso=False` — a tela mostra isso como aviso
+        # âmbar (AvisoDeImpressao), nunca como bloqueio do lançamento.
+        for item in itens:
+            item.impresso_em = agora
+            self.uow.itens.salvar(item)
+        self.uow.commit()  # commit único, depois de todos os grupos
         return resultados
 
     def reimprimir_comanda(self, comanda_id: int) -> list[ResultadoImpressao]:
@@ -152,7 +161,7 @@ class ImpressaoService:
         if not itens:
             return []
 
-        resultados, _ = self._imprimir_grupos(comanda, itens, datetime.now(), segunda_via=True)
+        resultados = self._imprimir_grupos(comanda, itens, datetime.now(), segunda_via=True)
         return resultados
 
     # ------------------------------------------------------------------
@@ -223,10 +232,14 @@ class ImpressaoService:
         itens: list[ItemComanda],
         agora: datetime,
         segunda_via: bool,
-    ) -> tuple[list[ResultadoImpressao], list[ItemComanda]]:
-        """Imprime um cupom por impressora e devolve (resultados, itens que saíram)."""
+    ) -> list[ResultadoImpressao]:
+        """Imprime um cupom por impressora e devolve um resultado por grupo.
+
+        Quem chama decide o que fazer com o resultado — `imprimir_comanda`
+        confirma o pedido de qualquer jeito e só usa isto pra montar o aviso
+        na tela; nenhum item fica esperando o papel sair para virar venda.
+        """
         resultados: list[ResultadoImpressao] = []
-        impressos: list[ItemComanda] = []
 
         for grupo in self._agrupar_por_impressora(itens):
             if grupo.impressora is None:
@@ -241,12 +254,9 @@ class ImpressaoService:
                 continue
 
             documento = self._documento_producao(comanda, grupo, agora, segunda_via)
-            resultado = self._enviar(grupo.impressora, documento, len(grupo.itens))
-            resultados.append(resultado)
-            if resultado.sucesso:
-                impressos.extend(grupo.itens)
+            resultados.append(self._enviar(grupo.impressora, documento, len(grupo.itens)))
 
-        return resultados, impressos
+        return resultados
 
     def _agrupar_por_impressora(self, itens: list[ItemComanda]) -> list[_GrupoDeImpressao]:
         """Agrupa por `item.produto.categoria.impressora`, na ordem de lançamento.

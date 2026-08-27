@@ -14,15 +14,18 @@ from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -48,7 +51,10 @@ from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
 
-_COLUNAS = ["Descrição", "Preço", "Qtd", "Total", "Status", "Ações"]
+_COLUNAS = ["Descrição", "Preço", "Qtd", "Total", ""]
+# Largura suficiente para "Cancelar" em negrito 13px + padding do botão
+# (ver `QPushButton[variante="perigo"]` em resources/qss/base.qss).
+_LARGURA_COLUNA_ACAO = 110
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
 _NADA_NOVO_PARA_IMPRIMIR = (
@@ -103,12 +109,6 @@ class ComandaView(QWidget):
         self._botao_add_item.clicked.connect(self._abrir_modal_adicionar_item)
         cabecalho.addWidget(self._botao_add_item)
 
-        self._botao_imprimir = QPushButton("Imprimir")
-        self._botao_imprimir.setProperty("variante", "secundario")
-        self._botao_imprimir.setToolTip("Manda para a produção só o que ainda não foi impresso.")
-        self._botao_imprimir.clicked.connect(self._imprimir_producao)
-        cabecalho.addWidget(self._botao_imprimir)
-
         self._botao_segunda_via = QPushButton("2ª via")
         self._botao_segunda_via.setProperty("variante", "secundario")
         self._botao_segunda_via.setToolTip("Repete a comanda inteira, para cupom rasgado ou perdido.")
@@ -133,18 +133,46 @@ class ComandaView(QWidget):
         self._aviso_impressao = AvisoDeImpressao()
         layout_externo.addWidget(self._aviso_impressao)
 
-        self._tabela = QTableWidget(0, len(_COLUNAS))
-        self._tabela.setHorizontalHeaderLabels(_COLUNAS)
-        self._tabela.verticalHeader().setVisible(False)
-        self._tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._tabela.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        self._tabela.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        # Colunas de status/ação têm texto curto e fixo — ResizeToContents
-        # evita que o Qt encolha a coluna a ponto do texto do botão sumir
-        # (era o caso antes, com a coluna "" caindo pro tamanho mínimo).
-        self._tabela.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self._tabela.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        layout_externo.addWidget(self._tabela)
+        # ---------- Seção "Pendentes de Envio" ----------
+        self._secao_pendentes = QFrame()
+        self._secao_pendentes.setObjectName("secao-pendentes")
+        layout_pendentes = QVBoxLayout(self._secao_pendentes)
+
+        titulo_pendentes = QLabel("Itens Pendentes de Envio")
+        titulo_pendentes.setObjectName("titulo-secao-pendentes")
+        layout_pendentes.addWidget(titulo_pendentes)
+
+        self._tabela_pendentes = self._criar_tabela()
+        layout_pendentes.addWidget(self._tabela_pendentes)
+
+        rodape_pendentes = QHBoxLayout()
+        rodape_pendentes.addStretch()
+        self._botao_enviar_pedido = QPushButton("Enviar Pedido à Produção")
+        self._botao_enviar_pedido.setProperty("variante", "sucesso")
+        self._botao_enviar_pedido.setMinimumHeight(40)
+        self._botao_enviar_pedido.setToolTip(
+            "Manda para a produção todos os itens pendentes desta comanda. (Ctrl+Enter ou F5)"
+        )
+        self._botao_enviar_pedido.clicked.connect(self._imprimir_producao)
+        rodape_pendentes.addWidget(self._botao_enviar_pedido)
+        layout_pendentes.addLayout(rodape_pendentes)
+
+        layout_externo.addWidget(self._secao_pendentes)
+
+        # Atalhos de teclado para o envio em lote — guardados como atributos
+        # para não serem coletados pelo GC do Python.
+        self._atalho_enviar_ctrl_enter = QShortcut(QKeySequence("Ctrl+Return"), self)
+        self._atalho_enviar_ctrl_enter.activated.connect(self._imprimir_producao)
+        self._atalho_enviar_f5 = QShortcut(QKeySequence("F5"), self)
+        self._atalho_enviar_f5.activated.connect(self._imprimir_producao)
+
+        # ---------- Seção "Lançados" ----------
+        titulo_lancados = QLabel("Itens Lançados")
+        titulo_lancados.setObjectName("titulo-secao-lancados")
+        layout_externo.addWidget(titulo_lancados)
+
+        self._tabela_lancados = self._criar_tabela()
+        layout_externo.addWidget(self._tabela_lancados)
 
         linha_total = QHBoxLayout()
         linha_total.addStretch()
@@ -153,6 +181,22 @@ class ComandaView(QWidget):
         self._label_total.setStyleSheet("font-weight: 700; font-size: 16px;")
         linha_total.addWidget(self._label_total)
         layout_externo.addLayout(linha_total)
+
+    def _criar_tabela(self) -> QTableWidget:
+        tabela = QTableWidget(0, len(_COLUNAS))
+        tabela.setHorizontalHeaderLabels(_COLUNAS)
+        tabela.verticalHeader().setVisible(False)
+        tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        tabela.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        tabela.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        # Coluna de ação só tem `setCellWidget` (o botão), sem
+        # `QTableWidgetItem` nenhum — e `ResizeToContents` mede o texto do
+        # ITEM da coluna, não do widget nela. Sem item, a coluna encolhe pro
+        # mínimo e o texto do botão ("Cancelar"/"Remover") fica cortado.
+        # Largura fixa evita essa armadilha do Qt.
+        tabela.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        tabela.setColumnWidth(4, _LARGURA_COLUNA_ACAO)
+        return tabela
 
     def carregar_comanda(self, comanda: Comanda) -> None:
         self._comanda = comanda
@@ -176,16 +220,25 @@ class ComandaView(QWidget):
 
         itens = self._comanda_service.listar_itens(self._comanda.id)
         itens_ativos = [item for item in itens if not item.cancelado]
+        itens_pendentes = [item for item in itens_ativos if item.impresso_em is None]
+        itens_lancados = [item for item in itens_ativos if item.impresso_em is not None]
 
-        # Antes do primeiro item, a comanda é rascunho — nada foi "enviado ao
-        # sistema" ainda, então não faz sentido mostrar relógio correndo.
+        # O relógio só corre a partir do primeiro item que a cozinha de fato
+        # viu — enquanto está tudo em "Pendentes" é rascunho, e numa mesa
+        # grande lançar tudo pode levar minutos sem que isso seja atraso.
+        primeiro_envio = ComandaService.hora_primeiro_envio(itens_ativos)
         self._label_horario.setText(
-            self._formatar_tempo_aberta(self._comanda.aberta_em) if itens else ""
+            self._formatar_tempo_aberta(primeiro_envio) if primeiro_envio else ""
         )
 
-        self._tabela.setRowCount(len(itens_ativos))
-        for linha, item in enumerate(itens_ativos):
-            self._preencher_linha(linha, item)
+        self._tabela_pendentes.setRowCount(len(itens_pendentes))
+        for linha, item in enumerate(itens_pendentes):
+            self._preencher_linha_pendente(linha, item)
+
+        grupos_lancados = self._agrupar_para_exibicao(itens_lancados)
+        self._tabela_lancados.setRowCount(len(grupos_lancados))
+        for linha, grupo in enumerate(grupos_lancados):
+            self._preencher_linha_lancada(linha, grupo)
 
         total = self._comanda_service.calcular_total(self._comanda.id)
         self._label_total.setText(_formatar_reais(total))
@@ -194,14 +247,32 @@ class ComandaView(QWidget):
         self._botao_add_item.setEnabled(aberta)
         self._botao_pagamento.setEnabled(aberta)
         self._botao_cancelar_comanda.setEnabled(aberta)
-        # Via de acréscimo só faz sentido na comanda aberta — a fechada não
-        # recebe mais item. A 2ª via continua liberada: cupom da cozinha some
-        # ou rasga depois do pagamento também.
-        self._botao_imprimir.setEnabled(aberta)
+        # Botão de envio só faz sentido havendo algo pendente na comanda
+        # aberta — a fechada não recebe mais item. A 2ª via continua
+        # liberada: cupom da cozinha some ou rasga depois do pagamento também.
+        self._botao_enviar_pedido.setEnabled(aberta and bool(itens_pendentes))
         self._botao_segunda_via.setEnabled(len(itens_ativos) > 0)
 
-    def _formatar_tempo_aberta(self, aberta_em: datetime) -> str:
-        minutos = int((datetime.now() - aberta_em).total_seconds() // 60)
+    @staticmethod
+    def _agrupar_para_exibicao(itens: list[ItemComanda]) -> list[list[ItemComanda]]:
+        """Agrupa itens já lançados por (produto, preço) para soma visual.
+
+        Cada grupo guarda os `ItemComanda` originais — necessário porque o
+        cancelamento continua sendo feito item a item (registro de
+        auditoria), mesmo que a tabela mostre uma linha só com a soma.
+        """
+        grupos: dict[tuple[int, Decimal], list[ItemComanda]] = {}
+        ordem: list[tuple[int, Decimal]] = []
+        for item in itens:
+            chave = (item.produto_id, item.preco_unit_congelado)
+            if chave not in grupos:
+                grupos[chave] = []
+                ordem.append(chave)
+            grupos[chave].append(item)
+        return [grupos[chave] for chave in ordem]
+
+    def _formatar_tempo_aberta(self, primeiro_envio: datetime) -> str:
+        minutos = int((datetime.now() - primeiro_envio).total_seconds() // 60)
         if minutos >= 60:
             cor, tempo = "#f43f5e", f"{minutos // 60}h{minutos % 60:02d}"
         elif minutos >= 30:
@@ -209,55 +280,83 @@ class ComandaView(QWidget):
         else:
             cor, tempo = "#94a3b8", f"{minutos} min"
         self._label_horario.setStyleSheet(f"font-size: 13px; margin-left: 8px; color: {cor};")
-        return f"Aberta às {aberta_em.strftime('%H:%M')} · há {tempo}"
+        return f"Na cozinha desde {primeiro_envio.strftime('%H:%M')} · há {tempo}"
 
-    def _preencher_linha(self, linha: int, item: ItemComanda) -> None:
+    def _preencher_celulas_basicas(
+        self, tabela: QTableWidget, linha: int, descricao: str, preco_unit: Decimal, quantidade: int
+    ) -> None:
+        total_item = preco_unit * quantidade
+        tabela.setItem(linha, 0, QTableWidgetItem(descricao))
+        tabela.setItem(linha, 1, QTableWidgetItem(_formatar_reais(preco_unit)))
+        tabela.setItem(linha, 2, QTableWidgetItem(str(quantidade)))
+        tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(total_item)))
+
+    @staticmethod
+    def _aplicar_variante(botao: QPushButton, variante: str) -> None:
+        # Botões criados no __init__ (voltar, +Item, etc.) já existem antes da
+        # janela ser exibida, então o `setProperty` sozinho basta: o Qt
+        # calcula o estilo pela primeira vez já com a propriedade presente.
+        # Estes aqui (Remover/Cancelar) nascem depois, a cada `atualizar()`,
+        # e vão direto para uma tabela já visível via `setCellWidget` — sem
+        # unpolish/polish o seletor `[variante="perigo"]` só pinta o fundo e
+        # o texto branco não é recalculado, some (bug conhecido do Qt com
+        # QSS + propriedade dinâmica em widget inserido após o polish inicial).
+        botao.setProperty("variante", variante)
+        botao.style().unpolish(botao)
+        botao.style().polish(botao)
+
+    def _preencher_linha_pendente(self, linha: int, item: ItemComanda) -> None:
         descricao = item.produto.nome
         if item.observacao:
             descricao += f" ({item.observacao})"
-        total_item = item.preco_unit_congelado * item.quantidade
-
-        self._tabela.setItem(linha, 0, QTableWidgetItem(descricao))
-        self._tabela.setItem(linha, 1, QTableWidgetItem(_formatar_reais(item.preco_unit_congelado)))
-        self._tabela.setItem(linha, 2, QTableWidgetItem(str(item.quantidade)))
-        self._tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(total_item)))
-
-        # Marca visual do que já foi (ou não) pra cozinha — sem isso o
-        # operador só descobre o status ao tentar remover e levar um erro.
-        if item.impresso_em is None:
-            status = QTableWidgetItem("● Pendente")
-            status.setForeground(Qt.GlobalColor.yellow)
-            status.setToolTip("Ainda não foi enviado à produção — pode ser removido livremente.")
-        else:
-            status = QTableWidgetItem("✓ Enviado")
-            status.setForeground(Qt.GlobalColor.green)
-            status.setToolTip("Já foi enviado à produção — remoção exige cancelamento autorizado.")
-        self._tabela.setItem(linha, 4, status)
+        self._preencher_celulas_basicas(
+            self._tabela_pendentes, linha, descricao, item.preco_unit_congelado, item.quantidade
+        )
 
         acoes_item = QWidget()
         layout_acoes = QHBoxLayout(acoes_item)
         layout_acoes.setContentsMargins(0, 0, 0, 0)
 
-        # Nunca os dois botões juntos: item ainda não impresso só pode ser
-        # removido direto (rascunho, sem rastro a preservar); depois que vai
-        # pra cozinha, a única saída é Cancelar, com PIN de gerente e motivo,
-        # porque a partir daí é registro de auditoria (ver docs/arquitetura §3.6).
-        if item.impresso_em is None:
-            botao_remover = QPushButton("🗑 Remover")
-            botao_remover.setProperty("variante", "perigo")
-            botao_remover.setToolTip("Remover item da lista (ainda não foi enviado à produção).")
-            botao_remover.clicked.connect(lambda _checked=False, i=item: self._remover_item(i))
-            layout_acoes.addWidget(botao_remover)
-        else:
-            botao_cancelar = QPushButton("⛔ Cancelar")
-            botao_cancelar.setProperty("variante", "perigo")
-            botao_cancelar.setToolTip(
-                "Solicitar cancelamento do item. Já foi enviado à produção — exige senha do gerente."
-            )
-            botao_cancelar.clicked.connect(lambda _checked=False, i=item: self._cancelar_item(i))
-            layout_acoes.addWidget(botao_cancelar)
+        # Item ainda não impresso é rascunho, sem rastro a preservar: remoção
+        # direta, sem confirmação (a única "trava" é o próprio botão — clique
+        # errado é raro e o item nem chegou à cozinha). Texto puro, não
+        # emoji: o glifo some em fontes sem suporte a emoji colorido e o
+        # botão vira um quadrado vazio, sem afordância nenhuma.
+        botao_remover = QPushButton("Remover")
+        self._aplicar_variante(botao_remover, "perigo")
+        botao_remover.setToolTip("Remover item da lista (ainda não foi enviado à produção).")
+        botao_remover.clicked.connect(lambda _checked=False, i=item: self._remover_item(i))
+        layout_acoes.addWidget(botao_remover)
 
-        self._tabela.setCellWidget(linha, 5, acoes_item)
+        self._tabela_pendentes.setCellWidget(linha, 4, acoes_item)
+
+    def _preencher_linha_lancada(self, linha: int, grupo: list[ItemComanda]) -> None:
+        primeiro = grupo[0]
+        descricao = primeiro.produto.nome
+        if primeiro.observacao and len(grupo) == 1:
+            descricao += f" ({primeiro.observacao})"
+        quantidade_total = sum(item.quantidade for item in grupo)
+        self._preencher_celulas_basicas(
+            self._tabela_lancados, linha, descricao, primeiro.preco_unit_congelado, quantidade_total
+        )
+
+        acoes_item = QWidget()
+        layout_acoes = QHBoxLayout(acoes_item)
+        layout_acoes.setContentsMargins(0, 0, 0, 0)
+
+        # Já foi para a produção: a única saída é Cancelar, com PIN de
+        # gerente e motivo, porque a partir daí é registro de auditoria (ver
+        # docs/arquitetura §3.6) — mesmo agrupado na tela, cada `ItemComanda`
+        # do grupo é cancelado individualmente por baixo.
+        botao_cancelar = QPushButton("Cancelar")
+        self._aplicar_variante(botao_cancelar, "perigo")
+        botao_cancelar.setToolTip(
+            "Solicitar cancelamento do item. Já foi enviado à produção — exige senha do gerente."
+        )
+        botao_cancelar.clicked.connect(lambda _checked=False, g=grupo: self._cancelar_grupo(g))
+        layout_acoes.addWidget(botao_cancelar)
+
+        self._tabela_lancados.setCellWidget(linha, 4, acoes_item)
 
     def _mostrar_mensagem(self, texto: str, *, sucesso: bool) -> None:
         cor = "#22c55e" if sucesso else "#f43f5e"
@@ -274,19 +373,27 @@ class ComandaView(QWidget):
         self.atualizar()
         self._mostrar_mensagem(f"{nome_produto} removido com sucesso.", sucesso=True)
 
-    def _cancelar_item(self, item: ItemComanda) -> None:
-        modal = CancelamentoDialog(f"Cancelar item — {item.produto.nome}", self)
+    def _cancelar_grupo(self, grupo: list[ItemComanda]) -> None:
+        nome_produto = grupo[0].produto.nome
+        titulo = (
+            f"Cancelar item — {nome_produto}"
+            if len(grupo) == 1
+            else f"Cancelar {len(grupo)}x {nome_produto}"
+        )
+        modal = CancelamentoDialog(titulo, self)
         if modal.exec() != QDialog.DialogCode.Accepted:
             return
         motivo, pin_gerente = modal.resultado()
-        nome_produto = item.produto.nome
 
+        gerente_nome = "gerente"
         try:
-            item_cancelado = self._comanda_service.cancelar_item(item.id, motivo, pin_gerente)
+            for item in grupo:
+                item_cancelado = self._comanda_service.cancelar_item(item.id, motivo, pin_gerente)
+                if item_cancelado.cancelado_por:
+                    gerente_nome = item_cancelado.cancelado_por.nome
         except _ERROS_SERVICE as erro:
             self._mostrar_mensagem(str(erro), sucesso=False)
             return
-        gerente_nome = item_cancelado.cancelado_por.nome if item_cancelado.cancelado_por else "gerente"
         self.atualizar()
         self._mostrar_mensagem(
             f"Cancelamento de {nome_produto} autorizado por {gerente_nome}.", sucesso=True
@@ -327,6 +434,26 @@ class ComandaView(QWidget):
             # ou sessão perdida, que são erro de verdade.
             self._label_erro.setText(str(erro))
             return
+        # Move visualmente os itens de "Pendentes" para "Lançados" assim que
+        # a impressão marca `impresso_em` — sem isto a tabela ficava com dado
+        # velho até a próxima ação (ex.: abrir o modal de +Item de novo).
+        # `atualizar()` limpa `_label_erro`, então a mensagem de confirmação
+        # só pode ser escrita depois dele.
+        self.atualizar()
+        if resultados:
+            # O pedido já está confirmado (ComandaService/ImpressaoService
+            # marcam `impresso_em` do lote inteiro, com ou sem impressora) —
+            # essa mensagem é sempre positiva. Falha de papel é só o aviso
+            # âmbar logo abaixo, nunca motivo pra parecer que o pedido não
+            # foi registrado.
+            houve_falha = any(not resultado.sucesso for resultado in resultados)
+            texto = (
+                "Pedido registrado com sucesso! (Aviso: alguns itens não possuem "
+                "impressora configurada — veja o detalhe abaixo.)"
+                if houve_falha
+                else "Pedido enviado para a produção com sucesso!"
+            )
+            self._mostrar_mensagem(texto, sucesso=True)
         self._aviso_impressao.mostrar(resultados, vazio=_NADA_NOVO_PARA_IMPRIMIR)
 
     def _imprimir_segunda_via(self) -> None:
@@ -346,7 +473,61 @@ class ComandaView(QWidget):
         self._aviso_impressao.mostrar(resultados, vazio="Esta comanda não tem itens para reimprimir.")
 
     def _voltar_clicado(self) -> None:
-        self.voltar.emit()
+        self.tentar_sair(self.voltar.emit)
+
+    def possui_itens_pendentes(self) -> bool:
+        return self._tabela_pendentes.rowCount() > 0
+
+    def tentar_sair(self, ao_sair: Callable[[], None]) -> None:
+        """Ponto único de saída da comanda (§ requisito 4).
+
+        `ao_sair` só é chamado se não houver pendência, ou se o operador
+        resolveu a pendência explicitamente (enviar ou descartar) — nunca
+        silenciosamente. Usado tanto pelo botão "← Mesas" quanto por
+        qualquer navegação externa (`MainWindow`, sidebar, logout) que tente
+        tirar o operador desta tela.
+        """
+        if not self.possui_itens_pendentes():
+            ao_sair()
+            return
+        self._abrir_modal_saida_com_pendencias(ao_sair)
+
+    def _abrir_modal_saida_com_pendencias(self, ao_sair: Callable[[], None]) -> None:
+        caixa = QMessageBox(self)
+        caixa.setWindowTitle("Itens pendentes")
+        caixa.setText("Existem itens pendentes que não foram enviados. O que deseja fazer?")
+        caixa.setIcon(QMessageBox.Icon.Warning)
+
+        botao_enviar = caixa.addButton("Enviar e Sair", QMessageBox.ButtonRole.AcceptRole)
+        botao_descartar = caixa.addButton("Descartar Pendências e Sair", QMessageBox.ButtonRole.DestructiveRole)
+        botao_continuar = caixa.addButton("Continuar Editando", QMessageBox.ButtonRole.RejectRole)
+        caixa.setDefaultButton(botao_enviar)
+        caixa.setEscapeButton(botao_continuar)
+        botao_enviar.setProperty("variante", "sucesso")
+        botao_descartar.setProperty("variante", "perigo")
+        botao_continuar.setProperty("variante", "secundario")
+
+        caixa.exec()
+        clicado = caixa.clickedButton()
+
+        if clicado is botao_enviar:
+            self._imprimir_producao()
+            if not self._label_erro.text():
+                ao_sair()
+        elif clicado is botao_descartar:
+            self._descartar_pendencias(ao_sair)
+        # botao_continuar (ou fechar a caixa): permanece na mesa atual.
+
+    def _descartar_pendencias(self, ao_sair: Callable[[], None]) -> None:
+        assert self._comanda is not None
+        itens_pendentes = [
+            item
+            for item in self._comanda_service.listar_itens(self._comanda.id)
+            if not item.cancelado and item.impresso_em is None
+        ]
+        for item in itens_pendentes:
+            self._comanda_service.remover_item(item.id)
+        ao_sair()
 
     def _solicitar_pagamento(self) -> None:
         if self._comanda is None:

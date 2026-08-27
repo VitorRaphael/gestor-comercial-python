@@ -1,15 +1,23 @@
-"""Histórico de Fechamentos: consulta de caixas já encerrados, com filtro por
-período e operador, e reimpressão do relatório de cada um (Controle de Turnos).
+"""Histórico Diário: fechamentos do mês selecionado, com comprovante digital
+e reimpressão (Controle de Turnos).
 
-Só lê o que `CaixaService` e `AuthService` já expõem — nenhuma regra de
-negócio mora aqui, igual às outras views (§ arquitetura, camadas).
+A COMPETÊNCIA de cada fechamento é a data de ABERTURA do caixa (§ virada de
+noite): um caixa aberto às 23h e fechado de madrugada no dia seguinte aparece
+como fechamento do dia em que foi aberto — por isso a consulta usa
+`CaixaService.listar_historico_mensal` (eixo `aberto_em`), não
+`listar_historico` (eixo `fechado_em`, usado só para achar "o Nº fechamento
+de hoje" na hora de fechar o caixa).
+
+Só lê o que `CaixaService`/`AuthService` já expõem — nenhuma regra de negócio
+mora aqui, igual às outras views (§ arquitetura, camadas).
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -17,7 +25,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -36,11 +43,28 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
+from gestor_comercial.ui.widgets.comprovante_dialog import (
+    ComprovanteFechamentoDialog,
+    montar_texto_comprovante,
+)
 from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
 
-_COLUNAS = ["Fechamento", "Aberto em", "Fechado em", "Aberto por", "Fechado por", "Diferença"]
+_COLUNAS = [
+    "Data (Dia/Mês)",
+    "Turno/Seq",
+    "Operador",
+    "Faturamento Total (R$)",
+    "Diferença/Quebra (R$)",
+    "Ações",
+]
+_COLUNA_ACOES = 5
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
+
+_MESES = [
+    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+]
 
 # Sentinela do item "Todos" do combo de operador — combina com o `userData`
 # de um QComboBox que também guarda `int` de verdade para cada funcionário.
@@ -48,7 +72,7 @@ _TODOS_OS_OPERADORES = None
 
 
 class HistoricoCaixaView(QWidget):
-    """Consulta de fechamentos passados: filtro por período/operador e reimpressão."""
+    """Fechamentos do mês selecionado: comprovante digital e reimpressão."""
 
     def __init__(
         self,
@@ -68,35 +92,23 @@ class HistoricoCaixaView(QWidget):
     def _montar_layout(self) -> None:
         layout_externo = QVBoxLayout(self)
 
-        titulo = QLabel("Histórico de Fechamentos")
+        cabecalho = QHBoxLayout()
+        titulo = QLabel("Histórico Diário")
         titulo.setStyleSheet("font-weight: 600; font-size: 18px;")
-        layout_externo.addWidget(titulo)
+        cabecalho.addWidget(titulo)
+        cabecalho.addStretch()
 
-        filtros = QHBoxLayout()
-        filtros.addWidget(QLabel("De"))
-        self._campo_inicio = QLineEdit()
-        self._campo_inicio.setPlaceholderText("dd/mm/aaaa")
-        filtros.addWidget(self._campo_inicio)
+        cabecalho.addWidget(QLabel("Mês"))
+        self._seletor_mes = QComboBox()
+        self._popular_seletor_mes()
+        self._seletor_mes.currentIndexChanged.connect(self._carregar)
+        cabecalho.addWidget(self._seletor_mes)
 
-        filtros.addWidget(QLabel("Até"))
-        self._campo_fim = QLineEdit()
-        self._campo_fim.setPlaceholderText("dd/mm/aaaa")
-        filtros.addWidget(self._campo_fim)
-
-        filtros.addWidget(QLabel("Operador"))
+        cabecalho.addWidget(QLabel("Operador"))
         self._combo_operador = QComboBox()
-        filtros.addWidget(self._combo_operador)
-
-        self._botao_filtrar = QPushButton("Filtrar")
-        self._botao_filtrar.setProperty("variante", "secundario")
-        self._botao_filtrar.clicked.connect(self._filtrar)
-        filtros.addWidget(self._botao_filtrar)
-
-        self._botao_limpar = QPushButton("Limpar filtros")
-        self._botao_limpar.clicked.connect(self._limpar_filtros)
-        filtros.addWidget(self._botao_limpar)
-        filtros.addStretch()
-        layout_externo.addLayout(filtros)
+        self._combo_operador.currentIndexChanged.connect(self._carregar)
+        cabecalho.addWidget(self._combo_operador)
+        layout_externo.addLayout(cabecalho)
 
         self._label_erro = QLabel("")
         self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
@@ -111,7 +123,8 @@ class HistoricoCaixaView(QWidget):
         self._tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._tabela.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._tabela.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self._tabela.cellDoubleClicked.connect(self._ao_dar_duplo_clique)
         layout_externo.addWidget(self._tabela)
 
         rodape = QHBoxLayout()
@@ -127,43 +140,62 @@ class HistoricoCaixaView(QWidget):
         rodape.addWidget(self._botao_reimprimir)
         layout_externo.addLayout(rodape)
 
+    def _popular_seletor_mes(self) -> None:
+        # Mesmo padrão do Histórico Mensal: mês vigente primeiro, mais 11 pra
+        # trás, mesmo sem nenhum fechamento ainda naquele mês.
+        hoje = date.today()
+        self._seletor_mes.blockSignals(True)
+        self._seletor_mes.clear()
+        self._seletor_mes.addItem(f"{_MESES[hoje.month - 1]}/{hoje.year}", (hoje.year, hoje.month))
+        ano, mes = hoje.year, hoje.month
+        for _ in range(11):
+            mes -= 1
+            if mes == 0:
+                mes = 12
+                ano -= 1
+            self._seletor_mes.addItem(f"{_MESES[mes - 1]}/{ano}", (ano, mes))
+        self._seletor_mes.blockSignals(False)
+
     def atualizar(self) -> None:
         self._label_erro.setText("")
         self._aviso_impressao.limpar()
         self._popular_combo_operador()
-        self._filtrar()
+        self._carregar()
 
     def _popular_combo_operador(self) -> None:
         # Reconstrói do zero: um funcionário desativado entre duas visitas à
         # tela ainda tem que aparecer, porque o histórico é dele mesmo assim.
         selecionado = self._combo_operador.currentData()
+        self._combo_operador.blockSignals(True)
         self._combo_operador.clear()
         self._combo_operador.addItem("Todos", _TODOS_OS_OPERADORES)
         for funcionario in self._auth.listar_todos():
             self._combo_operador.addItem(funcionario.nome, funcionario.id)
         indice = self._combo_operador.findData(selecionado)
         self._combo_operador.setCurrentIndex(indice if indice >= 0 else 0)
+        self._combo_operador.blockSignals(False)
 
-    def _filtrar(self) -> None:
+    def _carregar(self) -> None:
         self._label_erro.setText("")
+        ano_mes = self._seletor_mes.currentData()
+        if ano_mes is None:
+            return
+        ano, mes = ano_mes
         try:
-            inicio = self._ler_data(self._campo_inicio.text())
-            fim = self._ler_data(self._campo_fim.text())
-        except ValueError:
-            self._label_erro.setText("Data inválida. Use o formato dd/mm/aaaa.")
+            fechamentos = self._caixas.listar_historico_mensal(ano, mes)
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
             return
 
         funcionario_id = self._combo_operador.currentData()
-        self._fechamentos = self._caixas.listar_historico(
-            inicio=inicio, fim=fim, funcionario_id=funcionario_id
-        )
+        if funcionario_id is not None:
+            fechamentos = [
+                caixa
+                for caixa in fechamentos
+                if funcionario_id in (caixa.aberto_por_id, caixa.fechado_por_id)
+            ]
+        self._fechamentos = fechamentos
         self._preencher_tabela()
-
-    def _limpar_filtros(self) -> None:
-        self._campo_inicio.clear()
-        self._campo_fim.clear()
-        self._combo_operador.setCurrentIndex(0)
-        self._filtrar()
 
     def _preencher_tabela(self) -> None:
         self._tabela.setRowCount(len(self._fechamentos))
@@ -172,27 +204,47 @@ class HistoricoCaixaView(QWidget):
         self._tabela.clearSelection()
 
     def _preencher_linha(self, linha: int, caixa: Caixa) -> None:
-        try:
-            titulo = self._caixas.titulo_fechamento(caixa.id)
-        except _ERROS_SERVICE:
-            titulo = f"Caixa {caixa.id}"
-        aberto_por = caixa.aberto_por.nome if caixa.aberto_por is not None else "—"
-        fechado_por = caixa.fechado_por.nome if caixa.fechado_por is not None else "—"
+        operador = caixa.fechado_por.nome if caixa.fechado_por is not None else "—"
         resumo = self._caixas.resumo(caixa.id)
+        faturamento = resumo.total_dinheiro + resumo.total_maquininha + resumo.total_consumo_interno
         diferenca = "—" if resumo.diferenca is None else _formatar_reais(resumo.diferenca)
+        turno = "—" if caixa.numero_sequencial_dia is None else f"{caixa.numero_sequencial_dia}º"
 
-        self._tabela.setItem(linha, 0, QTableWidgetItem(titulo))
-        self._tabela.setItem(linha, 1, QTableWidgetItem(_formatar_data_hora(caixa.aberto_em)))
-        self._tabela.setItem(linha, 2, QTableWidgetItem(_formatar_data_hora(caixa.fechado_em)))
-        self._tabela.setItem(linha, 3, QTableWidgetItem(aberto_por))
-        self._tabela.setItem(linha, 4, QTableWidgetItem(fechado_por))
-        self._tabela.setItem(linha, 5, QTableWidgetItem(diferenca))
+        self._tabela.setItem(linha, 0, QTableWidgetItem(caixa.aberto_em.strftime("%d/%m")))
+        self._tabela.setItem(linha, 1, QTableWidgetItem(turno))
+        self._tabela.setItem(linha, 2, QTableWidgetItem(operador))
+        self._tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(faturamento)))
+        item_diferenca = QTableWidgetItem(diferenca)
+        if resumo.diferenca is not None and resumo.diferenca != 0:
+            item_diferenca.setForeground(Qt.GlobalColor.red)
+        self._tabela.setItem(linha, 4, item_diferenca)
+
+        botao_ver = QPushButton("Ver Comprovante")
+        botao_ver.setProperty("variante", "secundario")
+        botao_ver.clicked.connect(lambda _=False, caixa_id=caixa.id: self._abrir_comprovante(caixa_id))
+        self._tabela.setCellWidget(linha, _COLUNA_ACOES, botao_ver)
 
     def _caixa_selecionado(self) -> Caixa | None:
         linha = self._tabela.currentRow()
         if linha < 0 or linha >= len(self._fechamentos):
             return None
         return self._fechamentos[linha]
+
+    def _ao_dar_duplo_clique(self, linha: int, _coluna: int) -> None:
+        if linha < 0 or linha >= len(self._fechamentos):
+            return
+        self._abrir_comprovante(self._fechamentos[linha].id)
+
+    def _abrir_comprovante(self, caixa_id: int) -> None:
+        self._label_erro.setText("")
+        try:
+            caixa = self._caixas.buscar(caixa_id)
+            texto = montar_texto_comprovante(self._caixas, caixa)
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+            return
+        modal = ComprovanteFechamentoDialog(caixa, texto, self)
+        modal.exec()
 
     def _reimprimir(self) -> None:
         self._label_erro.setText("")
@@ -226,13 +278,6 @@ class HistoricoCaixaView(QWidget):
         modal = _CancelamentosDialog(titulo, resumo, self)
         modal.exec()
 
-    @staticmethod
-    def _ler_data(texto: str) -> date | None:
-        limpo = texto.strip()
-        if not limpo:
-            return None
-        return datetime.strptime(limpo, "%d/%m/%Y").date()
-
 
 class _CancelamentosDialog(QDialog):
     """Modal com a auditoria de itens cancelados de um fechamento passado."""
@@ -254,10 +299,6 @@ class _CancelamentosDialog(QDialog):
         botoes.accepted.connect(self.accept)
         botoes.button(QDialogButtonBox.StandardButton.Close).clicked.connect(self.accept)
         layout.addWidget(botoes)
-
-
-def _formatar_data_hora(momento: datetime | None) -> str:
-    return "—" if momento is None else momento.strftime("%d/%m/%Y %H:%M")
 
 
 def _formatar_reais(valor: Decimal) -> str:

@@ -13,7 +13,7 @@ from gestor_comercial.repository.base import SessionLocal
 
 TOTAL_MESAS = 60
 ADMIN_NOME = "Gerente"
-ADMIN_PIN_PADRAO = "264072"
+ADMIN_PIN_PADRAO = "26407200"
 
 # Cardápio portado do Gestor Comercial (Java). Combos ficam de fora
 # propositalmente: só fazem sentido depois que todos os itens já

@@ -1,3 +1,4 @@
+import calendar
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, select
@@ -63,3 +64,34 @@ class CaixaRepository(Repository[Caixa]):
             )
         stmt = stmt.order_by(Caixa.fechado_em.desc(), Caixa.id.desc())
         return list(self.session.scalars(stmt))
+
+    def listar_por_mes_abertura(self, ano: int, mes: int) -> list[Caixa]:
+        """Fechamentos cuja COMPETÊNCIA é o mês civil `ano`/`mes`.
+
+        Divergência intencional de `listar_historico`: aqui o eixo é
+        `aberto_em`, não `fechado_em`. Um caixa aberto às 23h de um dia e
+        fechado de madrugada no dia seguinte pertence, para efeito contábil
+        da tela de Relatórios, ao dia (e ao mês) em que foi ABERTO — é a regra
+        de "virada de noite" do food truck. `numero_sequencial_dia` continua
+        indexado por `fechado_em` (não muda aqui): é uma numeração diferente,
+        para um propósito diferente (identificar qual fechamento é qual no
+        dia em que a gaveta foi de fato conferida).
+        """
+        inicio, fim = _intervalo_do_mes(ano, mes)
+        limite = datetime(fim.year, fim.month, fim.day) + timedelta(days=1)
+        stmt = (
+            select(Caixa)
+            .where(
+                Caixa.status == StatusCaixa.FECHADO,
+                Caixa.aberto_em >= datetime(inicio.year, inicio.month, inicio.day),
+                Caixa.aberto_em < limite,
+            )
+            .order_by(Caixa.aberto_em.desc(), Caixa.id.desc())
+        )
+        return list(self.session.scalars(stmt))
+
+
+def _intervalo_do_mes(ano: int, mes: int) -> tuple[date, date]:
+    """`startOfMonth`/`endOfMonth` do mês civil `ano`/`mes`."""
+    ultimo_dia = calendar.monthrange(ano, mes)[1]
+    return date(ano, mes, 1), date(ano, mes, ultimo_dia)

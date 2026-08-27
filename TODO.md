@@ -51,6 +51,7 @@
 - [ ] Gerar `.exe` e testar em máquina limpa (sem Python instalado) — roteiro em [`docs/checklist-maquina-limpa.md`](docs/checklist-maquina-limpa.md)
 - [x] Simular quedas de energia / fechamento forçado — checar integridade do SQLite — automatizado em `tests/integration/test_resiliencia_queda_energia.py` (mata o processo de verdade no meio da escrita; confirma rollback automático sem commit e persistência com commit)
 - [x] Testes de estresse: inputs inválidos, digitação errada, dupla submissão — coberto pela suíte de services (PIN errado, quantidade 0/negativa, cancelar sem PIN de gerente, fechar sem pagamento, e o novo `test_confirmar_pagamento_duas_vezes_seguidas_e_bloqueado`)
+- [ ] Ícone `.ico` do app (`resources/`) + `icon=` no `build.spec` (hoje `icon=None`) e instalador (Inno Setup) que cria atalho no Menu Iniciar/Desktop
 - [ ] Validação final com o pai antes de ir para produção real
 
 ## Backlog (V2/V3 — não iniciar antes da V1 estar em produção)

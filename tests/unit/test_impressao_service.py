@@ -163,9 +163,10 @@ def test_sem_padrao_o_grupo_orfao_falha_e_os_outros_imprimem(
     assert orfao.sucesso is False
     assert "Bebidas" in orfao.erro
     assert "Cardápio" in orfao.erro
-    # O que imprimiu fica marcado; o órfão continua esperando configuração.
+    # O pedido inteiro fica confirmado — o órfão não fica preso em
+    # "Pendentes" só porque a categoria dele ainda não tem impressora.
     assert item_lanche.impresso_em is not None
-    assert item_bebida.impresso_em is None
+    assert item_bebida.impresso_em is not None
 
 
 def test_o_aviso_do_grupo_orfao_diz_qual_e_o_caso(uow, impressao, gerente, caixa_aberto):
@@ -270,7 +271,9 @@ def test_impressora_padrao_desativada_nao_recebe_o_fallback(
     assert [r.impressora_nome for r in resultados] == [GRUPO_SEM_IMPRESSORA]
     assert resultados[0].sucesso is False
     assert driver.enviados == []
-    assert item.impresso_em is None
+    # Pedido confirmado mesmo sem nenhuma impressora elegível — o cliente não
+    # fica esperando o gerente configurar hardware pra fechar a mesa.
+    assert item.impresso_em is not None
 
 
 def test_item_de_outra_comanda_nao_entra_no_cupom(uow, impressao, driver, gerente, caixa_aberto):
@@ -398,7 +401,7 @@ def test_listar_nao_impressos_ignora_cancelado_e_ja_impresso(uow, gerente, caixa
 
 
 def test_a_marcacao_dos_grupos_e_um_commit_so(uow, impressao, gerente, caixa_aberto, monkeypatch):
-    """Dois cupons, uma gravação: ou a comanda inteira marca, ou nenhuma marca."""
+    """Dois cupons impressos, uma gravação só — não um commit por grupo."""
     cozinha = nova_impressora(uow, "Cozinha", padrao=True)
     bar = nova_impressora(uow, "Bar")
     lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger", "20.00", cozinha)
@@ -414,21 +417,24 @@ def test_a_marcacao_dos_grupos_e_um_commit_so(uow, impressao, gerente, caixa_abe
     assert len(commits) == 1
 
 
-def test_impressao_que_falha_inteira_nao_grava_nada(
+def test_impressao_que_falha_inteira_ainda_assim_confirma_o_pedido(
     uow, auth, driver_que_falha, gerente, caixa_aberto, monkeypatch
 ):
+    """Nenhum cupom saiu no papel, mas o pedido não pode ficar refém disso —
+    persistência é a regra principal, impressão é só o aviso secundário."""
     impressao = ImpressaoService(uow, auth, abrir_driver=driver_que_falha)
     cozinha = nova_impressora(uow, "Cozinha", padrao=True)
     lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger", "20.00", cozinha)
     comanda = nova_comanda(uow, caixa_aberto, gerente)
-    novo_item(uow, comanda, lanche)
+    item = novo_item(uow, comanda, lanche)
     commits = []
     monkeypatch.setattr(uow, "commit", lambda: commits.append(1))
 
     resultados = impressao.imprimir_comanda(comanda.id)
 
     assert resultados[0].sucesso is False
-    assert commits == []
+    assert commits == [1]
+    assert item.impresso_em is not None
 
 
 def test_reimprimir_leva_o_que_ja_saiu_e_o_que_ainda_nao(
@@ -548,8 +554,9 @@ def test_falha_vira_resultado_e_nao_excecao(uow, auth, gerente, caixa_aberto):
 
     assert resultados[0].sucesso is False
     assert "cabo" in resultados[0].erro
-    # Não marcou: o item tem que sair de novo no próximo clique.
-    assert item.impresso_em is None
+    # Marcou mesmo assim: falha de impressora não pode travar o pedido em
+    # "Pendentes" — quem quer repapelar usa "2ª via" (reimprimir_comanda).
+    assert item.impresso_em is not None
 
 
 def test_erro_inesperado_do_driver_tambem_nao_derruba_a_venda(uow, auth, gerente, caixa_aberto):
@@ -570,7 +577,8 @@ def test_erro_inesperado_do_driver_tambem_nao_derruba_a_venda(uow, auth, gerente
 
     assert resultados[0].sucesso is False
     assert "inesperado" in resultados[0].erro
-    assert item.impresso_em is None
+    # Erro de hardware não é motivo pra deixar a venda em rascunho.
+    assert item.impresso_em is not None
 
 
 def test_grupo_que_falha_nao_impede_o_grupo_que_funciona(uow, auth, gerente, caixa_aberto):
@@ -588,8 +596,9 @@ def test_grupo_que_falha_nao_impede_o_grupo_que_funciona(uow, auth, gerente, cai
 
     por_nome = {r.impressora_nome: r.sucesso for r in resultados}
     assert por_nome == {"Cozinha": True, "Bar": False}
+    # Os dois confirmam — o grupo que falhou só carrega o aviso no resultado.
     assert item_lanche.impresso_em is not None
-    assert item_bebida.impresso_em is None
+    assert item_bebida.impresso_em is not None
 
 
 def test_falha_no_recibo_nao_aborta_o_pagamento(uow, auth, driver_que_falha, gerente, caixa_aberto):

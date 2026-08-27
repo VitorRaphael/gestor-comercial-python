@@ -13,6 +13,7 @@ view isolada, como os testes manuais desta sessão já fizeram.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -48,6 +49,12 @@ from gestor_comercial.ui.views.mesas_view import MesasView
 from gestor_comercial.ui.views.pagamento_dialog import PagamentoDialog
 from gestor_comercial.ui.views.relatorios_view import RelatoriosView
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
+from gestor_comercial.ui.widgets.senha_gerente_dialog import SenhaGerenteDialog
+
+# Áreas da sidebar que exigem reautenticação por PIN de gerente, mesmo com um
+# gerente já logado (§ o caixa fica destravado na mão de quem estiver por
+# perto): "Relatórios" expõe faturamento e diferença de caixa do mês inteiro.
+_ROTULOS_QUE_EXIGEM_PIN = {"Relatórios"}
 
 _ROTULOS_PERFIL = {
     PerfilFuncionario.ATENDENTE: "Atendente",
@@ -219,6 +226,25 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _navegar(self, rotulo: str) -> None:
+        # A sidebar troca de página direto, sem passar pelo botão "← Mesas"
+        # da comanda — sem este desvio, o guard de itens pendentes (§
+        # ComandaView.tentar_sair) nunca disparava para quem saía por aqui.
+        if self._paginas.currentWidget() is self._comanda_view:
+            self._comanda_view.tentar_sair(lambda: self._exigir_pin_se_necessario(rotulo))
+            return
+        self._exigir_pin_se_necessario(rotulo)
+
+    def _exigir_pin_se_necessario(self, rotulo: str) -> None:
+        if rotulo not in _ROTULOS_QUE_EXIGEM_PIN:
+            self._navegar_agora(rotulo)
+            return
+        # Reautenticação a cada acesso, não só na primeira vez: um PIN digitado
+        # há uma hora não prova quem está com o mouse na mão agora.
+        modal = SenhaGerenteDialog(self._auth, f"Acesso restrito — {rotulo}", self)
+        if modal.exec() == QDialog.DialogCode.Accepted:
+            self._navegar_agora(rotulo)
+
+    def _navegar_agora(self, rotulo: str) -> None:
         pagina, recarregar = self._destinos_nav[rotulo]()
         recarregar()
         self._mostrar_pagina(pagina)
@@ -294,5 +320,11 @@ class MainWindow(QMainWindow):
         self._navegar("Mesas")
 
     def _deslogar(self) -> None:
+        if self._paginas.currentWidget() is self._comanda_view:
+            self._comanda_view.tentar_sair(self._deslogar_agora)
+            return
+        self._deslogar_agora()
+
+    def _deslogar_agora(self) -> None:
         self._auth.logout()
         self._pilha_raiz.setCurrentIndex(0)

@@ -166,6 +166,22 @@ QPushButton[variante="neutro"]:pressed {
   background: #2b3340;
 }
 
+QPushButton[variante="sucesso"] {
+  background: #22c55e;
+  color: white;
+  font-weight: 700;
+}
+QPushButton[variante="sucesso"]:hover {
+  background: #34d878;
+}
+QPushButton[variante="sucesso"]:pressed {
+  background: #16a34a;
+}
+QPushButton[variante="sucesso"]:disabled {
+  background: #2a2f47;
+  color: #6a6f89;
+}
+
 /* ---------- Grid de mesas ---------- */
 
 QPushButton[variante="mesa"] {
@@ -180,6 +196,9 @@ QPushButton[variante="mesa"] {
 QPushButton[variante="mesa"]:hover {
   background: #1f2436;
 }
+/* Roxo, não vermelho: "ocupada" é estado normal (mesa em atendimento), não
+   um alerta — o vermelho fica reservado pra ações destrutivas (perigo).
+   Misturar os dois fazia toda mesa ocupada parecer "atrasada" o tempo todo. */
 QPushButton[variante="mesa"][ocupada="true"] {
   border-top: 3px solid #ec4899;
 }
@@ -237,7 +256,7 @@ QLabel[variante="badge"] {
   font-size: 10px;
 }
 QLabel[variante="badge"][status="ocupada"] {
-  background: #ec4899;
+  background: #a855f7;
 }
 QLabel[variante="badge"][status="fechada"], QLabel[variante="badge"][status="inativo"] {
   background: #2a2f47;
@@ -251,4 +270,24 @@ QLabel[variante="badge"][status="cancelada"], QLabel[variante="badge"][status="p
 
 QDialog {
   background: #161a29;
+}
+
+/* ---------- Seção de itens pendentes (comanda) ---------- */
+
+#secao-pendentes {
+  border: 2px dashed #eab308;
+  border-radius: 14px;
+  background: #161a29;
+}
+#titulo-secao-pendentes {
+  color: #eab308;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+#titulo-secao-lancados {
+  color: #9195ac;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
 }
