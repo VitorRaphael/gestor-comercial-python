@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -66,7 +67,20 @@ def _novo_pagamento(uow, comanda, forma, valor, troco=None):
     )
 
 
-def _caixa_fechado(uow, valor_abertura="50.00", fechado_em=datetime(2026, 8, 19, 23, 0)):
+def _caixa_fechado(
+    uow, valor_abertura="50.00", fechado_em=datetime(2026, 8, 19, 23, 0), resumo_produtos=None
+):
+    """`resumo_produtos`: lista de `(nome, quantidade, valor_total_str)` para simular
+    o que `CaixaService.fechar` gravaria em `resumo_produtos_json` de verdade —
+    esses testes constroem o `Caixa` direto pelo repository, sem passar por `fechar`."""
+    snapshot = None
+    if resumo_produtos is not None:
+        snapshot = json.dumps(
+            [
+                {"produto_nome": nome, "quantidade": quantidade, "valor_total": valor_total}
+                for nome, quantidade, valor_total in resumo_produtos
+            ]
+        )
     return uow.caixas.salvar(
         Caixa(
             status=StatusCaixa.FECHADO,
@@ -74,6 +88,7 @@ def _caixa_fechado(uow, valor_abertura="50.00", fechado_em=datetime(2026, 8, 19,
             valor_contado=dinheiro(valor_abertura),
             aberto_em=datetime(2026, 8, 19, 8, 0),
             fechado_em=fechado_em,
+            resumo_produtos_json=snapshot,
         )
     )
 
@@ -932,3 +947,135 @@ def test_resumo_vendas_ignora_vendas_de_outro_caixa(uow, caixas, gerente, caixa_
 def test_resumo_vendas_de_caixa_inexistente(caixas):
     with pytest.raises(RecursoNaoEncontradoError):
         caixas.resumo_vendas(999)
+
+
+# ------------------------------------------------------------------
+# resumo_mensal (Dashboard Consolidado Mensal)
+# ------------------------------------------------------------------
+
+
+def test_resumo_mensal_sem_nenhum_fechamento_no_mes(caixas):
+    resumo = caixas.resumo_mensal(2026, 8)
+
+    assert resumo.ano == 2026
+    assert resumo.mes == 8
+    assert resumo.faturamento_bruto == Decimal("0")
+    assert resumo.formas_pagamento == []
+    assert resumo.turnos_fechados == 0
+    assert resumo.ticket_medio == Decimal("0")
+    assert resumo.cancelamentos_quantidade == 0
+    assert resumo.ranking_produtos == []
+
+
+def test_resumo_mensal_soma_faturamento_e_formas_de_pagamento(uow, caixas, gerente, produto):
+    caixa = _caixa_fechado(uow, fechado_em=datetime(2026, 8, 10, 22, 0))
+    comanda = _nova_comanda(uow, caixa, gerente, status=StatusComanda.FECHADA)
+    _novo_item(uow, comanda, produto, quantidade=2)
+    _novo_pagamento(uow, comanda, FormaPagamento.DINHEIRO, "30.00")
+    _novo_pagamento(uow, comanda, FormaPagamento.CREDITO, "20.00")
+
+    resumo = caixas.resumo_mensal(2026, 8)
+
+    assert resumo.faturamento_bruto == Decimal("50.00")
+    assert resumo.turnos_fechados == 1
+    por_forma = {linha.forma: linha for linha in resumo.formas_pagamento}
+    assert por_forma[FormaPagamento.DINHEIRO].valor == Decimal("30.00")
+    assert por_forma[FormaPagamento.DINHEIRO].percentual == Decimal("60.00")
+    assert por_forma[FormaPagamento.CREDITO].valor == Decimal("20.00")
+    assert por_forma[FormaPagamento.CREDITO].percentual == Decimal("40.00")
+
+
+def test_resumo_mensal_ignora_fechamentos_de_outro_mes(uow, caixas, gerente, produto):
+    caixa_julho = _caixa_fechado(uow, fechado_em=datetime(2026, 7, 31, 22, 0))
+    comanda = _nova_comanda(uow, caixa_julho, gerente, status=StatusComanda.FECHADA)
+    _novo_pagamento(uow, comanda, FormaPagamento.DINHEIRO, "99.00")
+
+    resumo = caixas.resumo_mensal(2026, 8)
+
+    assert resumo.turnos_fechados == 0
+    assert resumo.faturamento_bruto == Decimal("0")
+
+
+def test_resumo_mensal_ticket_medio_conta_so_comandas_fechadas(uow, caixas, gerente, produto):
+    caixa = _caixa_fechado(uow, fechado_em=datetime(2026, 8, 5, 22, 0))
+    comanda_paga = _nova_comanda(uow, caixa, gerente, status=StatusComanda.FECHADA)
+    _novo_pagamento(uow, comanda_paga, FormaPagamento.DINHEIRO, "40.00")
+    # comanda aberta na mesma sessão não vira transação — não pode inflar o denominador
+    _nova_comanda(uow, caixa, gerente, status=StatusComanda.ABERTA)
+
+    resumo = caixas.resumo_mensal(2026, 8)
+
+    assert resumo.ticket_medio == Decimal("40.00")
+
+
+def test_resumo_mensal_ranking_le_o_snapshot_gravado_no_fechamento(uow, caixas, gerente, categoria):
+    """O ranking mensal só soma o que está em `resumo_produtos_json` — não
+    reconsulta `item_comanda`. Por isso o snapshot é gravado aqui como
+    `fechar()` faria de verdade, e não deduzido a partir dos itens lançados."""
+    from gestor_comercial.domain.produto import Produto
+
+    x_burger = uow.produtos.salvar(
+        Produto(nome="X-Burger", preco=Decimal("20.00"), categoria_id=categoria.id)
+    )
+    caixa_1 = _caixa_fechado(
+        uow,
+        fechado_em=datetime(2026, 8, 5, 22, 0),
+        resumo_produtos=[("X-Burger", 3, "60.00")],
+    )
+    _nova_comanda(uow, caixa_1, gerente, status=StatusComanda.FECHADA)
+
+    caixa_2 = _caixa_fechado(
+        uow,
+        fechado_em=datetime(2026, 8, 12, 22, 0),
+        resumo_produtos=[("X-Burger", 5, "100.00")],
+    )
+    _nova_comanda(uow, caixa_2, gerente, status=StatusComanda.FECHADA)
+
+    resumo = caixas.resumo_mensal(2026, 8)
+
+    assert len(resumo.ranking_produtos) == 1
+    assert resumo.ranking_produtos[0].produto_nome == "X-Burger"
+    assert resumo.ranking_produtos[0].quantidade == 8
+    assert resumo.ranking_produtos[0].valor_total == Decimal("160.00")
+
+
+def test_resumo_mensal_ignora_fechamento_sem_snapshot(uow, caixas, gerente, produto):
+    """Caixa fechado antes desta coluna existir (`resumo_produtos_json=None`)
+    não derruba o ranking do mês — só fica de fora dele."""
+    caixa = _caixa_fechado(uow, fechado_em=datetime(2026, 8, 5, 22, 0))
+    _nova_comanda(uow, caixa, gerente, status=StatusComanda.FECHADA)
+
+    resumo = caixas.resumo_mensal(2026, 8)
+
+    assert resumo.ranking_produtos == []
+
+
+def test_fechar_grava_o_snapshot_do_mix_de_vendas(uow, caixas, gerente, caixa_aberto, produto):
+    comanda = _nova_comanda(uow, caixa_aberto, gerente, status=StatusComanda.FECHADA)
+    _novo_item(uow, comanda, produto, quantidade=4)
+
+    caixa_fechado = caixas.fechar(caixa_aberto.id, "0.00")
+
+    assert caixa_fechado.resumo_produtos_json is not None
+    dados = json.loads(caixa_fechado.resumo_produtos_json)
+    assert len(dados) == 1
+    assert dados[0]["produto_nome"] == produto.nome
+    assert dados[0]["quantidade"] == 4
+    assert Decimal(dados[0]["valor_total"]) == dinheiro(produto.preco * 4)
+
+
+def test_fechar_sem_nenhuma_venda_grava_snapshot_vazio(caixas, gerente, caixa_aberto):
+    caixa_fechado = caixas.fechar(caixa_aberto.id, "0.00")
+
+    assert json.loads(caixa_fechado.resumo_produtos_json) == []
+
+
+def test_resumo_mensal_soma_cancelamentos_entre_turnos(uow, caixas, gerente, produto):
+    caixa = _caixa_fechado(uow, fechado_em=datetime(2026, 8, 5, 22, 0))
+    comanda = _nova_comanda(uow, caixa, gerente, status=StatusComanda.FECHADA)
+    _item_cancelado(uow, comanda, produto, gerente, cancelado_em=datetime(2026, 8, 5, 21, 0))
+
+    resumo = caixas.resumo_mensal(2026, 8)
+
+    assert resumo.cancelamentos_quantidade == 1
+    assert resumo.cancelamentos_valor == produto.preco

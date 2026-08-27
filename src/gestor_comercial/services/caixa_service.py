@@ -7,6 +7,8 @@ services do Java viraram um só aqui porque `registrar` já dependia de
 
 from __future__ import annotations
 
+import calendar
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -102,6 +104,39 @@ class ResumoCancelamentos:
     detalhado: list[ItemCanceladoDetalhe]
 
 
+@dataclass(frozen=True)
+class TotalPorFormaMensal:
+    """Uma linha do breakdown de formas de pagamento do Dashboard Mensal."""
+
+    forma: FormaPagamento
+    valor: Decimal
+    percentual: Decimal
+
+
+@dataclass(frozen=True)
+class ItemRankingMensal:
+    """Uma linha do mix de vendas do mês, ordenado por faturamento decrescente."""
+
+    produto_nome: str
+    quantidade: int
+    valor_total: Decimal
+
+
+@dataclass(frozen=True)
+class ResumoMensal:
+    """Dashboard Consolidado Mensal: acumulado dos fechamentos de um mês civil."""
+
+    ano: int
+    mes: int
+    faturamento_bruto: Decimal
+    formas_pagamento: list[TotalPorFormaMensal]
+    turnos_fechados: int
+    ticket_medio: Decimal
+    cancelamentos_quantidade: int
+    cancelamentos_valor: Decimal
+    ranking_produtos: list[ItemRankingMensal]
+
+
 class CaixaService:
     """Abertura/fechamento do caixa, movimentos da gaveta e conferência (§3.9, §3.10)."""
 
@@ -178,6 +213,10 @@ class CaixaService:
         # fechar de novo o mesmo caixa já é bloqueado acima, então este número
         # é imutável a partir daqui.
         numero_sequencial_dia = self.uow.caixas.contar_fechados_no_dia(fechado_em.date()) + 1
+        # Congela o mix de vendas AGORA: é o único momento em que "o que foi
+        # vendido neste turno" é uma pergunta estável. Depois de fechado, o
+        # Dashboard Mensal só lê esta string — nunca mais volta em item_comanda.
+        resumo_produtos_json = _serializar_resumo_produtos(self.resumo_vendas(caixa_id))
 
         caixa.status = StatusCaixa.FECHADO
         caixa.fechado_em = fechado_em
@@ -185,6 +224,7 @@ class CaixaService:
         caixa.observacao_fechamento = self._texto_ou_nulo(observacao)
         caixa.fechado_por_id = gerente.id
         caixa.numero_sequencial_dia = numero_sequencial_dia
+        caixa.resumo_produtos_json = resumo_produtos_json
         self.uow.caixas.salvar(caixa)
         self.uow.commit()
         return caixa
@@ -447,6 +487,84 @@ class CaixaService:
             detalhado=detalhado,
         )
 
+    # ------------------------------------------------------------------
+    # Dashboard Consolidado Mensal
+    # ------------------------------------------------------------------
+
+    def resumo_mensal(self, ano: int, mes: int) -> ResumoMensal:
+        """Acumulado do mês civil (`startOfMonth`–`endOfMonth`), a partir dos
+        fechamentos já registrados.
+
+        Financeiro e cancelamentos vêm de `resumo`/`totais_por_forma` (tabelas
+        `Caixa`/`Pagamento`/`MovimentoCaixa`) e `resumo_cancelamentos`. O
+        ranking de produtos é o único que tocaria `item_comanda` — e por isso
+        lê exclusivamente `Caixa.resumo_produtos_json`, o snapshot congelado
+        por `fechar()`: nunca reabre a tabela de itens vendidos aqui. Um
+        fechamento anterior a essa coluna existir (`resumo_produtos_json`
+        None) simplesmente não contribui pro ranking do mês.
+        """
+        inicio, fim = _intervalo_do_mes(ano, mes)
+        caixas = self.listar_historico(inicio=inicio, fim=fim)
+
+        faturamento = ZERO
+        por_forma: dict[FormaPagamento, Decimal] = {}
+        cancelamentos_qtd = 0
+        cancelamentos_valor = ZERO
+        ranking: dict[str, ItemRankingMensal] = {}
+        comandas_pagas = 0
+
+        for caixa in caixas:
+            resumo = self.resumo(caixa.id)
+            faturamento += resumo.total_dinheiro + resumo.total_maquininha + resumo.total_consumo_interno
+
+            for forma, valor in self.totais_por_forma(caixa.id).items():
+                por_forma[forma] = por_forma.get(forma, ZERO) + valor
+
+            cancelamentos = self.resumo_cancelamentos(caixa.id)
+            cancelamentos_qtd += cancelamentos.quantidade_total
+            cancelamentos_valor += cancelamentos.valor_total
+
+            for vendido in _desserializar_resumo_produtos(caixa.resumo_produtos_json):
+                atual = ranking.get(vendido.produto_nome)
+                if atual is None:
+                    ranking[vendido.produto_nome] = vendido
+                else:
+                    ranking[vendido.produto_nome] = ItemRankingMensal(
+                        produto_nome=atual.produto_nome,
+                        quantidade=atual.quantidade + vendido.quantidade,
+                        valor_total=dinheiro(atual.valor_total + vendido.valor_total),
+                    )
+
+            comandas_pagas += sum(
+                1
+                for comanda in self.uow.comandas.listar_por_caixa(caixa.id)
+                if comanda.status is StatusComanda.FECHADA
+            )
+
+        faturamento = dinheiro(faturamento)
+        formas_pagamento = [
+            TotalPorFormaMensal(
+                forma=forma,
+                valor=valor,
+                percentual=dinheiro((valor / faturamento) * 100) if faturamento > ZERO else ZERO,
+            )
+            for forma, valor in por_forma.items()
+        ]
+        ticket_medio = dinheiro(faturamento / comandas_pagas) if comandas_pagas > 0 else ZERO
+        ranking_produtos = sorted(ranking.values(), key=lambda item: item.valor_total, reverse=True)
+
+        return ResumoMensal(
+            ano=ano,
+            mes=mes,
+            faturamento_bruto=faturamento,
+            formas_pagamento=formas_pagamento,
+            turnos_fechados=len(caixas),
+            ticket_medio=ticket_medio,
+            cancelamentos_quantidade=cancelamentos_qtd,
+            cancelamentos_valor=dinheiro(cancelamentos_valor),
+            ranking_produtos=ranking_produtos,
+        )
+
     @staticmethod
     def _origem_da_comanda(comanda) -> str:
         """'Mesa 04' ou 'Balcão #12' — de onde veio o item cancelado."""
@@ -486,3 +604,53 @@ class CaixaService:
             return None
         limpo = texto.strip()
         return limpo or None
+
+
+def _intervalo_do_mes(ano: int, mes: int) -> tuple[date, date]:
+    """`startOfMonth`/`endOfMonth` do mês civil, para filtrar `listar_historico`."""
+    ultimo_dia = calendar.monthrange(ano, mes)[1]
+    return date(ano, mes, 1), date(ano, mes, ultimo_dia)
+
+
+def _serializar_resumo_produtos(itens: list[ItemVendidoPorProduto]) -> str:
+    """`Caixa.resumo_produtos_json` no fechamento — `Decimal` vira `str` porque
+    `json` não serializa `Decimal` nativamente, e `str` preserva a casa
+    decimal exata (float arredondaria o centavo)."""
+    return json.dumps(
+        [
+            {
+                "produto_nome": item.produto_nome,
+                "quantidade": item.quantidade,
+                "valor_total": str(item.valor_total),
+            }
+            for item in itens
+        ]
+    )
+
+
+def _desserializar_resumo_produtos(bruto: str | None) -> list[ItemRankingMensal]:
+    """Lê de volta o snapshot gravado por `_serializar_resumo_produtos`.
+
+    `None`/vazio/JSON corrompido viram lista vazia — um fechamento sem
+    snapshot (anterior a esta coluna, ou dado sujo) só fica fora do ranking
+    daquele mês, nunca derruba o dashboard inteiro.
+    """
+    if not bruto:
+        return []
+    try:
+        dados = json.loads(bruto)
+    except (TypeError, ValueError):
+        return []
+    itens = []
+    for linha in dados:
+        try:
+            itens.append(
+                ItemRankingMensal(
+                    produto_nome=linha["produto_nome"],
+                    quantidade=linha["quantidade"],
+                    valor_total=dinheiro(linha["valor_total"]),
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return itens

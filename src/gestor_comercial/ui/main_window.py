@@ -46,6 +46,7 @@ from gestor_comercial.ui.views.impressoras_view import ImpressorasView
 from gestor_comercial.ui.views.login_view import LoginView
 from gestor_comercial.ui.views.mesas_view import MesasView
 from gestor_comercial.ui.views.pagamento_dialog import PagamentoDialog
+from gestor_comercial.ui.views.relatorios_view import RelatoriosView
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 
 _ROTULOS_PERFIL = {
@@ -123,6 +124,7 @@ class MainWindow(QMainWindow):
         self._cardapio_view = CardapioView(cardapio_service)
         self._funcionarios_view = FuncionariosView(auth_service, self._pagamentos)
         self._impressoras_view = ImpressorasView(cardapio_service, self._impressao)
+        self._relatorios_view = RelatoriosView(caixa_service, auth_service, self._impressao)
 
         self._paginas = QStackedWidget()
         for pagina in (
@@ -132,6 +134,7 @@ class MainWindow(QMainWindow):
             self._cardapio_view,
             self._funcionarios_view,
             self._impressoras_view,
+            self._relatorios_view,
         ):
             self._paginas.addWidget(pagina)
         coluna_direita.addWidget(self._paginas)
@@ -175,6 +178,20 @@ class MainWindow(QMainWindow):
             self._botoes_nav[rotulo] = botao
 
         layout.addStretch()
+
+        # Relatórios (Histórico Diário + Dashboard Mensal) fica fixo no rodapé,
+        # separado da navegação do dia a dia, e só aparece pra gerente — é a
+        # mesma estrutura de auditoria que HistoricoCaixaView já protegia
+        # ficando fora do menu; aqui ela volta a ficar visível, mas restrita
+        # a quem tem perfil pra ver esse tipo de dado (o funcionário comum
+        # nunca sabe que essa tela existe).
+        self._botao_relatorios = QPushButton("Relatórios")
+        self._botao_relatorios.setProperty("variante", "nav")
+        self._botao_relatorios.clicked.connect(lambda: self._navegar("Relatórios"))
+        self._botao_relatorios.setVisible(False)
+        layout.addWidget(self._botao_relatorios)
+        self._botoes_nav["Relatórios"] = self._botao_relatorios
+        self._destinos_nav["Relatórios"] = lambda: (self._relatorios_view, self._relatorios_view.atualizar)
 
         botao_sair = QPushButton("Sair")
         botao_sair.setProperty("variante", "nav")
@@ -268,6 +285,8 @@ class MainWindow(QMainWindow):
     def _ao_logar(self, funcionario: Funcionario) -> None:
         rotulo_perfil = _ROTULOS_PERFIL.get(funcionario.perfil, funcionario.perfil.value)
         self._label_usuario.setText(f"{funcionario.nome} · {rotulo_perfil}")
+        # Atendente nunca vê o botão — nem sabe que a auditoria de fechamentos existe.
+        self._botao_relatorios.setVisible(funcionario.perfil is PerfilFuncionario.GERENTE)
         # Aviso de impressão é da sessão anterior; quem entra agora não tem o que
         # fazer com o cupom de outro turno.
         self._aviso_impressao.limpar()

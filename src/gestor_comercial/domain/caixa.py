@@ -26,6 +26,15 @@ class Caixa(Base):
     numero_sequencial_dia: Mapped[int | None] = mapped_column(Integer)
     aberto_por_id: Mapped[int | None] = mapped_column(ForeignKey("funcionarios.id"))
     fechado_por_id: Mapped[int | None] = mapped_column(ForeignKey("funcionarios.id"))
+    # Snapshot do mix de vendas do turno, congelado em `CaixaService.fechar` a
+    # partir de `resumo_vendas` — JSON de {produto_nome, quantidade,
+    # valor_unitario, valor_total}. Existe para o Dashboard Mensal poder somar
+    # o ranking de produtos lendo só a tabela de fechamentos, sem tocar
+    # `item_comanda` de novo: numa máquina fraca, ler N linhas de texto já
+    # pronto é mais barato do que re-agregar item por item todo mês. NULL em
+    # caixa fechado antes desta coluna existir — não há como voltar no tempo
+    # e recalcular o mix de um turno já encerrado.
+    resumo_produtos_json: Mapped[str | None] = mapped_column(String)
 
     comandas: Mapped[list["Comanda"]] = relationship(back_populates="caixa")
     movimentos: Mapped[list["MovimentoCaixa"]] = relationship(back_populates="caixa")
