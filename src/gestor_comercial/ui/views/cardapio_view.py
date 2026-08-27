@@ -407,22 +407,17 @@ class _ProdutosPainel(QWidget):
             return
         categoria_inicial_id = self._categoria.id if self._categoria else None
         modal = _ProdutoDialog("Novo produto", categorias, self, categoria_id_inicial=categoria_inicial_id)
-        if modal.exec() != QDialog.DialogCode.Accepted:
-            return
-        try:
-            nome, preco, custo, categoria_id, descricao = modal.resultado()
-        except InvalidOperation:
-            self._mostrar_erro("Preço ou custo inválido. Informe um valor em reais, como 12.50.")
-            return
-
         self._mostrar_erro("")
-        try:
-            self._service.criar_produto(nome, preco, categoria_id, custo, descricao)
-        except _ERROS_SERVICE as erro:
-            self._mostrar_erro(str(erro))
+        while modal.exec() == QDialog.DialogCode.Accepted:
+            nome, preco, custo, categoria_id, descricao = modal.resultado()
+            try:
+                self._service.criar_produto(nome, preco, categoria_id, custo, descricao)
+            except _ERROS_SERVICE as erro:
+                modal.mostrar_erro_servico(str(erro))
+                continue
+            self.atualizar()
+            self.alterado.emit()
             return
-        self.atualizar()
-        self.alterado.emit()
 
     def _editar(self) -> None:
         produto = self._produto_selecionado()
@@ -439,22 +434,17 @@ class _ProdutosPainel(QWidget):
             categoria_id_inicial=produto.categoria_id,
             descricao_inicial=produto.descricao,
         )
-        if modal.exec() != QDialog.DialogCode.Accepted:
-            return
-        try:
-            nome, preco, custo, categoria_id, descricao = modal.resultado()
-        except InvalidOperation:
-            self._mostrar_erro("Preço ou custo inválido. Informe um valor em reais, como 12.50.")
-            return
-
         self._mostrar_erro("")
-        try:
-            self._service.atualizar_produto(produto.id, nome, preco, custo, categoria_id, descricao)
-        except _ERROS_SERVICE as erro:
-            self._mostrar_erro(str(erro))
+        while modal.exec() == QDialog.DialogCode.Accepted:
+            nome, preco, custo, categoria_id, descricao = modal.resultado()
+            try:
+                self._service.atualizar_produto(produto.id, nome, preco, custo, categoria_id, descricao)
+            except _ERROS_SERVICE as erro:
+                modal.mostrar_erro_servico(str(erro))
+                continue
+            self.atualizar()
+            self.alterado.emit()
             return
-        self.atualizar()
-        self.alterado.emit()
 
     def _gerenciar_combo(self) -> None:
         produto = self._produto_selecionado()
@@ -682,9 +672,13 @@ class _ProdutoDialog(QDialog):
 
         self._campo_nome = QLineEdit(nome_inicial)
         formulario.addRow("Nome", self._campo_nome)
+        self._erro_nome = _criar_rotulo_erro()
+        formulario.addRow("", self._erro_nome)
 
         self._campo_preco = QLineEdit(_formatar_campo(preco_inicial))
         formulario.addRow("Preço", self._campo_preco)
+        self._erro_preco = _criar_rotulo_erro()
+        formulario.addRow("", self._erro_preco)
 
         self._campo_custo = QLineEdit(_formatar_campo(custo_inicial))
         self._campo_custo.setPlaceholderText("Opcional, padrão 0,00")
@@ -705,12 +699,60 @@ class _ProdutoDialog(QDialog):
 
         layout.addLayout(formulario)
 
+        self._erro_geral = _criar_rotulo_erro()
+        layout.addWidget(self._erro_geral)
+
         botoes = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        botoes.accepted.connect(self.accept)
+        botoes.accepted.connect(self._ao_confirmar)
         botoes.rejected.connect(self.reject)
         layout.addWidget(botoes)
+
+    def _ao_confirmar(self) -> None:
+        """Só fecha o modal (accept) se a validação local passar.
+
+        Em caso de erro, os campos preenchidos permanecem intactos — o modal
+        nunca é recriado nem fechado por falha de validação.
+        """
+        if self._validar():
+            self.accept()
+
+    def _validar(self) -> bool:
+        valido = True
+        foco: QLineEdit | None = None
+
+        nome = self._campo_nome.text().strip()
+        if len(nome) < 2:
+            _marcar_erro(self._campo_nome, self._erro_nome, "O nome do produto é obrigatório (mínimo 2 caracteres).")
+            foco = foco or self._campo_nome
+            valido = False
+        else:
+            _limpar_erro(self._campo_nome, self._erro_nome)
+
+        preco_valido = True
+        try:
+            preco = Decimal(self._campo_preco.text().strip().replace(",", "."))
+            if preco <= 0:
+                preco_valido = False
+        except InvalidOperation:
+            preco_valido = False
+        if not preco_valido:
+            _marcar_erro(self._campo_preco, self._erro_preco, "Informe um preço válido, maior que zero.")
+            foco = foco or self._campo_preco
+            valido = False
+        else:
+            _limpar_erro(self._campo_preco, self._erro_preco)
+
+        if foco is not None:
+            foco.setFocus()
+        return valido
+
+    def mostrar_erro_servico(self, mensagem: str) -> None:
+        """Exibe um erro vindo do backend sem fechar o modal nem perder dados."""
+        self._erro_geral.setText(mensagem)
+        self._erro_geral.setVisible(True)
+        self._campo_nome.setFocus()
 
     def resultado(self) -> tuple[str, Decimal, Decimal, int, str | None]:
         nome = self._campo_nome.text().strip()
@@ -838,3 +880,22 @@ def _formatar_campo(valor: Decimal | None) -> str:
     if valor is None:
         return ""
     return f"{valor:.2f}".replace(".", ",")
+
+
+def _criar_rotulo_erro() -> QLabel:
+    rotulo = QLabel()
+    rotulo.setStyleSheet("color: #c0392b; font-size: 11px;")
+    rotulo.setWordWrap(True)
+    rotulo.setVisible(False)
+    return rotulo
+
+
+def _marcar_erro(campo: QLineEdit, rotulo: QLabel, mensagem: str) -> None:
+    campo.setStyleSheet("border: 1px solid #c0392b; background-color: #fdecea;")
+    rotulo.setText(mensagem)
+    rotulo.setVisible(True)
+
+
+def _limpar_erro(campo: QLineEdit, rotulo: QLabel) -> None:
+    campo.setStyleSheet("")
+    rotulo.setVisible(False)
