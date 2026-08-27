@@ -152,12 +152,15 @@ QPushButton[variante="perigo"]:hover {
 }
 
 QPushButton[variante="neutro"] {
-  background: transparent;
-  color: #9195ac;
-  border: 1px solid #9195ac;
+  background: #374151;
+  color: #f3f4f8;
+  border: 1px solid #4a5568;
 }
 QPushButton[variante="neutro"]:hover {
-  background: rgba(145, 149, 172, 0.12);
+  background: #4a5568;
+}
+QPushButton[variante="neutro"]:pressed {
+  background: #2b3340;
 }
 
 /* ---------- Grid de mesas ---------- */

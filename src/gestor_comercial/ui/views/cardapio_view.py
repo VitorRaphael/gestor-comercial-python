@@ -122,12 +122,14 @@ class _CategoriasPainel(QWidget):
         botao_nova.clicked.connect(self._criar)
         barra1.addWidget(botao_nova)
         self._botao_editar = QPushButton("Editar")
+        self._botao_editar.setProperty("variante", "neutro")
         self._botao_editar.clicked.connect(self._editar)
         barra1.addWidget(self._botao_editar)
         layout.addLayout(barra1)
 
         barra2 = QHBoxLayout()
         self._botao_impressora = QPushButton("Impressora")
+        self._botao_impressora.setProperty("variante", "neutro")
         self._botao_impressora.clicked.connect(self._associar_impressora)
         barra2.addWidget(self._botao_impressora)
         self._botao_status = QPushButton("Desativar")
@@ -326,10 +328,12 @@ class _ProdutosPainel(QWidget):
         acoes.addWidget(self._botao_novo)
 
         self._botao_editar = QPushButton("Editar")
+        self._botao_editar.setProperty("variante", "neutro")
         self._botao_editar.clicked.connect(self._editar)
         acoes.addWidget(self._botao_editar)
 
         self._botao_combo = QPushButton("Gerenciar combo")
+        self._botao_combo.setProperty("variante", "neutro")
         self._botao_combo.clicked.connect(self._gerenciar_combo)
         acoes.addWidget(self._botao_combo)
 
