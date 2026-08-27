@@ -143,12 +143,15 @@ QPushButton[variante="secundario"]:hover {
 }
 
 QPushButton[variante="perigo"] {
-  background: transparent;
-  color: #f43f5e;
-  border: 1px solid #f43f5e;
+  background: #f43f5e;
+  color: white;
+  border: none;
 }
 QPushButton[variante="perigo"]:hover {
-  background: rgba(244, 63, 94, 0.12);
+  background: #ff6379;
+}
+QPushButton[variante="perigo"]:pressed {
+  background: #c8283f;
 }
 
 QPushButton[variante="neutro"] {
