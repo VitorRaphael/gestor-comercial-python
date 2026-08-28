@@ -4,13 +4,19 @@ separada — é um Produto normal com `is_combo=True`, ligado a ele
 automaticamente pelo service assim que ganha o primeiro componente (ver
 `CardapioService.associar_componente`). Aqui só exibimos a badge "COMBO" e
 damos o botão "Gerenciar combo" pra abrir esse cadastro de componentes.
+
+A barra de ações (Novo/Editar/Ativar-Desativar/Excluir) é única para a tela
+inteira e age por contexto: o alvo é a categoria ou o produto que estiver
+com foco no momento (`_contexto`), evitando dois jogos de botões repetidos.
+Associação de impressora não mora aqui — isso é responsabilidade exclusiva
+da tela "Impressoras".
 """
 
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -18,12 +24,14 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -60,11 +68,16 @@ def _por_nome(itens: list) -> list:
 
 
 class CardapioView(QWidget):
-    """Cardápio unificado: categorias à esquerda, produtos da categoria à direita."""
+    """Cardápio unificado: categorias à esquerda, produtos da categoria à direita.
+
+    Uma única barra de ações contextual serve os dois painéis — o alvo da
+    ação (categoria ou produto) é definido por qual lado está com foco.
+    """
 
     def __init__(self, cardapio_service: CardapioService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._service = cardapio_service
+        self._contexto = "categoria"  # "categoria" | "produto" — quem recebe Editar/Ativar-Desativar/Excluir
 
         layout = QVBoxLayout(self)
 
@@ -73,30 +86,137 @@ class CardapioView(QWidget):
         layout.addWidget(self._label_erro)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
         layout.addWidget(splitter, stretch=1)
 
         self._painel_categorias = _CategoriasPainel(self._service, self._mostrar_erro)
         self._painel_produtos = _ProdutosPainel(self._service, self._mostrar_erro)
         splitter.addWidget(self._painel_categorias)
         splitter.addWidget(self._painel_produtos)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
+        splitter.setStretchFactor(0, 35)
+        splitter.setStretchFactor(1, 65)
+
+        layout.addLayout(self._criar_barra_acoes())
 
         self._painel_categorias.categoria_selecionada.connect(self._painel_produtos.exibir_categoria)
+        self._painel_categorias.categoria_selecionada.connect(self._ao_mudar_selecao_categoria)
         self._painel_categorias.alterado.connect(self._painel_produtos.atualizar)
         self._painel_produtos.alterado.connect(self._painel_categorias.atualizar_mantendo_selecao)
+        self._painel_produtos.produto_selecionado.connect(self._ao_mudar_selecao_produto)
+
+        # Detecta em qual lado está o foco pra saber quem é o alvo de Editar/Ativar-Desativar/Excluir.
+        self._painel_categorias.lista.installEventFilter(self)
+        self._painel_produtos.tabela.installEventFilter(self)
+
+        QShortcut(QKeySequence("Ctrl+N"), self, self._novo_padrao)
+        QShortcut(QKeySequence(Qt.Key.Key_F2), self, self._editar)
+        QShortcut(QKeySequence(Qt.Key.Key_Delete), self, self._excluir)
 
         self.atualizar()
+
+    def _criar_barra_acoes(self) -> QHBoxLayout:
+        barra = QHBoxLayout()
+        barra.setSpacing(8)
+
+        self._botao_novo = QPushButton("Novo ▾")
+        self._botao_novo.setProperty("variante", "primario")
+        menu_novo = QMenu(self)
+        menu_novo.addAction("Novo Produto", self._painel_produtos.criar)
+        menu_novo.addAction("Nova Categoria", self._painel_categorias.criar)
+        self._botao_novo.setMenu(menu_novo)
+        barra.addWidget(self._botao_novo)
+
+        self._botao_editar = QPushButton("Editar")
+        self._botao_editar.setProperty("variante", "neutro")
+        self._botao_editar.clicked.connect(self._editar)
+        barra.addWidget(self._botao_editar)
+
+        self._botao_status = QPushButton("Desativar")
+        self._botao_status.setProperty("variante", "perigo")
+        self._botao_status.clicked.connect(self._alternar_status)
+        barra.addWidget(self._botao_status)
+
+        self._botao_excluir = QPushButton("Excluir")
+        self._botao_excluir.setProperty("variante", "perigo")
+        self._botao_excluir.clicked.connect(self._excluir)
+        barra.addWidget(self._botao_excluir)
+
+        barra.addStretch()
+
+        self._botao_combo = QPushButton("Gerenciar combo")
+        self._botao_combo.setProperty("variante", "neutro")
+        self._botao_combo.clicked.connect(self._painel_produtos.gerenciar_combo)
+        barra.addWidget(self._botao_combo)
+
+        return barra
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 - override Qt
+        if event.type() == QEvent.Type.FocusIn:
+            if obj is self._painel_categorias.lista:
+                self._contexto = "categoria"
+                self._atualizar_barra_acoes()
+            elif obj is self._painel_produtos.tabela:
+                self._contexto = "produto"
+                self._atualizar_barra_acoes()
+        return super().eventFilter(obj, event)
+
+    def _ao_mudar_selecao_categoria(self, _categoria: Categoria | None) -> None:
+        if self._contexto == "categoria":
+            self._atualizar_barra_acoes()
+
+    def _ao_mudar_selecao_produto(self, _produto: Produto | None) -> None:
+        if self._contexto == "produto":
+            self._atualizar_barra_acoes()
+        self._botao_combo.setEnabled(_produto is not None)
+
+    def _atualizar_barra_acoes(self) -> None:
+        if self._contexto == "categoria":
+            alvo = self._painel_categorias.categoria_atual()
+            ativo = alvo.ativo if alvo is not None else None
+        else:
+            alvo = self._painel_produtos.produto_atual()
+            ativo = alvo.ativo if alvo is not None else None
+
+        self._botao_editar.setEnabled(alvo is not None)
+        self._botao_status.setEnabled(alvo is not None)
+        self._botao_status.setText("Ativar" if ativo is False else "Desativar")
+        self._botao_excluir.setEnabled(alvo is not None)
+
+    def _novo_padrao(self) -> None:
+        """Ctrl+N segue o contexto atual: categoria selecionada cria produto, senão categoria."""
+        if self._contexto == "produto" or self._painel_categorias.categoria_atual() is not None:
+            self._painel_produtos.criar()
+        else:
+            self._painel_categorias.criar()
+
+    def _editar(self) -> None:
+        if self._contexto == "categoria":
+            self._painel_categorias.editar()
+        else:
+            self._painel_produtos.editar()
+
+    def _alternar_status(self) -> None:
+        if self._contexto == "categoria":
+            self._painel_categorias.alternar_status()
+        else:
+            self._painel_produtos.alternar_status()
+
+    def _excluir(self) -> None:
+        if self._contexto == "categoria":
+            self._painel_categorias.excluir()
+        else:
+            self._painel_produtos.excluir()
 
     def atualizar(self) -> None:
         self._label_erro.setText("")
         self._painel_categorias.atualizar()
+        self._atualizar_barra_acoes()
 
     def _mostrar_erro(self, mensagem: str) -> None:
         self._label_erro.setText(mensagem)
 
 
-class _CategoriasPainel(QWidget):
+class _CategoriasPainel(QFrame):
     """Bloco da esquerda: lista de categorias em ordem alfabética."""
 
     categoria_selecionada = Signal(object)  # Categoria | None
@@ -104,6 +224,7 @@ class _CategoriasPainel(QWidget):
 
     def __init__(self, service: CardapioService, mostrar_erro, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
         self._service = service
         self._mostrar_erro = mostrar_erro
         self._categorias: list[Categoria] = []
@@ -111,40 +232,10 @@ class _CategoriasPainel(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("<b>Categorias</b>"))
 
-        self._lista = QListWidget()
-        self._lista.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._lista.currentRowChanged.connect(self._emitir_selecao)
-        layout.addWidget(self._lista, stretch=1)
-
-        barra1 = QHBoxLayout()
-        botao_nova = QPushButton("Nova categoria")
-        botao_nova.setProperty("variante", "primario")
-        botao_nova.clicked.connect(self._criar)
-        barra1.addWidget(botao_nova)
-        self._botao_editar = QPushButton("Editar")
-        self._botao_editar.setProperty("variante", "neutro")
-        self._botao_editar.clicked.connect(self._editar)
-        barra1.addWidget(self._botao_editar)
-        layout.addLayout(barra1)
-
-        barra2 = QHBoxLayout()
-        self._botao_impressora = QPushButton("Impressora")
-        self._botao_impressora.setProperty("variante", "neutro")
-        self._botao_impressora.clicked.connect(self._associar_impressora)
-        barra2.addWidget(self._botao_impressora)
-        self._botao_status = QPushButton("Desativar")
-        self._botao_status.setProperty("variante", "perigo")
-        self._botao_status.clicked.connect(self._alternar_status)
-        barra2.addWidget(self._botao_status)
-        layout.addLayout(barra2)
-
-        botao_excluir = QPushButton("Excluir categoria")
-        botao_excluir.setProperty("variante", "perigo")
-        botao_excluir.clicked.connect(self._excluir)
-        layout.addWidget(botao_excluir)
-
-        QShortcut(QKeySequence("Ctrl+N"), self, self._criar)
-        QShortcut(QKeySequence(Qt.Key.Key_F2), self, self._editar)
+        self.lista = QListWidget()
+        self.lista.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.lista.currentRowChanged.connect(self._emitir_selecao)
+        layout.addWidget(self.lista, stretch=1)
 
     def atualizar(self) -> None:
         self._atualizar(manter_selecao=False)
@@ -156,14 +247,14 @@ class _CategoriasPainel(QWidget):
         categoria_id_atual = self.categoria_selecionada_id() if manter_selecao else None
         self._categorias = _por_nome(self._service.listar_categorias())
 
-        self._lista.blockSignals(True)
-        self._lista.clear()
+        self.lista.blockSignals(True)
+        self.lista.clear()
         for categoria in self._categorias:
             item = QListWidgetItem()
             item.setData(_ID_CATEGORIA, categoria.id)
-            self._lista.addItem(item)
-            self._lista.setItemWidget(item, _criar_linha_categoria(categoria))
-        self._lista.blockSignals(False)
+            self.lista.addItem(item)
+            self.lista.setItemWidget(item, _criar_linha_categoria(categoria))
+        self.lista.blockSignals(False)
 
         indice = 0
         if categoria_id_atual is not None:
@@ -172,15 +263,15 @@ class _CategoriasPainel(QWidget):
                     indice = linha
                     break
         if self._categorias:
-            self._lista.setCurrentRow(indice)
+            self.lista.setCurrentRow(indice)
         else:
             self._emitir_selecao(-1)
 
     def categoria_selecionada_id(self) -> int | None:
-        item = self._lista.currentItem()
+        item = self.lista.currentItem()
         return item.data(_ID_CATEGORIA) if item is not None else None
 
-    def _categoria_atual(self) -> Categoria | None:
+    def categoria_atual(self) -> Categoria | None:
         categoria_id = self.categoria_selecionada_id()
         if categoria_id is None:
             return None
@@ -190,16 +281,10 @@ class _CategoriasPainel(QWidget):
         return None
 
     def _emitir_selecao(self, linha: int) -> None:
-        categoria = self._categoria_atual() if linha >= 0 else None
-        self._botao_status.setEnabled(categoria is not None)
-        self._botao_status.setText(
-            "Ativar" if categoria is not None and not categoria.ativo else "Desativar"
-        )
-        self._botao_editar.setEnabled(categoria is not None)
-        self._botao_impressora.setEnabled(categoria is not None)
+        categoria = self.categoria_atual() if linha >= 0 else None
         self.categoria_selecionada.emit(categoria)
 
-    def _criar(self) -> None:
+    def criar(self) -> None:
         modal = _CategoriaDialog("Nova categoria", self)
         if modal.exec() != QDialog.DialogCode.Accepted:
             return
@@ -212,8 +297,8 @@ class _CategoriasPainel(QWidget):
         self.atualizar()
         self.alterado.emit()
 
-    def _editar(self) -> None:
-        categoria = self._categoria_atual()
+    def editar(self) -> None:
+        categoria = self.categoria_atual()
         if categoria is None:
             return
         modal = _CategoriaDialog("Editar categoria", self, nome_inicial=categoria.nome)
@@ -228,27 +313,8 @@ class _CategoriasPainel(QWidget):
         self.atualizar_mantendo_selecao()
         self.alterado.emit()
 
-    def _associar_impressora(self) -> None:
-        categoria = self._categoria_atual()
-        if categoria is None:
-            return
-        impressoras = self._service.listar_impressoras()
-        if not impressoras:
-            self._mostrar_erro("Não há impressoras cadastradas.")
-            return
-        modal = _AssociarImpressoraDialog(impressoras, self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
-            return
-        self._mostrar_erro("")
-        try:
-            self._service.associar_impressora(categoria.id, modal.impressora_id())
-        except _ERROS_SERVICE as erro:
-            self._mostrar_erro(str(erro))
-            return
-        self.atualizar_mantendo_selecao()
-
-    def _alternar_status(self) -> None:
-        categoria = self._categoria_atual()
+    def alternar_status(self) -> None:
+        categoria = self.categoria_atual()
         if categoria is None:
             return
         self._mostrar_erro("")
@@ -263,18 +329,24 @@ class _CategoriasPainel(QWidget):
         self.atualizar_mantendo_selecao()
         self.alterado.emit()
 
-    def _excluir(self) -> None:
-        categoria = self._categoria_atual()
+    def excluir(self) -> None:
+        categoria = self.categoria_atual()
         if categoria is None:
             return
-        resposta = QMessageBox.question(
-            self,
-            "Excluir categoria",
-            f"Excluir a categoria '{categoria.nome}' permanentemente? Esta ação não pode ser desfeita.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+        caixa = QMessageBox(self)
+        caixa.setWindowTitle("Atenção: Exclusão de Categoria")
+        caixa.setIcon(QMessageBox.Icon.Warning)
+        caixa.setText(
+            f"Você tem certeza que deseja excluir a categoria '{categoria.nome}'? "
+            "Todos os produtos vinculados a ela também serão excluídos permanentemente."
         )
-        if resposta != QMessageBox.StandardButton.Yes:
+        botao_cancelar = caixa.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
+        botao_confirmar = caixa.addButton("Sim, excluir tudo", QMessageBox.ButtonRole.DestructiveRole)
+        botao_confirmar.setProperty("variante", "perigo")
+        caixa.setDefaultButton(botao_cancelar)
+        caixa.setEscapeButton(botao_cancelar)
+        caixa.exec()
+        if caixa.clickedButton() is not botao_confirmar:
             return
         self._mostrar_erro("")
         try:
@@ -286,13 +358,15 @@ class _CategoriasPainel(QWidget):
         self.alterado.emit()
 
 
-class _ProdutosPainel(QWidget):
+class _ProdutosPainel(QFrame):
     """Bloco da direita: produtos da categoria selecionada, em ordem alfabética."""
 
     alterado = Signal()
+    produto_selecionado = Signal(object)  # Produto | None
 
     def __init__(self, service: CardapioService, mostrar_erro, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
         self._service = service
         self._mostrar_erro = mostrar_erro
         self._categoria: Categoria | None = None
@@ -303,57 +377,23 @@ class _ProdutosPainel(QWidget):
         self._titulo = QLabel("<b>Produtos</b>")
         layout.addWidget(self._titulo)
 
-        self._tabela = QTableWidget(0, len(_COLUNAS_PRODUTOS))
-        self._tabela.setHorizontalHeaderLabels(_COLUNAS_PRODUTOS)
-        self._tabela.verticalHeader().setVisible(False)
-        self._tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        cabecalho = self._tabela.horizontalHeader()
+        self.tabela = QTableWidget(0, len(_COLUNAS_PRODUTOS))
+        self.tabela.setHorizontalHeaderLabels(_COLUNAS_PRODUTOS)
+        self.tabela.verticalHeader().setVisible(False)
+        self.tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        cabecalho = self.tabela.horizontalHeader()
         cabecalho.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for coluna in (1, 2, 3, 4):
             cabecalho.setSectionResizeMode(coluna, QHeaderView.ResizeMode.Fixed)
-        self._tabela.setColumnWidth(1, 90)
-        self._tabela.setColumnWidth(2, 90)
-        self._tabela.setColumnWidth(3, 90)
-        self._tabela.setColumnWidth(4, 110)
-        self._tabela.verticalHeader().setDefaultSectionSize(36)
-        self._tabela.currentCellChanged.connect(lambda *_: self._atualizar_botoes())
-        layout.addWidget(self._tabela, stretch=1)
-
-        acoes = QHBoxLayout()
-        self._botao_novo = QPushButton("Novo produto")
-        self._botao_novo.setProperty("variante", "primario")
-        self._botao_novo.clicked.connect(self._criar)
-        acoes.addWidget(self._botao_novo)
-
-        self._botao_editar = QPushButton("Editar")
-        self._botao_editar.setProperty("variante", "neutro")
-        self._botao_editar.clicked.connect(self._editar)
-        acoes.addWidget(self._botao_editar)
-
-        self._botao_combo = QPushButton("Gerenciar combo")
-        self._botao_combo.setProperty("variante", "neutro")
-        self._botao_combo.clicked.connect(self._gerenciar_combo)
-        acoes.addWidget(self._botao_combo)
-
-        self._botao_status = QPushButton("Desativar")
-        self._botao_status.setProperty("variante", "perigo")
-        self._botao_status.clicked.connect(self._alternar_status)
-        acoes.addWidget(self._botao_status)
-
-        self._botao_excluir = QPushButton("Excluir")
-        self._botao_excluir.setProperty("variante", "perigo")
-        self._botao_excluir.setShortcut(QKeySequence(Qt.Key.Key_Delete))
-        self._botao_excluir.clicked.connect(self._excluir)
-        acoes.addWidget(self._botao_excluir)
-        acoes.addStretch()
-        layout.addLayout(acoes)
-
-        QShortcut(QKeySequence("Ctrl+N"), self, self._criar)
-        QShortcut(QKeySequence(Qt.Key.Key_F2), self, self._editar)
-
-        self._atualizar_botoes()
+        self.tabela.setColumnWidth(1, 90)
+        self.tabela.setColumnWidth(2, 90)
+        self.tabela.setColumnWidth(3, 90)
+        self.tabela.setColumnWidth(4, 110)
+        self.tabela.verticalHeader().setDefaultSectionSize(36)
+        self.tabela.currentCellChanged.connect(lambda *_: self._emitir_selecao())
+        layout.addWidget(self.tabela, stretch=1)
 
     def exibir_categoria(self, categoria: Categoria | None) -> None:
         self._categoria = categoria
@@ -376,35 +416,29 @@ class _ProdutosPainel(QWidget):
                 [p for p in self._service.listar_produtos() if p.categoria_id == categoria.id]
             )
 
-        self._tabela.setRowCount(len(self._produtos))
+        self.tabela.setRowCount(len(self._produtos))
         for linha, produto in enumerate(self._produtos):
-            self._tabela.setItem(linha, 0, QTableWidgetItem(produto.nome))
-            self._tabela.setCellWidget(linha, 1, _criar_badge_tipo(produto.is_combo))
-            self._tabela.setItem(linha, 2, QTableWidgetItem(_formatar_reais(produto.preco)))
-            self._tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(produto.custo)))
-            self._tabela.setCellWidget(linha, 4, _criar_badge_status(produto.ativo))
+            self.tabela.setItem(linha, 0, QTableWidgetItem(produto.nome))
+            self.tabela.setCellWidget(linha, 1, _criar_badge_tipo(produto.is_combo))
+            self.tabela.setItem(linha, 2, QTableWidgetItem(_formatar_reais(produto.preco)))
+            self.tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(produto.custo)))
+            self.tabela.setCellWidget(linha, 4, _criar_badge_status(produto.ativo))
 
-        self._atualizar_botoes()
+        self._emitir_selecao()
 
-    def _produto_selecionado(self) -> Produto | None:
-        linha = self._tabela.currentRow()
+    def produto_atual(self) -> Produto | None:
+        linha = self.tabela.currentRow()
         if linha < 0 or linha >= len(self._produtos):
             return None
         return self._produtos[linha]
 
-    def _atualizar_botoes(self) -> None:
-        produto = self._produto_selecionado()
-        self._botao_novo.setEnabled(self._categoria is not None)
-        self._botao_editar.setEnabled(produto is not None)
-        self._botao_status.setEnabled(produto is not None)
-        self._botao_status.setText("Ativar" if produto is not None and not produto.ativo else "Desativar")
-        self._botao_excluir.setEnabled(produto is not None)
-        self._botao_combo.setEnabled(produto is not None)
+    def _emitir_selecao(self) -> None:
+        self.produto_selecionado.emit(self.produto_atual())
 
     def _categorias_ativas(self) -> list[Categoria]:
         return _por_nome(self._service.listar_categorias_ativas())
 
-    def _criar(self) -> None:
+    def criar(self) -> None:
         categorias = self._categorias_ativas()
         if not categorias:
             self._mostrar_erro("Cadastre uma categoria ativa antes de criar um produto.")
@@ -425,8 +459,8 @@ class _ProdutosPainel(QWidget):
             self.alterado.emit()
             return
 
-    def _editar(self) -> None:
-        produto = self._produto_selecionado()
+    def editar(self) -> None:
+        produto = self.produto_atual()
         if produto is None:
             return
         categorias = self._categorias_ativas()
@@ -489,8 +523,8 @@ class _ProdutosPainel(QWidget):
         caixa.exec()
         return caixa.clickedButton() is botao_forcar
 
-    def _gerenciar_combo(self) -> None:
-        produto = self._produto_selecionado()
+    def gerenciar_combo(self) -> None:
+        produto = self.produto_atual()
         if produto is None:
             return
         candidatos = [p for p in self._service.listar_produtos_ativos() if p.id != produto.id]
@@ -500,8 +534,8 @@ class _ProdutosPainel(QWidget):
         self.atualizar()
         self.alterado.emit()
 
-    def _alternar_status(self) -> None:
-        produto = self._produto_selecionado()
+    def alternar_status(self) -> None:
+        produto = self.produto_atual()
         if produto is None:
             return
         self._mostrar_erro("")
@@ -516,8 +550,8 @@ class _ProdutosPainel(QWidget):
         self.atualizar()
         self.alterado.emit()
 
-    def _excluir(self) -> None:
-        produto = self._produto_selecionado()
+    def excluir(self) -> None:
+        produto = self.produto_atual()
         if produto is None:
             return
         resposta = QMessageBox.question(
@@ -658,34 +692,6 @@ class _CategoriaDialog(QDialog):
 
     def nome(self) -> str:
         return self._campo_nome.text().strip()
-
-
-class _AssociarImpressoraDialog(QDialog):
-    """Modal de escolha de impressora para uma categoria."""
-
-    def __init__(self, impressoras: list, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Associar impressora")
-        self._impressoras = impressoras
-
-        layout = QVBoxLayout(self)
-        formulario = QFormLayout()
-
-        self._seletor = QComboBox()
-        for impressora in impressoras:
-            self._seletor.addItem(impressora.nome, impressora.id)
-        formulario.addRow("Impressora", self._seletor)
-        layout.addLayout(formulario)
-
-        botoes = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        botoes.accepted.connect(self.accept)
-        botoes.rejected.connect(self.reject)
-        layout.addWidget(botoes)
-
-    def impressora_id(self) -> int:
-        return self._seletor.currentData()
 
 
 class _ProdutoDialog(QDialog):
