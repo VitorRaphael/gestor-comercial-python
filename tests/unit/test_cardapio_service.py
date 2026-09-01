@@ -38,7 +38,7 @@ def vender(uow, gerente, caixa_aberto, produto):
     comanda = uow.comandas.salvar(
         Comanda(
             aberta_em=datetime(2026, 8, 20, 12, 0),
-            funcionario_id=gerente.id,
+            usuario_id=gerente.id,
             caixa_id=caixa_aberto.id,
         )
     )

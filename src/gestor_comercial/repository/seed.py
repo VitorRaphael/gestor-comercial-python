@@ -5,10 +5,10 @@ from decimal import Decimal
 
 from gestor_comercial.domain.categoria import Categoria
 from gestor_comercial.domain.combo_item import ComboItem
-from gestor_comercial.domain.enums import PerfilFuncionario
-from gestor_comercial.domain.funcionario import Funcionario
+from gestor_comercial.domain.enums import PerfilUsuario
 from gestor_comercial.domain.mesa import Mesa
 from gestor_comercial.domain.produto import Produto
+from gestor_comercial.domain.usuario import Usuario
 from gestor_comercial.repository.base import SessionLocal
 
 TOTAL_MESAS = 60
@@ -203,16 +203,16 @@ def seed_mesas(session) -> None:
             session.add(Mesa(numero=numero))
 
 
-def seed_funcionario_admin(session) -> None:
-    if session.query(Funcionario).count() > 0:
+def seed_usuario_admin(session) -> None:
+    if session.query(Usuario).count() > 0:
         return
     salt = gerar_salt()
     session.add(
-        Funcionario(
+        Usuario(
             nome=ADMIN_NOME,
             pin_hash=hash_pin(ADMIN_PIN_PADRAO, salt),
             salt=salt,
-            perfil=PerfilFuncionario.GERENTE,
+            perfil=PerfilUsuario.GERENTE,
         )
     )
 
@@ -279,7 +279,7 @@ def seed_combos(session) -> None:
 def run_seed() -> None:
     with SessionLocal() as session:
         seed_mesas(session)
-        seed_funcionario_admin(session)
+        seed_usuario_admin(session)
         seed_cardapio(session)
         seed_combos(session)
         session.commit()

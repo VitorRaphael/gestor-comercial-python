@@ -75,6 +75,7 @@ def main() -> int:
     from gestor_comercial.services.caixa_service import CaixaService
     from gestor_comercial.services.cardapio_service import CardapioService
     from gestor_comercial.services.comanda_service import ComandaService
+    from gestor_comercial.services.funcionario_service import FuncionarioService
     from gestor_comercial.services.impressao_service import ImpressaoService
     from gestor_comercial.services.pagamento_service import PagamentoService
     from gestor_comercial.ui.main_window import MainWindow
@@ -87,7 +88,8 @@ def main() -> int:
     comanda_service = ComandaService(uow, auth_service)
     cardapio_service = CardapioService(uow, auth_service)
     caixa_service = CaixaService(uow, auth_service)
-    pagamento_service = PagamentoService(uow, auth_service, comanda_service)
+    funcionario_service = FuncionarioService(uow, auth_service)
+    pagamento_service = PagamentoService(uow, auth_service, comanda_service, funcionario_service)
     # Sem `abrir_driver` explícito: em produção vale o driver ESC/POS de
     # verdade. Quem troca isso por um driver falso é a suíte de testes.
     impressao_service = ImpressaoService(uow, auth_service)
@@ -99,6 +101,7 @@ def main() -> int:
         caixa_service,
         pagamento_service,
         impressao_service,
+        funcionario_service,
     )
     janela.showMaximized()
 

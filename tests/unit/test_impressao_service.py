@@ -18,7 +18,7 @@ import pytest
 from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.enums import (
     FormaPagamento,
-    PerfilFuncionario,
+    PerfilUsuario,
     StatusCaixa,
     StatusComanda,
     TipoMovimento,
@@ -36,6 +36,7 @@ from gestor_comercial.services.exceptions import (
     NaoAutorizadoError,
     RecursoNaoEncontradoError,
 )
+from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.impressao_service import (
     GRUPO_SEM_IMPRESSORA,
     ImpressaoService,
@@ -68,13 +69,13 @@ def nova_categoria_com_produto(uow, nome_categoria, nome_produto, preco, impress
     )
 
 
-def nova_comanda(uow, caixa, funcionario, mesa=None):
+def nova_comanda(uow, caixa, usuario, mesa=None):
     return uow.comandas.salvar(
         Comanda(
             status=StatusComanda.ABERTA,
             aberta_em=datetime(2026, 8, 21, 19, 30),
             mesa_id=None if mesa is None else mesa.id,
-            funcionario_id=funcionario.id,
+            usuario_id=usuario.id,
             caixa_id=caixa.id,
         )
     )
@@ -788,7 +789,7 @@ def test_fechamento_usa_os_numeros_do_caixa_service(
             valor=dinheiro("50.00"),
             registrado_em=datetime(2026, 8, 21, 21, 0),
             caixa_id=caixa_aberto.id,
-            funcionario_id=gerente.id,
+            usuario_id=gerente.id,
         )
     )
 
@@ -846,7 +847,7 @@ def test_fechamento_de_caixa_fechado_mostra_contado_e_diferenca(
             valor=dinheiro("50.00"),
             registrado_em=datetime(2026, 8, 21, 21, 0),
             caixa_id=caixa_aberto.id,
-            funcionario_id=gerente.id,
+            usuario_id=gerente.id,
         )
     )
     caixa_aberto.status = StatusCaixa.FECHADO
@@ -1148,7 +1149,8 @@ def test_da_comanda_ao_recibo_pelo_caminho_de_verdade(
     cozinha = nova_impressora(uow, "Cozinha")
     lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger", "20.00", cozinha)
     comandas = ComandaService(uow, auth)
-    pagamentos = PagamentoService(uow, auth, comandas)
+    funcionarios = FuncionarioService(uow, auth)
+    pagamentos = PagamentoService(uow, auth, comandas, funcionarios)
     impressao = ImpressaoService(uow, auth, abrir_driver=driver)
 
     comanda = comandas.abrir_por_mesa(mesa.id)
@@ -1177,7 +1179,8 @@ def test_o_fechamento_impresso_bate_com_o_que_o_caixa_service_calcula(
     nova_impressora(uow, "Balcão", padrao=True)
     lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger", "20.00")
     comandas = ComandaService(uow, auth)
-    pagamentos = PagamentoService(uow, auth, comandas)
+    funcionarios = FuncionarioService(uow, auth)
+    pagamentos = PagamentoService(uow, auth, comandas, funcionarios)
     caixas = CaixaService(uow, auth)
     impressao = ImpressaoService(uow, auth, abrir_driver=driver)
 
@@ -1206,8 +1209,8 @@ def test_nome_comprido_de_funcionario_nao_estoura_a_bobina(
     """Nome de gente é comprido, e `funcionarios.nome` aceita até 120 caracteres.
     As linhas "Atendente:" e "Conferido por:" precisam passar pelo formatador
     igual ao nome do produto, senão saem quebradas torto no papel."""
-    atendente = auth.criar_funcionario(
-        "Ana Carolina Rodrigues do Nascimento", PIN_NOME_COMPRIDO, PerfilFuncionario.ATENDENTE
+    atendente = auth.criar_usuario(
+        "Ana Carolina Rodrigues do Nascimento", PIN_NOME_COMPRIDO, PerfilUsuario.OPERADOR_CAIXA
     )
     cozinha = nova_impressora(uow, "Cozinha", padrao=True, colunas=32)
     lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger", "20.00", cozinha)

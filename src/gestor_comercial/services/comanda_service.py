@@ -71,14 +71,35 @@ class ComandaService:
                 "Não há caixa aberto. Abra o caixa antes de iniciar uma comanda."
             )
 
-        funcionario = self.auth.usuario_atual()
+        usuario = self.auth.usuario_atual()
         comanda = Comanda(
             status=StatusComanda.ABERTA,
             aberta_em=datetime.now(),
             mesa_id=mesa_id,
-            funcionario_id=funcionario.id,
+            usuario_id=usuario.id,
             caixa_id=caixa.id,
         )
+        self.uow.comandas.salvar(comanda)
+        self.uow.commit()
+        return comanda
+
+    def definir_atendente(self, comanda_id: int, funcionario_id: int | None) -> Comanda:
+        """Define/troca qual `Funcionario` (garçom/atendente) atendeu a comanda.
+
+        Independente de quem está logado (`usuario_id`, obrigatório e
+        automático) — este é só o vínculo operacional de "quem atendeu",
+        opcional e editável a qualquer momento enquanto a comanda existir.
+        """
+        comanda = self.buscar(comanda_id)
+        if funcionario_id is not None:
+            funcionario = self.uow.funcionarios.buscar_por_id(funcionario_id)
+            if funcionario is None:
+                raise RecursoNaoEncontradoError(f"Funcionário não encontrado (código {funcionario_id}).")
+            if not funcionario.ativo:
+                raise RegraDeNegocioError(
+                    f"O funcionário {funcionario.nome} está desativado e não pode ser vinculado."
+                )
+        comanda.atendente_id = funcionario_id
         self.uow.comandas.salvar(comanda)
         self.uow.commit()
         return comanda

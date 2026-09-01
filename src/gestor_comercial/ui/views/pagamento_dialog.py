@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
 )
 
 from gestor_comercial.domain.enums import FormaPagamento
-from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
     NaoAutorizadoError,
@@ -46,14 +45,12 @@ class PagamentoDialog(QDialog):
     def __init__(
         self,
         pagamento_service: PagamentoService,
-        auth_service: AuthService,
         comanda_id: int,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Pagamento da comanda")
         self._pagamentos = pagamento_service
-        self._auth = auth_service
         self._comanda_id = comanda_id
         self.comanda_fechada = False
 
@@ -86,7 +83,7 @@ class PagamentoDialog(QDialog):
         self._linha_pin_gerente = formulario.addRow("PIN do gerente", self._campo_pin_gerente)
 
         self._combo_funcionario_consumo = QComboBox()
-        for funcionario in self._auth.listar_ativos():
+        for funcionario in self._pagamentos.funcionarios.listar_ativos():
             self._combo_funcionario_consumo.addItem(funcionario.nome, funcionario.id)
         self._linha_funcionario_consumo = formulario.addRow(
             "Funcionário", self._combo_funcionario_consumo

@@ -15,6 +15,7 @@ from gestor_comercial.repository.movimento_caixa_repository import MovimentoCaix
 from gestor_comercial.repository.pagamento_repository import PagamentoRepository
 from gestor_comercial.repository.produto_repository import ProdutoRepository
 from gestor_comercial.repository.quitacao_consumo_repository import QuitacaoConsumoRepository
+from gestor_comercial.repository.usuario_repository import UsuarioRepository
 
 
 class UnitOfWork:
@@ -34,6 +35,7 @@ class UnitOfWork:
         self._session_propria = session is None
         self.session = session if session is not None else SessionLocal()
 
+        self.usuarios = UsuarioRepository(self.session)
         self.funcionarios = FuncionarioRepository(self.session)
         self.mesas = MesaRepository(self.session)
         self.comandas = ComandaRepository(self.session)

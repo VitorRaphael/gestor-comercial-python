@@ -1,9 +1,12 @@
-"""Autenticação por PIN, sessão em memória e cadastro de funcionários.
+"""Autenticação por PIN, sessão em memória e cadastro de usuários de login.
 
-Porte de PinHashService.java, SessaoService.java e FuncionarioService.java.
-No Java a sessão era um mapa token -> funcionário porque havia HTTP no meio;
-aqui é um único processo desktop com um usuário por vez, então a "sessão" é
-uma variável de instância deste service (§3.1 da arquitetura).
+Porte de PinHashService.java e SessaoService.java. No Java a sessão era um
+mapa token -> usuário porque havia HTTP no meio; aqui é um único processo
+desktop com um usuário por vez, então a "sessão" é uma variável de instância
+deste service (§3.1 da arquitetura).
+
+`Usuario` é só quem loga (ADMIN/GERENTE/OPERADOR_CAIXA) — o CRUD de
+`Funcionario` (atendimento, sem login) vive em `FuncionarioService`.
 """
 
 from __future__ import annotations
@@ -13,8 +16,8 @@ import hashlib
 import hmac
 import os
 
-from gestor_comercial.domain.enums import PerfilFuncionario
-from gestor_comercial.domain.funcionario import Funcionario
+from gestor_comercial.domain.enums import PerfilUsuario
+from gestor_comercial.domain.usuario import Usuario
 from gestor_comercial.repository.unit_of_work import UnitOfWork
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
@@ -27,13 +30,16 @@ TAMANHO_SALT_BYTES = 16
 PIN_MIN_DIGITOS = 4
 PIN_MAX_DIGITOS = 8
 
+# Perfis que passam em `exigir_gerente()`: ADMIN é superset de GERENTE.
+_PERFIS_GERENCIAIS = {PerfilUsuario.ADMIN, PerfilUsuario.GERENTE}
+
 
 class AuthService:
-    """Hash de PIN, sessão do funcionário logado e CRUD de funcionários."""
+    """Hash de PIN, sessão do usuário logado e CRUD de usuários de login."""
 
     def __init__(self, uow: UnitOfWork) -> None:
         self.uow = uow
-        self._usuario_logado: Funcionario | None = None
+        self._usuario_logado: Usuario | None = None
 
     # ------------------------------------------------------------------
     # Hash do PIN (porte de PinHashService.java)
@@ -59,7 +65,7 @@ class AuthService:
         try:
             calculado = AuthService.hash_pin(pin, salt)
         except ValueError:
-            # Salt corrompido no banco: este funcionário simplesmente não
+            # Salt corrompido no banco: este usuário simplesmente não
             # autentica, mas o login dos outros continua funcionando.
             return False
         # compare_digest em vez de == para o tempo da comparação não revelar
@@ -71,120 +77,120 @@ class AuthService:
     # ------------------------------------------------------------------
 
     @property
-    def usuario_logado(self) -> Funcionario | None:
+    def usuario_logado(self) -> Usuario | None:
         return self._usuario_logado
 
-    def login(self, pin: str) -> Funcionario:
-        funcionario = self.autenticar_por_pin(pin)
-        self._usuario_logado = funcionario
-        return funcionario
+    def login(self, pin: str) -> Usuario:
+        usuario = self.autenticar_por_pin(pin)
+        self._usuario_logado = usuario
+        return usuario
 
     def logout(self) -> None:
         self._usuario_logado = None
 
-    def usuario_atual(self) -> Funcionario:
+    def usuario_atual(self) -> Usuario:
         if self._usuario_logado is None:
-            raise NaoAutorizadoError("Nenhum funcionário logado. Faça login para continuar.")
+            raise NaoAutorizadoError("Nenhum usuário logado. Faça login para continuar.")
         return self._usuario_logado
 
-    def exigir_gerente(self) -> Funcionario:
+    def exigir_gerente(self) -> Usuario:
         """Porta de entrada das ações administrativas de §3.1, usada pelos outros services."""
-        funcionario = self.usuario_atual()
-        if funcionario.perfil is not PerfilFuncionario.GERENTE:
+        usuario = self.usuario_atual()
+        if usuario.perfil not in _PERFIS_GERENCIAIS:
             raise AcessoNegadoError("Esta ação só pode ser feita por um gerente.")
-        return funcionario
+        return usuario
 
     # ------------------------------------------------------------------
-    # Funcionários (porte de FuncionarioService.java)
+    # Usuários de login (porte de FuncionarioService.java)
     # ------------------------------------------------------------------
 
-    def criar_funcionario(self, nome: str, pin: str, perfil: PerfilFuncionario) -> Funcionario:
+    def criar_usuario(self, nome: str, pin: str, perfil: PerfilUsuario) -> Usuario:
         # Ação administrativa (§3.1) — exige gerente, com uma exceção: o
         # cadastro do primeiro gerente do sistema (feito pelo seed no boot,
         # ou manualmente se o seed não rodou) não tem quem autorizar ainda.
         # Passado esse bootstrap, todo cadastro exige gerente logado.
-        if self.uow.funcionarios.contar_ativos_por_perfil(PerfilFuncionario.GERENTE) > 0:
+        if self.uow.usuarios.contar_ativos_por_perfil(PerfilUsuario.GERENTE) > 0:
             self.exigir_gerente()
 
         nome_limpo = nome.strip() if isinstance(nome, str) else ""
         if not nome_limpo:
-            raise RegraDeNegocioError("Informe o nome do funcionário.")
-        if not isinstance(perfil, PerfilFuncionario):
-            raise RegraDeNegocioError("Selecione o perfil do funcionário: Atendente ou Gerente.")
+            raise RegraDeNegocioError("Informe o nome do usuário.")
+        if not isinstance(perfil, PerfilUsuario):
+            raise RegraDeNegocioError("Selecione o perfil do usuário: Admin, Gerente ou Operador de Caixa.")
         self._validar_formato_pin(pin)
 
-        # O PIN é a identidade do funcionário na tela de login (não há usuário),
-        # então dois ativos com o mesmo PIN fariam a venda ser lançada no nome
-        # de quem o banco devolvesse primeiro. Inativos podem repetir: o PIN de
-        # um funcionário que saiu fica livre pro próximo.
+        # O PIN é a identidade do usuário na tela de login, então dois ativos
+        # com o mesmo PIN fariam a venda ser lançada no nome de quem o banco
+        # devolvesse primeiro. Inativos podem repetir: o PIN de um usuário que
+        # saiu fica livre pro próximo.
         if any(
-            self.confere_pin(pin, f.salt, f.pin_hash) for f in self.uow.funcionarios.listar_ativos()
+            self.confere_pin(pin, u.salt, u.pin_hash) for u in self.uow.usuarios.listar_ativos()
         ):
-            raise RegraDeNegocioError("Este PIN já está em uso por outro funcionário ativo.")
+            raise RegraDeNegocioError("Este PIN já está em uso por outro usuário ativo.")
 
         salt = self.gerar_salt()
-        funcionario = Funcionario(
+        usuario = Usuario(
             nome=nome_limpo,
             salt=salt,
             pin_hash=self.hash_pin(pin, salt),
             perfil=perfil,
             ativo=True,
         )
-        self.uow.funcionarios.salvar(funcionario)
+        self.uow.usuarios.salvar(usuario)
         self.uow.commit()
-        return funcionario
+        return usuario
 
-    def listar_ativos(self) -> list[Funcionario]:
-        return self.uow.funcionarios.listar_ativos()
+    def listar_ativos(self) -> list[Usuario]:
+        return self.uow.usuarios.listar_ativos()
 
-    def listar_todos(self) -> list[Funcionario]:
-        return self.uow.funcionarios.listar_todos()
+    def listar_todos(self) -> list[Usuario]:
+        return self.uow.usuarios.listar_todos()
 
-    def buscar_funcionario(self, funcionario_id: int) -> Funcionario:
-        funcionario = self.uow.funcionarios.buscar_por_id(funcionario_id)
-        if funcionario is None:
-            raise RecursoNaoEncontradoError(f"Funcionário não encontrado (código {funcionario_id}).")
-        return funcionario
+    def buscar_usuario(self, usuario_id: int) -> Usuario:
+        usuario = self.uow.usuarios.buscar_por_id(usuario_id)
+        if usuario is None:
+            raise RecursoNaoEncontradoError(f"Usuário não encontrado (código {usuario_id}).")
+        return usuario
 
-    def desativar_funcionario(self, funcionario_id: int) -> Funcionario:
+    def desativar_usuario(self, usuario_id: int) -> Usuario:
         self.exigir_gerente()  # ação administrativa (§3.1)
-        funcionario = self.buscar_funcionario(funcionario_id)
-        if not funcionario.ativo:
-            raise RegraDeNegocioError(f"O funcionário {funcionario.nome} já está desativado.")
+        usuario = self.buscar_usuario(usuario_id)
+        if not usuario.ativo:
+            raise RegraDeNegocioError(f"O usuário {usuario.nome} já está desativado.")
 
         # Sem nenhum gerente ativo ninguém mais autoriza cancelamento nem abre
         # caixa, e não existe tela de recuperação: o sistema trava de vez.
         # Por isso o último gerente não pode ser desativado nem por engano.
         if (
-            funcionario.perfil is PerfilFuncionario.GERENTE
-            and self.uow.funcionarios.contar_ativos_por_perfil(PerfilFuncionario.GERENTE) <= 1
+            usuario.perfil is PerfilUsuario.GERENTE
+            and self.uow.usuarios.contar_ativos_por_perfil(PerfilUsuario.GERENTE) <= 1
         ):
             raise RegraDeNegocioError(
                 "Não é possível desativar o último gerente ativo. "
                 "Cadastre outro gerente antes de desativar este."
             )
 
-        funcionario.ativo = False
-        self.uow.funcionarios.salvar(funcionario)
+        usuario.ativo = False
+        self.uow.usuarios.salvar(usuario)
         self.uow.commit()
-        return funcionario
+        return usuario
 
-    def autenticar_por_pin(self, pin: str) -> Funcionario:
+    def autenticar_por_pin(self, pin: str) -> Usuario:
         """Descobre de quem é o PIN, sem mexer na sessão."""
         if not isinstance(pin, str) or not pin:
             raise NaoAutorizadoError("Digite o PIN para continuar.")
-        for funcionario in self.uow.funcionarios.listar_ativos():
-            if self.confere_pin(pin, funcionario.salt, funcionario.pin_hash):
-                return funcionario
+        for usuario in self.uow.usuarios.listar_ativos():
+            if self.confere_pin(pin, usuario.salt, usuario.pin_hash):
+                return usuario
         raise NaoAutorizadoError("PIN inválido.")
 
-    def validar_pin_gerente(self, pin: str) -> Funcionario:
+    def validar_pin_gerente(self, pin: str) -> Usuario:
         """Reautenticação para ação crítica: confere o PIN e devolve quem autorizou,
-        mantendo na sessão o atendente que estava operando (§3.1)."""
-        funcionario = self.autenticar_por_pin(pin)
-        if funcionario.perfil is not PerfilFuncionario.GERENTE:
+        mantendo na sessão o usuário que estava operando (§3.1)."""
+        usuario = self.autenticar_por_pin(pin)
+        if usuario.perfil not in _PERFIS_GERENCIAIS:
             raise AcessoNegadoError("O PIN informado não é de um gerente.")
-        return funcionario
+        return usuario
 
     # ------------------------------------------------------------------
 
@@ -192,7 +198,7 @@ class AuthService:
     def _validar_formato_pin(pin: str) -> None:
         # Só dígito ASCII: o teclado da tela de login é numérico, então um PIN
         # com letra (ou com dígito unicode colado de fora) nunca mais poderia
-        # ser digitado de volta pelo funcionário.
+        # ser digitado de volta pelo usuário.
         if not isinstance(pin, str) or not pin.isascii() or not pin.isdigit():
             raise RegraDeNegocioError("O PIN deve conter apenas números.")
         if not PIN_MIN_DIGITOS <= len(pin) <= PIN_MAX_DIGITOS:

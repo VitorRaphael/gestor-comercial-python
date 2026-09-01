@@ -8,7 +8,7 @@ from gestor_comercial.domain.caixa import Caixa
 from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.enums import (
     FormaPagamento,
-    PerfilFuncionario,
+    PerfilUsuario,
     StatusCaixa,
     StatusComanda,
     TipoMovimento,
@@ -32,12 +32,12 @@ def caixas(uow, auth):
     return CaixaService(uow, auth)
 
 
-def _nova_comanda(uow, caixa, funcionario, status=StatusComanda.ABERTA):
+def _nova_comanda(uow, caixa, usuario, status=StatusComanda.ABERTA):
     return uow.comandas.salvar(
         Comanda(
             status=status,
             aberta_em=datetime(2026, 8, 20, 12, 0),
-            funcionario_id=funcionario.id,
+            usuario_id=usuario.id,
             caixa_id=caixa.id,
         )
     )
@@ -291,7 +291,7 @@ def test_registrar_reforco_vincula_caixa_aberto_e_quem_registrou(caixas, gerente
     assert movimento.valor == Decimal("50.00")
     assert movimento.descricao == "Troco extra"
     assert movimento.caixa_id == caixa_aberto.id
-    assert movimento.funcionario_id == gerente.id
+    assert movimento.usuario_id == gerente.id
     assert movimento.registrado_em is not None
 
 
@@ -299,7 +299,7 @@ def test_registrar_reforco_liberado_para_atendente(caixas, auth, gerente, atende
     auth.login(PIN_ATENDENTE)
     movimento = caixas.registrar_movimento(TipoMovimento.REFORCO, Decimal("20.00"))
 
-    assert movimento.funcionario_id == atendente.id
+    assert movimento.usuario_id == atendente.id
     assert movimento.descricao is None
 
 
@@ -384,7 +384,7 @@ def test_listar_movimentos_traz_so_os_do_caixa(uow, caixas, gerente, caixa_abert
             valor=Decimal("99.00"),
             registrado_em=datetime(2026, 8, 19, 10, 0),
             caixa_id=outro.id,
-            funcionario_id=gerente.id,
+            usuario_id=gerente.id,
         )
     )
 
@@ -661,9 +661,9 @@ def test_listar_historico_filtra_por_periodo(uow, caixas):
 
 
 def test_listar_historico_filtra_por_operador_abertura_ou_fechamento(uow, auth, gerente):
-    abriu = auth.criar_funcionario("Quem Abriu", "444444", PerfilFuncionario.ATENDENTE)
-    fechou = auth.criar_funcionario("Quem Fechou", "555555", PerfilFuncionario.ATENDENTE)
-    de_outro = auth.criar_funcionario("Outro", "666666", PerfilFuncionario.ATENDENTE)
+    abriu = auth.criar_usuario("Quem Abriu", "444444", PerfilUsuario.OPERADOR_CAIXA)
+    fechou = auth.criar_usuario("Quem Fechou", "555555", PerfilUsuario.OPERADOR_CAIXA)
+    de_outro = auth.criar_usuario("Outro", "666666", PerfilUsuario.OPERADOR_CAIXA)
 
     caixa_do_abridor = uow.caixas.salvar(
         Caixa(
@@ -690,8 +690,8 @@ def test_listar_historico_filtra_por_operador_abertura_ou_fechamento(uow, auth, 
     uow.commit()
 
     servico = CaixaService(uow, auth)
-    historico_abridor = servico.listar_historico(funcionario_id=abriu.id)
-    historico_fechador = servico.listar_historico(funcionario_id=fechou.id)
+    historico_abridor = servico.listar_historico(usuario_id=abriu.id)
+    historico_fechador = servico.listar_historico(usuario_id=fechou.id)
 
     assert [c.id for c in historico_abridor] == [caixa_do_abridor.id]
     assert [c.id for c in historico_fechador] == [caixa_do_fechador.id]

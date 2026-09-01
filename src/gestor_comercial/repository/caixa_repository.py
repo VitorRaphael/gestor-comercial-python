@@ -43,14 +43,14 @@ class CaixaRepository(Repository[Caixa]):
         *,
         inicio: date | None = None,
         fim: date | None = None,
-        funcionario_id: int | None = None,
+        usuario_id: int | None = None,
     ) -> list[Caixa]:
         """Fechamentos para a tela de Histórico, do mais recente para o mais antigo.
 
         `inicio`/`fim` filtram pela data de `fechado_em` (mesmo eixo da sequência
-        diária), inclusive nas duas pontas. `funcionario_id` casa com quem abriu
+        diária), inclusive nas duas pontas. `usuario_id` casa com quem abriu
         OU quem fechou, porque o gerente que está conferindo pode não lembrar de
-        qual das duas pontas do turno era o funcionário que procura.
+        qual das duas pontas do turno era o usuário que procura.
         """
         stmt = select(Caixa).where(Caixa.status == StatusCaixa.FECHADO)
         if inicio is not None:
@@ -58,9 +58,9 @@ class CaixaRepository(Repository[Caixa]):
         if fim is not None:
             limite = datetime(fim.year, fim.month, fim.day) + timedelta(days=1)
             stmt = stmt.where(Caixa.fechado_em < limite)
-        if funcionario_id is not None:
+        if usuario_id is not None:
             stmt = stmt.where(
-                (Caixa.aberto_por_id == funcionario_id) | (Caixa.fechado_por_id == funcionario_id)
+                (Caixa.aberto_por_id == usuario_id) | (Caixa.fechado_por_id == usuario_id)
             )
         stmt = stmt.order_by(Caixa.fechado_em.desc(), Caixa.id.desc())
         return list(self.session.scalars(stmt))

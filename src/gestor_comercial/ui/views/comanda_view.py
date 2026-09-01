@@ -17,6 +17,7 @@ from decimal import Decimal
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -46,6 +47,7 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
@@ -75,12 +77,14 @@ class ComandaView(QWidget):
         comanda_service: ComandaService,
         cardapio_service: CardapioService,
         impressao_service: ImpressaoService,
+        funcionario_service: FuncionarioService,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._comanda_service = comanda_service
         self._cardapio_service = cardapio_service
         self._impressao_service = impressao_service
+        self._funcionario_service = funcionario_service
         self._comanda: Comanda | None = None
 
         self._montar_layout()
@@ -125,6 +129,15 @@ class ComandaView(QWidget):
         self._botao_cancelar_comanda.clicked.connect(self._cancelar_comanda)
         cabecalho.addWidget(self._botao_cancelar_comanda)
         layout_externo.addLayout(cabecalho)
+
+        linha_atendente = QHBoxLayout()
+        linha_atendente.addWidget(QLabel("Atendeu:"))
+        self._combo_atendente = QComboBox()
+        self._combo_atendente.setObjectName("combo-atendente")
+        self._combo_atendente.currentIndexChanged.connect(self._ao_trocar_atendente)
+        linha_atendente.addWidget(self._combo_atendente)
+        linha_atendente.addStretch()
+        layout_externo.addLayout(linha_atendente)
 
         self._label_erro = QLabel("")
         self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
@@ -218,6 +231,8 @@ class ComandaView(QWidget):
         titulo = f"Mesa {self._comanda.mesa.numero}" if self._comanda.mesa else "Balcão"
         self._label_titulo.setText(titulo)
 
+        self._popular_combo_atendente()
+
         itens = self._comanda_service.listar_itens(self._comanda.id)
         itens_ativos = [item for item in itens if not item.cancelado]
         itens_pendentes = [item for item in itens_ativos if item.impresso_em is None]
@@ -252,6 +267,36 @@ class ComandaView(QWidget):
         # liberada: cupom da cozinha some ou rasga depois do pagamento também.
         self._botao_enviar_pedido.setEnabled(aberta and bool(itens_pendentes))
         self._botao_segunda_via.setEnabled(len(itens_ativos) > 0)
+
+    def _popular_combo_atendente(self) -> None:
+        """Busca rápida de quem atendeu (§3.11) — só funcionários ativos, mais
+        o próprio já vinculado mesmo que tenha sido desativado depois."""
+        assert self._comanda is not None
+        self._combo_atendente.blockSignals(True)
+        self._combo_atendente.clear()
+        self._combo_atendente.addItem("— Ninguém —", None)
+
+        atendentes = self._funcionario_service.listar_ativos()
+        atendente_atual = self._comanda.atendente
+        if atendente_atual is not None and not atendente_atual.ativo:
+            atendentes = [atendente_atual, *atendentes]
+
+        for funcionario in atendentes:
+            self._combo_atendente.addItem(funcionario.nome, funcionario.id)
+
+        indice = self._combo_atendente.findData(self._comanda.atendente_id)
+        self._combo_atendente.setCurrentIndex(indice if indice >= 0 else 0)
+        self._combo_atendente.blockSignals(False)
+
+    def _ao_trocar_atendente(self) -> None:
+        if self._comanda is None:
+            return
+        funcionario_id = self._combo_atendente.currentData()
+        try:
+            self._comanda_service.definir_atendente(self._comanda.id, funcionario_id)
+        except _ERROS_SERVICE as erro:
+            self._mostrar_mensagem(str(erro), sucesso=False)
+            self._popular_combo_atendente()
 
     @staticmethod
     def _agrupar_para_exibicao(itens: list[ItemComanda]) -> list[list[ItemComanda]]:

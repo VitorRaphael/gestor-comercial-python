@@ -23,6 +23,7 @@ from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.comanda_service import ComandaService
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
 from gestor_comercial.services.exceptions import RegraDeNegocioError
+from gestor_comercial.services.funcionario_service import FuncionarioService
 
 
 @dataclass(frozen=True)
@@ -60,10 +61,17 @@ class ExtratoConsumo:
 class PagamentoService:
     """Pagamento parcial/múltiplo, troco e quitação de consumo interno (§3.7, §3.8)."""
 
-    def __init__(self, uow: UnitOfWork, auth: AuthService, comandas: ComandaService) -> None:
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        auth: AuthService,
+        comandas: ComandaService,
+        funcionarios: FuncionarioService,
+    ) -> None:
         self.uow = uow
         self.auth = auth
         self.comandas = comandas
+        self.funcionarios = funcionarios
 
     # ------------------------------------------------------------------
     # Recebimento (porte de PagamentoService.registrar)
@@ -193,7 +201,7 @@ class PagamentoService:
     def calcular_saldo_devedor(self, funcionario_id: int) -> Decimal:
         """Fonte da verdade da dívida: o que foi consumido menos o que já foi quitado."""
         self.auth.exigir_gerente()  # §3.1/§3.8: dívida de um funcionário não é leitura livre
-        self.auth.buscar_funcionario(funcionario_id)
+        self.funcionarios.buscar(funcionario_id)
         return self._somar_pendente(
             self.uow.pagamentos.listar_consumos_do_funcionario(funcionario_id)
         )
@@ -215,7 +223,7 @@ class PagamentoService:
 
     def listar_consumos(self, funcionario_id: int) -> ExtratoConsumo:
         self.auth.exigir_gerente()  # §3.1/§3.8
-        funcionario = self.auth.buscar_funcionario(funcionario_id)
+        funcionario = self.funcionarios.buscar(funcionario_id)
         consumos = self.uow.pagamentos.listar_consumos_do_funcionario(funcionario_id)
         return ExtratoConsumo(
             funcionario_id=funcionario.id,
@@ -227,7 +235,7 @@ class PagamentoService:
 
     def quitar(self, funcionario_id: int, valor: Decimal, pin_gerente: str) -> Decimal:
         """Abate a dívida do mais antigo para o mais novo e devolve o saldo que sobrou."""
-        funcionario = self.auth.buscar_funcionario(funcionario_id)
+        funcionario = self.funcionarios.buscar(funcionario_id)
         gerente = self.auth.validar_pin_gerente(pin_gerente)
 
         montante = self._valor_monetario(valor, "valor da quitação")
@@ -290,7 +298,7 @@ class PagamentoService:
             raise RegraDeNegocioError("Informe qual funcionário está consumindo.")
 
         self.auth.validar_pin_gerente(pin_gerente)
-        funcionario = self.auth.buscar_funcionario(funcionario_consumo_id)
+        funcionario = self.funcionarios.buscar(funcionario_consumo_id)
         if not funcionario.ativo:
             raise RegraDeNegocioError(
                 f"O funcionário {funcionario.nome} está desativado e não pode lançar consumo interno."

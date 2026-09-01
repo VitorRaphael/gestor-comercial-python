@@ -25,8 +25,8 @@ from PySide6.QtWidgets import (
 )
 
 from gestor_comercial.domain.comanda import Comanda
-from gestor_comercial.domain.enums import PerfilFuncionario
-from gestor_comercial.domain.funcionario import Funcionario
+from gestor_comercial.domain.enums import PerfilUsuario
+from gestor_comercial.domain.usuario import Usuario
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.caixa_service import CaixaService
 from gestor_comercial.services.cardapio_service import CardapioService
@@ -37,6 +37,7 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.services.pagamento_service import PagamentoService
 from gestor_comercial.ui.views.caixa_view import CaixaView
@@ -57,9 +58,12 @@ from gestor_comercial.ui.widgets.senha_gerente_dialog import SenhaGerenteDialog
 _ROTULOS_QUE_EXIGEM_PIN = {"Relatórios"}
 
 _ROTULOS_PERFIL = {
-    PerfilFuncionario.ATENDENTE: "Atendente",
-    PerfilFuncionario.GERENTE: "Gerente",
+    PerfilUsuario.ADMIN: "Admin",
+    PerfilUsuario.GERENTE: "Gerente",
+    PerfilUsuario.OPERADOR_CAIXA: "Operador de Caixa",
 }
+
+_PERFIS_GERENCIAIS = {PerfilUsuario.ADMIN, PerfilUsuario.GERENTE}
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
@@ -75,6 +79,7 @@ class MainWindow(QMainWindow):
         caixa_service: CaixaService,
         pagamento_service: PagamentoService,
         impressao_service: ImpressaoService,
+        funcionario_service: FuncionarioService,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -85,6 +90,7 @@ class MainWindow(QMainWindow):
         self._auth = auth_service
         self._pagamentos = pagamento_service
         self._impressao = impressao_service
+        self._funcionarios = funcionario_service
 
         self._pilha_raiz = QStackedWidget()
         self.setCentralWidget(self._pilha_raiz)
@@ -122,14 +128,16 @@ class MainWindow(QMainWindow):
         self._mesas_view = MesasView(comanda_service)
         self._mesas_view.comanda_aberta.connect(self._abrir_comanda)
 
-        self._comanda_view = ComandaView(comanda_service, cardapio_service, self._impressao)
+        self._comanda_view = ComandaView(
+            comanda_service, cardapio_service, self._impressao, self._funcionarios
+        )
         self._comanda_view.voltar.connect(self._voltar_para_mesas)
         self._comanda_view.comanda_cancelada.connect(self._ao_comanda_cancelada)
         self._comanda_view.pagamento_solicitado.connect(self._abrir_pagamento)
 
         self._caixa_view = CaixaView(caixa_service, self._impressao)
         self._cardapio_view = CardapioView(cardapio_service)
-        self._funcionarios_view = FuncionariosView(auth_service, self._pagamentos)
+        self._funcionarios_view = FuncionariosView(self._funcionarios, self._pagamentos)
         self._impressoras_view = ImpressorasView(cardapio_service, self._impressao)
         self._relatorios_view = RelatoriosView(caixa_service, auth_service, self._impressao)
 
@@ -278,7 +286,7 @@ class MainWindow(QMainWindow):
 
     def _abrir_pagamento(self, comanda_id: int) -> None:
         self._aviso_impressao.limpar()
-        modal = PagamentoDialog(self._pagamentos, self._auth, comanda_id, self)
+        modal = PagamentoDialog(self._pagamentos, comanda_id, self)
         modal.exec()
         if modal.comanda_fechada:
             # Recibo só quando a conta fecha: um cupom por pagamento parcial
@@ -308,11 +316,11 @@ class MainWindow(QMainWindow):
     # Sessão
     # ------------------------------------------------------------------
 
-    def _ao_logar(self, funcionario: Funcionario) -> None:
-        rotulo_perfil = _ROTULOS_PERFIL.get(funcionario.perfil, funcionario.perfil.value)
-        self._label_usuario.setText(f"{funcionario.nome} · {rotulo_perfil}")
-        # Atendente nunca vê o botão — nem sabe que a auditoria de fechamentos existe.
-        self._botao_relatorios.setVisible(funcionario.perfil is PerfilFuncionario.GERENTE)
+    def _ao_logar(self, usuario: Usuario) -> None:
+        rotulo_perfil = _ROTULOS_PERFIL.get(usuario.perfil, usuario.perfil.value)
+        self._label_usuario.setText(f"{usuario.nome} · {rotulo_perfil}")
+        # Operador de caixa nunca vê o botão — nem sabe que a auditoria de fechamentos existe.
+        self._botao_relatorios.setVisible(usuario.perfil in _PERFIS_GERENCIAIS)
         # Aviso de impressão é da sessão anterior; quem entra agora não tem o que
         # fazer com o cupom de outro turno.
         self._aviso_impressao.limpar()

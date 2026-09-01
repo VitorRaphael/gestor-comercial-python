@@ -17,15 +17,21 @@ class Comanda(Base):
     cancelada_em: Mapped[datetime | None] = mapped_column(DateTime)
     motivo_cancelamento: Mapped[str | None] = mapped_column(String(500))
     mesa_id: Mapped[int | None] = mapped_column(ForeignKey("mesas.id"))
-    funcionario_id: Mapped[int] = mapped_column(ForeignKey("funcionarios.id"), nullable=False)
-    cancelado_por_id: Mapped[int | None] = mapped_column(ForeignKey("funcionarios.id"))
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False)
+    cancelado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+    atendente_id: Mapped[int | None] = mapped_column(ForeignKey("funcionarios.id"))
     caixa_id: Mapped[int] = mapped_column(ForeignKey("caixas.id"), nullable=False)
 
     mesa: Mapped["Mesa | None"] = relationship(back_populates="comandas")
-    funcionario: Mapped["Funcionario"] = relationship(
-        foreign_keys=[funcionario_id], back_populates="comandas"
+    usuario: Mapped["Usuario"] = relationship(
+        foreign_keys=[usuario_id], back_populates="comandas"
     )
-    cancelado_por: Mapped["Funcionario | None"] = relationship(foreign_keys=[cancelado_por_id])
+    cancelado_por: Mapped["Usuario | None"] = relationship(
+        foreign_keys=[cancelado_por_id], back_populates="comandas_canceladas"
+    )
+    atendente: Mapped["Funcionario | None"] = relationship(
+        foreign_keys=[atendente_id], back_populates="comandas_atendidas"
+    )
     caixa: Mapped["Caixa"] = relationship(back_populates="comandas")
     itens: Mapped[list["ItemComanda"]] = relationship(back_populates="comanda")
     pagamentos: Mapped[list["Pagamento"]] = relationship(back_populates="comanda")

@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from gestor_comercial.domain.enums import FormaPagamento, PerfilFuncionario, StatusComanda, StatusMesa
+from gestor_comercial.domain.enums import FormaPagamento, StatusComanda, StatusMesa
 from gestor_comercial.domain.produto import Produto
 from gestor_comercial.services.comanda_service import ComandaService
 from gestor_comercial.services.exceptions import (
@@ -24,8 +24,8 @@ def comandas(uow, auth):
 
 
 @pytest.fixture
-def pagamentos(uow, auth, comandas):
-    return PagamentoService(uow, auth, comandas)
+def pagamentos(uow, auth, comandas, funcionarios):
+    return PagamentoService(uow, auth, comandas, funcionarios)
 
 
 @pytest.fixture
@@ -259,72 +259,72 @@ def test_registrar_sem_ninguem_logado(pagamentos, auth, conta_36):
 # ----------------------------------------------------------------------
 
 
-def test_registrar_consumo_interno_gera_divida_do_funcionario(pagamentos, conta_36, atendente):
+def test_registrar_consumo_interno_gera_divida_do_funcionario(pagamentos, conta_36, funcionario):
     resumo = pagamentos.registrar(
         conta_36.id,
         FormaPagamento.CONSUMO_INTERNO,
         Decimal("36.00"),
         pin_gerente=PIN_GERENTE,
-        funcionario_consumo_id=atendente.id,
+        funcionario_consumo_id=funcionario.id,
     )
 
     assert resumo.comanda_fechada is True
     (pagamento,) = pagamentos.listar_por_comanda(conta_36.id)
-    assert pagamento.funcionario_consumo_id == atendente.id
+    assert pagamento.funcionario_consumo_id == funcionario.id
     assert pagamento.valor == Decimal("36.00")
     assert pagamento.valor_quitado == Decimal("0.00")
-    assert pagamentos.calcular_saldo_devedor(atendente.id) == Decimal("36.00")
-    assert atendente.saldo_devedor == Decimal("36.00")
+    assert pagamentos.calcular_saldo_devedor(funcionario.id) == Decimal("36.00")
+    assert funcionario.saldo_devedor == Decimal("36.00")
 
 
-def test_registrar_consumo_interno_parcial_soma_so_o_lancado(pagamentos, conta_36, atendente):
+def test_registrar_consumo_interno_parcial_soma_so_o_lancado(pagamentos, conta_36, funcionario):
     pagamentos.registrar(
         conta_36.id,
         FormaPagamento.CONSUMO_INTERNO,
         Decimal("10.00"),
         pin_gerente=PIN_GERENTE,
-        funcionario_consumo_id=atendente.id,
+        funcionario_consumo_id=funcionario.id,
     )
     resumo = pagamentos.registrar(conta_36.id, FormaPagamento.DINHEIRO, Decimal("26.00"))
 
     assert resumo.comanda_fechada is True
-    assert pagamentos.calcular_saldo_devedor(atendente.id) == Decimal("10.00")
-    assert atendente.saldo_devedor == Decimal("10.00")
+    assert pagamentos.calcular_saldo_devedor(funcionario.id) == Decimal("10.00")
+    assert funcionario.saldo_devedor == Decimal("10.00")
 
 
-def test_registrar_consumo_interno_sem_pin_de_gerente(pagamentos, conta_36, atendente):
+def test_registrar_consumo_interno_sem_pin_de_gerente(pagamentos, conta_36, funcionario):
     with pytest.raises(RegraDeNegocioError):
         pagamentos.registrar(
             conta_36.id,
             FormaPagamento.CONSUMO_INTERNO,
             Decimal("36.00"),
-            funcionario_consumo_id=atendente.id,
+            funcionario_consumo_id=funcionario.id,
         )
 
 
-def test_registrar_consumo_interno_com_pin_de_atendente(pagamentos, conta_36, atendente):
+def test_registrar_consumo_interno_com_pin_de_atendente(pagamentos, conta_36, funcionario, atendente):
     with pytest.raises(AcessoNegadoError):
         pagamentos.registrar(
             conta_36.id,
             FormaPagamento.CONSUMO_INTERNO,
             Decimal("36.00"),
             pin_gerente=PIN_ATENDENTE,
-            funcionario_consumo_id=atendente.id,
+            funcionario_consumo_id=funcionario.id,
         )
 
 
-def test_registrar_consumo_interno_com_pin_inexistente(pagamentos, conta_36, atendente):
+def test_registrar_consumo_interno_com_pin_inexistente(pagamentos, conta_36, funcionario):
     with pytest.raises(NaoAutorizadoError):
         pagamentos.registrar(
             conta_36.id,
             FormaPagamento.CONSUMO_INTERNO,
             Decimal("36.00"),
             pin_gerente=PIN_INEXISTENTE,
-            funcionario_consumo_id=atendente.id,
+            funcionario_consumo_id=funcionario.id,
         )
 
 
-def test_registrar_consumo_interno_sem_funcionario(pagamentos, conta_36, atendente):
+def test_registrar_consumo_interno_sem_funcionario(pagamentos, conta_36, funcionario):
     with pytest.raises(RegraDeNegocioError):
         pagamentos.registrar(
             conta_36.id,
@@ -334,7 +334,7 @@ def test_registrar_consumo_interno_sem_funcionario(pagamentos, conta_36, atenden
         )
 
 
-def test_registrar_consumo_interno_com_funcionario_inexistente(pagamentos, conta_36, atendente):
+def test_registrar_consumo_interno_com_funcionario_inexistente(pagamentos, conta_36, funcionario):
     with pytest.raises(RecursoNaoEncontradoError):
         pagamentos.registrar(
             conta_36.id,
@@ -345,8 +345,10 @@ def test_registrar_consumo_interno_com_funcionario_inexistente(pagamentos, conta
         )
 
 
-def test_registrar_consumo_interno_com_funcionario_desativado(pagamentos, auth, conta_36, atendente):
-    auth.desativar_funcionario(atendente.id)
+def test_registrar_consumo_interno_com_funcionario_desativado(
+    pagamentos, funcionarios, conta_36, funcionario
+):
+    funcionarios.desativar(funcionario.id)
 
     with pytest.raises(RegraDeNegocioError):
         pagamentos.registrar(
@@ -354,7 +356,7 @@ def test_registrar_consumo_interno_com_funcionario_desativado(pagamentos, auth, 
             FormaPagamento.CONSUMO_INTERNO,
             Decimal("36.00"),
             pin_gerente=PIN_GERENTE,
-            funcionario_consumo_id=atendente.id,
+            funcionario_consumo_id=funcionario.id,
         )
 
 
@@ -399,17 +401,17 @@ def test_calcular_restante_nunca_fica_negativo(pagamentos, comandas, conta_36):
 # ----------------------------------------------------------------------
 
 
-def test_calcular_saldo_devedor_sem_consumo(pagamentos, atendente):
-    assert pagamentos.calcular_saldo_devedor(atendente.id) == Decimal("0.00")
+def test_calcular_saldo_devedor_sem_consumo(pagamentos, gerente, funcionario):
+    assert pagamentos.calcular_saldo_devedor(funcionario.id) == Decimal("0.00")
 
 
 def test_calcular_saldo_devedor_soma_varios_consumos(
-    pagamentos, comandas, gerente, caixa_aberto, produto, atendente
+    pagamentos, comandas, gerente, caixa_aberto, produto, funcionario
 ):
-    lancar_consumo(comandas, pagamentos, produto, 1, atendente.id)
-    lancar_consumo(comandas, pagamentos, produto, 2, atendente.id)
+    lancar_consumo(comandas, pagamentos, produto, 1, funcionario.id)
+    lancar_consumo(comandas, pagamentos, produto, 2, funcionario.id)
 
-    assert pagamentos.calcular_saldo_devedor(atendente.id) == Decimal("30.00")
+    assert pagamentos.calcular_saldo_devedor(funcionario.id) == Decimal("30.00")
 
 
 def test_calcular_saldo_devedor_de_funcionario_inexistente(pagamentos, gerente):
@@ -417,37 +419,37 @@ def test_calcular_saldo_devedor_de_funcionario_inexistente(pagamentos, gerente):
         pagamentos.calcular_saldo_devedor(4242)
 
 
-def test_consultas_de_divida_sao_bloqueadas_para_atendente(pagamentos, auth, gerente, atendente):
+def test_consultas_de_divida_sao_bloqueadas_para_atendente(pagamentos, auth, gerente, atendente, funcionario):
     # §3.1/§3.8: dívida de consumo interno não é leitura livre — só gerente.
     auth.login(PIN_ATENDENTE)
     with pytest.raises(AcessoNegadoError):
-        pagamentos.calcular_saldo_devedor(atendente.id)
+        pagamentos.calcular_saldo_devedor(funcionario.id)
     with pytest.raises(AcessoNegadoError):
         pagamentos.listar_funcionarios_com_saldo()
     with pytest.raises(AcessoNegadoError):
-        pagamentos.listar_consumos(atendente.id)
+        pagamentos.listar_consumos(funcionario.id)
 
 
-def test_consultas_de_divida_sao_bloqueadas_sem_sessao(pagamentos, auth, gerente, atendente):
+def test_consultas_de_divida_sao_bloqueadas_sem_sessao(pagamentos, auth, gerente, funcionario):
     auth.logout()
     with pytest.raises(NaoAutorizadoError):
-        pagamentos.calcular_saldo_devedor(atendente.id)
+        pagamentos.calcular_saldo_devedor(funcionario.id)
     with pytest.raises(NaoAutorizadoError):
         pagamentos.listar_funcionarios_com_saldo()
     with pytest.raises(NaoAutorizadoError):
-        pagamentos.listar_consumos(atendente.id)
+        pagamentos.listar_consumos(funcionario.id)
 
 
 def test_cache_saldo_devedor_bate_com_a_fonte_da_verdade(
-    pagamentos, comandas, gerente, caixa_aberto, produto, atendente
+    pagamentos, comandas, gerente, caixa_aberto, produto, funcionario
 ):
     """O campo denormalizado tem que continuar igual à soma dos pagamentos."""
-    lancar_consumo(comandas, pagamentos, produto, 3, atendente.id)
-    pagamentos.quitar(atendente.id, Decimal("12.50"), PIN_GERENTE)
+    lancar_consumo(comandas, pagamentos, produto, 3, funcionario.id)
+    pagamentos.quitar(funcionario.id, Decimal("12.50"), PIN_GERENTE)
 
-    fonte_da_verdade = pagamentos.calcular_saldo_devedor(atendente.id)
+    fonte_da_verdade = pagamentos.calcular_saldo_devedor(funcionario.id)
     assert fonte_da_verdade == Decimal("17.50")
-    assert atendente.saldo_devedor == fonte_da_verdade
+    assert funcionario.saldo_devedor == fonte_da_verdade
 
 
 # ----------------------------------------------------------------------
@@ -456,10 +458,10 @@ def test_cache_saldo_devedor_bate_com_a_fonte_da_verdade(
 
 
 def test_listar_funcionarios_com_saldo_traz_so_quem_deve_em_ordem_de_nome(
-    pagamentos, comandas, auth, gerente, caixa_aberto, produto, atendente
+    pagamentos, comandas, funcionarios, gerente, caixa_aberto, produto, funcionario
 ):
-    bruno = auth.criar_funcionario("Bruno", "333333", PerfilFuncionario.ATENDENTE)
-    ana = auth.criar_funcionario("Ana", "444444", PerfilFuncionario.ATENDENTE)
+    bruno = funcionarios.criar("Bruno")
+    ana = funcionarios.criar("Ana")
     lancar_consumo(comandas, pagamentos, produto, 2, bruno.id)
     lancar_consumo(comandas, pagamentos, produto, 1, ana.id)
 
@@ -472,26 +474,26 @@ def test_listar_funcionarios_com_saldo_traz_so_quem_deve_em_ordem_de_nome(
 
 
 def test_listar_funcionarios_com_saldo_ignora_quem_ja_quitou(
-    pagamentos, comandas, gerente, caixa_aberto, produto, atendente
+    pagamentos, comandas, gerente, caixa_aberto, produto, funcionario
 ):
-    lancar_consumo(comandas, pagamentos, produto, 1, atendente.id)
-    pagamentos.quitar(atendente.id, Decimal("10.00"), PIN_GERENTE)
+    lancar_consumo(comandas, pagamentos, produto, 1, funcionario.id)
+    pagamentos.quitar(funcionario.id, Decimal("10.00"), PIN_GERENTE)
 
     assert pagamentos.listar_funcionarios_com_saldo() == []
 
 
 def test_listar_consumos_monta_o_extrato(
-    pagamentos, comandas, gerente, caixa_aberto, produto, atendente
+    pagamentos, comandas, gerente, caixa_aberto, produto, funcionario
 ):
-    lancar_consumo(comandas, pagamentos, produto, 1, atendente.id)
-    lancar_consumo(comandas, pagamentos, produto, 2, atendente.id)
-    pagamentos.quitar(atendente.id, Decimal("5.00"), PIN_GERENTE)
-    pagamentos.quitar(atendente.id, Decimal("3.00"), PIN_GERENTE)
+    lancar_consumo(comandas, pagamentos, produto, 1, funcionario.id)
+    lancar_consumo(comandas, pagamentos, produto, 2, funcionario.id)
+    pagamentos.quitar(funcionario.id, Decimal("5.00"), PIN_GERENTE)
+    pagamentos.quitar(funcionario.id, Decimal("3.00"), PIN_GERENTE)
 
-    extrato = pagamentos.listar_consumos(atendente.id)
+    extrato = pagamentos.listar_consumos(funcionario.id)
 
-    assert extrato.funcionario_id == atendente.id
-    assert extrato.nome == "Atendente"
+    assert extrato.funcionario_id == funcionario.id
+    assert extrato.nome == "Garçom"
     assert extrato.saldo == Decimal("22.00")
     assert [consumo.valor for consumo in extrato.consumos] == [Decimal("10.00"), Decimal("20.00")]
     # Quitações mais recentes primeiro — é a ordem que a tela de extrato mostra.
@@ -512,100 +514,100 @@ def test_listar_consumos_de_funcionario_inexistente(pagamentos, gerente):
 
 
 def test_quitar_abate_fifo_do_consumo_mais_antigo(
-    pagamentos, comandas, gerente, caixa_aberto, produto, atendente
+    pagamentos, comandas, gerente, caixa_aberto, produto, funcionario
 ):
     """Três consumos (10, 20, 30) e uma quitação de 25: abate o 1º inteiro e 15 do 2º."""
-    lancar_consumo(comandas, pagamentos, produto, 1, atendente.id)
-    lancar_consumo(comandas, pagamentos, produto, 2, atendente.id)
-    lancar_consumo(comandas, pagamentos, produto, 3, atendente.id)
+    lancar_consumo(comandas, pagamentos, produto, 1, funcionario.id)
+    lancar_consumo(comandas, pagamentos, produto, 2, funcionario.id)
+    lancar_consumo(comandas, pagamentos, produto, 3, funcionario.id)
 
-    novo_saldo = pagamentos.quitar(atendente.id, Decimal("25.00"), PIN_GERENTE)
+    novo_saldo = pagamentos.quitar(funcionario.id, Decimal("25.00"), PIN_GERENTE)
 
     assert novo_saldo == Decimal("35.00")
-    primeiro, segundo, terceiro = pagamentos.listar_consumos(atendente.id).consumos
+    primeiro, segundo, terceiro = pagamentos.listar_consumos(funcionario.id).consumos
     assert primeiro.valor_quitado == Decimal("10.00")
     assert segundo.valor_quitado == Decimal("15.00")
     assert terceiro.valor_quitado == Decimal("0.00")
-    assert atendente.saldo_devedor == Decimal("35.00")
+    assert funcionario.saldo_devedor == Decimal("35.00")
 
 
 def test_quitar_tudo_zera_o_saldo(
-    pagamentos, comandas, gerente, caixa_aberto, produto, atendente
+    pagamentos, comandas, gerente, caixa_aberto, produto, funcionario
 ):
-    lancar_consumo(comandas, pagamentos, produto, 2, atendente.id)
+    lancar_consumo(comandas, pagamentos, produto, 2, funcionario.id)
 
-    novo_saldo = pagamentos.quitar(atendente.id, Decimal("20.00"), PIN_GERENTE)
+    novo_saldo = pagamentos.quitar(funcionario.id, Decimal("20.00"), PIN_GERENTE)
 
     assert novo_saldo == Decimal("0.00")
-    assert pagamentos.calcular_saldo_devedor(atendente.id) == Decimal("0.00")
-    assert atendente.saldo_devedor == Decimal("0.00")
+    assert pagamentos.calcular_saldo_devedor(funcionario.id) == Decimal("0.00")
+    assert funcionario.saldo_devedor == Decimal("0.00")
 
 
 def test_quitar_registra_quem_autorizou(
-    pagamentos, comandas, gerente, caixa_aberto, produto, atendente
+    pagamentos, comandas, gerente, caixa_aberto, produto, funcionario
 ):
-    lancar_consumo(comandas, pagamentos, produto, 1, atendente.id)
-    pagamentos.quitar(atendente.id, Decimal("4.00"), PIN_GERENTE)
+    lancar_consumo(comandas, pagamentos, produto, 1, funcionario.id)
+    pagamentos.quitar(funcionario.id, Decimal("4.00"), PIN_GERENTE)
 
-    (quitacao,) = pagamentos.listar_consumos(atendente.id).quitacoes
+    (quitacao,) = pagamentos.listar_consumos(funcionario.id).quitacoes
     assert quitacao.valor_quitado == Decimal("4.00")
-    assert quitacao.funcionario_id == atendente.id
+    assert quitacao.funcionario_id == funcionario.id
     assert quitacao.autorizado_por_id == gerente.id
     assert isinstance(quitacao.quitado_em, datetime)
 
 
 def test_quitar_acima_do_saldo_e_bloqueado(
-    pagamentos, comandas, gerente, caixa_aberto, produto, atendente
+    pagamentos, comandas, gerente, caixa_aberto, produto, funcionario
 ):
-    lancar_consumo(comandas, pagamentos, produto, 1, atendente.id)
+    lancar_consumo(comandas, pagamentos, produto, 1, funcionario.id)
 
     with pytest.raises(RegraDeNegocioError):
-        pagamentos.quitar(atendente.id, Decimal("10.01"), PIN_GERENTE)
+        pagamentos.quitar(funcionario.id, Decimal("10.01"), PIN_GERENTE)
 
-    assert pagamentos.calcular_saldo_devedor(atendente.id) == Decimal("10.00")
+    assert pagamentos.calcular_saldo_devedor(funcionario.id) == Decimal("10.00")
 
 
 def test_quitar_valor_zero_e_bloqueado(
-    pagamentos, comandas, gerente, caixa_aberto, produto, atendente
+    pagamentos, comandas, gerente, caixa_aberto, produto, funcionario
 ):
-    lancar_consumo(comandas, pagamentos, produto, 1, atendente.id)
+    lancar_consumo(comandas, pagamentos, produto, 1, funcionario.id)
 
     with pytest.raises(RegraDeNegocioError):
-        pagamentos.quitar(atendente.id, Decimal("0.00"), PIN_GERENTE)
+        pagamentos.quitar(funcionario.id, Decimal("0.00"), PIN_GERENTE)
 
 
 def test_quitar_valor_negativo_e_bloqueado(
-    pagamentos, comandas, gerente, caixa_aberto, produto, atendente
+    pagamentos, comandas, gerente, caixa_aberto, produto, funcionario
 ):
-    lancar_consumo(comandas, pagamentos, produto, 1, atendente.id)
+    lancar_consumo(comandas, pagamentos, produto, 1, funcionario.id)
 
     with pytest.raises(RegraDeNegocioError):
-        pagamentos.quitar(atendente.id, Decimal("-1.00"), PIN_GERENTE)
+        pagamentos.quitar(funcionario.id, Decimal("-1.00"), PIN_GERENTE)
 
 
-def test_quitar_sem_divida_e_bloqueado(pagamentos, gerente, atendente):
+def test_quitar_sem_divida_e_bloqueado(pagamentos, gerente, funcionario):
     with pytest.raises(RegraDeNegocioError):
-        pagamentos.quitar(atendente.id, Decimal("10.00"), PIN_GERENTE)
+        pagamentos.quitar(funcionario.id, Decimal("10.00"), PIN_GERENTE)
 
 
 def test_quitar_com_pin_de_atendente(
-    pagamentos, comandas, gerente, caixa_aberto, produto, atendente
+    pagamentos, comandas, gerente, caixa_aberto, produto, funcionario, atendente
 ):
-    lancar_consumo(comandas, pagamentos, produto, 1, atendente.id)
+    lancar_consumo(comandas, pagamentos, produto, 1, funcionario.id)
 
     with pytest.raises(AcessoNegadoError):
-        pagamentos.quitar(atendente.id, Decimal("5.00"), PIN_ATENDENTE)
+        pagamentos.quitar(funcionario.id, Decimal("5.00"), PIN_ATENDENTE)
 
-    assert pagamentos.calcular_saldo_devedor(atendente.id) == Decimal("10.00")
+    assert pagamentos.calcular_saldo_devedor(funcionario.id) == Decimal("10.00")
 
 
 def test_quitar_com_pin_inexistente(
-    pagamentos, comandas, gerente, caixa_aberto, produto, atendente
+    pagamentos, comandas, gerente, caixa_aberto, produto, funcionario
 ):
-    lancar_consumo(comandas, pagamentos, produto, 1, atendente.id)
+    lancar_consumo(comandas, pagamentos, produto, 1, funcionario.id)
 
     with pytest.raises(NaoAutorizadoError):
-        pagamentos.quitar(atendente.id, Decimal("5.00"), PIN_INEXISTENTE)
+        pagamentos.quitar(funcionario.id, Decimal("5.00"), PIN_INEXISTENTE)
 
 
 def test_quitar_de_funcionario_inexistente(pagamentos, gerente):

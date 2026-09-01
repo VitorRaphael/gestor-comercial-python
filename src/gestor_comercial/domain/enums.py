@@ -1,9 +1,13 @@
 import enum
 
 
-class PerfilFuncionario(enum.Enum):
-    ATENDENTE = "ATENDENTE"
+class PerfilUsuario(enum.Enum):
+    """Perfis de quem loga no sistema (§3.1). Funcionário de atendimento
+    (garçom, cozinha) não tem perfil nenhum — não loga, ver `Funcionario`."""
+
+    ADMIN = "ADMIN"
     GERENTE = "GERENTE"
+    OPERADOR_CAIXA = "OPERADOR_CAIXA"
 
 
 class StatusMesa(enum.Enum):

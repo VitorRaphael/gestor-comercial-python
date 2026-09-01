@@ -48,7 +48,7 @@ def test_abrir_por_mesa_cria_comanda_aberta(comandas, gerente, caixa_aberto, mes
     assert comanda.id is not None
     assert comanda.status is StatusComanda.ABERTA
     assert comanda.mesa_id == mesa.id
-    assert comanda.funcionario_id == gerente.id
+    assert comanda.usuario_id == gerente.id
     assert comanda.caixa_id == caixa_aberto.id
     assert isinstance(comanda.aberta_em, datetime)
 

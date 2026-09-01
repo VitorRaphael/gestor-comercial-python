@@ -17,7 +17,7 @@ class MovimentoCaixa(Base):
     descricao: Mapped[str | None] = mapped_column(String(500))
     registrado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     caixa_id: Mapped[int] = mapped_column(ForeignKey("caixas.id"), nullable=False)
-    funcionario_id: Mapped[int] = mapped_column(ForeignKey("funcionarios.id"), nullable=False)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False)
 
     caixa: Mapped["Caixa"] = relationship(back_populates="movimentos")
-    funcionario: Mapped["Funcionario"] = relationship(back_populates="movimentos_caixa")
+    usuario: Mapped["Usuario"] = relationship(back_populates="movimentos_caixa")

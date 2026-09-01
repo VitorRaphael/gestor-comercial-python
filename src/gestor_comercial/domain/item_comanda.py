@@ -23,8 +23,10 @@ class ItemComanda(Base):
     impresso_em: Mapped[datetime | None] = mapped_column(DateTime)
     comanda_id: Mapped[int] = mapped_column(ForeignKey("comandas.id"), nullable=False)
     produto_id: Mapped[int] = mapped_column(ForeignKey("produtos.id"), nullable=False)
-    cancelado_por_id: Mapped[int | None] = mapped_column(ForeignKey("funcionarios.id"))
+    cancelado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
 
     comanda: Mapped["Comanda"] = relationship(back_populates="itens")
     produto: Mapped["Produto"] = relationship(back_populates="itens_comanda")
-    cancelado_por: Mapped["Funcionario | None"] = relationship(foreign_keys=[cancelado_por_id])
+    cancelado_por: Mapped["Usuario | None"] = relationship(
+        foreign_keys=[cancelado_por_id], back_populates="itens_cancelados"
+    )

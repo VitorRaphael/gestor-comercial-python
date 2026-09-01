@@ -34,6 +34,7 @@ htmlcov/
 # PyInstaller (artefatos de build, não o .spec)
 packaging/build/
 packaging/dist/
+packaging/output/
 *.manifest
 
 # IDEs

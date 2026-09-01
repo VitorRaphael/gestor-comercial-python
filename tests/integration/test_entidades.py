@@ -7,7 +7,7 @@ from gestor_comercial.domain.combo_item import ComboItem
 from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.enums import (
     FormaPagamento,
-    PerfilFuncionario,
+    PerfilUsuario,
     StatusCaixa,
     StatusComanda,
     StatusMesa,
@@ -21,16 +21,28 @@ from gestor_comercial.domain.movimento_caixa import MovimentoCaixa
 from gestor_comercial.domain.pagamento import Pagamento
 from gestor_comercial.domain.produto import Produto
 from gestor_comercial.domain.quitacao_consumo import QuitacaoConsumo
+from gestor_comercial.domain.usuario import Usuario
+
+
+def test_usuario(session):
+    usuario = Usuario(nome="Gerente", pin_hash="h", salt="s", perfil=PerfilUsuario.GERENTE)
+    session.add(usuario)
+    session.commit()
+
+    salvo = session.query(Usuario).one()
+    assert salvo.nome == "Gerente"
+    assert salvo.perfil == PerfilUsuario.GERENTE
+    assert salvo.ativo is True
 
 
 def test_funcionario(session):
-    func = Funcionario(nome="Gerente", pin_hash="h", salt="s", perfil=PerfilFuncionario.GERENTE)
+    func = Funcionario(nome="Garçom", cargo="Garçom", telefone="11999990000")
     session.add(func)
     session.commit()
 
     salvo = session.query(Funcionario).one()
-    assert salvo.nome == "Gerente"
-    assert salvo.perfil == PerfilFuncionario.GERENTE
+    assert salvo.nome == "Garçom"
+    assert salvo.cargo == "Garçom"
     assert salvo.ativo is True
     assert salvo.saldo_devedor == Decimal("0")
 
@@ -81,8 +93,8 @@ def test_produto_e_combo_item(session):
 
 
 def test_caixa_e_movimento_caixa(session):
-    func = Funcionario(nome="Atendente", pin_hash="h", salt="s", perfil=PerfilFuncionario.ATENDENTE)
-    session.add(func)
+    usuario = Usuario(nome="Operador", pin_hash="h", salt="s", perfil=PerfilUsuario.OPERADOR_CAIXA)
+    session.add(usuario)
     session.flush()
 
     caixa = Caixa(valor_abertura=Decimal("100.00"), aberto_em=datetime(2026, 8, 20, 8, 0))
@@ -94,7 +106,7 @@ def test_caixa_e_movimento_caixa(session):
         valor=Decimal("50.00"),
         registrado_em=datetime(2026, 8, 20, 10, 0),
         caixa_id=caixa.id,
-        funcionario_id=func.id,
+        usuario_id=usuario.id,
     )
     session.add(movimento)
     session.commit()
@@ -106,11 +118,12 @@ def test_caixa_e_movimento_caixa(session):
 
 
 def test_comanda_item_e_pagamento(session):
-    func = Funcionario(nome="Atendente", pin_hash="h", salt="s", perfil=PerfilFuncionario.ATENDENTE)
+    usuario = Usuario(nome="Operador", pin_hash="h", salt="s", perfil=PerfilUsuario.OPERADOR_CAIXA)
+    atendente = Funcionario(nome="Garçom", cargo="Garçom")
     mesa = Mesa(numero=5)
     caixa = Caixa(valor_abertura=Decimal("100.00"), aberto_em=datetime(2026, 8, 20, 8, 0))
     categoria = Categoria(nome="Lanches")
-    session.add_all([func, mesa, caixa, categoria])
+    session.add_all([usuario, atendente, mesa, caixa, categoria])
     session.flush()
 
     produto = Produto(nome="X-Burger", preco=Decimal("18.00"), categoria_id=categoria.id)
@@ -120,7 +133,8 @@ def test_comanda_item_e_pagamento(session):
     comanda = Comanda(
         aberta_em=datetime(2026, 8, 20, 12, 0),
         mesa_id=mesa.id,
-        funcionario_id=func.id,
+        usuario_id=usuario.id,
+        atendente_id=atendente.id,
         caixa_id=caixa.id,
     )
     session.add(comanda)
@@ -144,6 +158,8 @@ def test_comanda_item_e_pagamento(session):
     salva = session.query(Comanda).one()
     assert salva.status == StatusComanda.ABERTA
     assert salva.mesa.numero == 5
+    assert salva.usuario.nome == "Operador"
+    assert salva.atendente.nome == "Garçom"
     assert len(salva.itens) == 1
     assert salva.itens[0].produto.nome == "X-Burger"
     assert len(salva.pagamentos) == 1
@@ -151,15 +167,16 @@ def test_comanda_item_e_pagamento(session):
 
 
 def test_pagamento_consumo_interno_e_quitacao_consumo(session):
-    atendente = Funcionario(nome="Atendente", pin_hash="h", salt="s", perfil=PerfilFuncionario.ATENDENTE)
-    gerente = Funcionario(nome="Gerente", pin_hash="h", salt="s", perfil=PerfilFuncionario.GERENTE)
+    atendente = Funcionario(nome="Garçom", cargo="Garçom")
+    operador = Usuario(nome="Operador", pin_hash="h", salt="s", perfil=PerfilUsuario.OPERADOR_CAIXA)
+    gerente = Usuario(nome="Gerente", pin_hash="h", salt="s", perfil=PerfilUsuario.GERENTE)
     caixa = Caixa(valor_abertura=Decimal("100.00"), aberto_em=datetime(2026, 8, 20, 8, 0))
-    session.add_all([atendente, gerente, caixa])
+    session.add_all([atendente, operador, gerente, caixa])
     session.flush()
 
     comanda = Comanda(
         aberta_em=datetime(2026, 8, 20, 13, 0),
-        funcionario_id=atendente.id,
+        usuario_id=operador.id,
         caixa_id=caixa.id,
     )
     session.add(comanda)
@@ -182,10 +199,10 @@ def test_pagamento_consumo_interno_e_quitacao_consumo(session):
     session.commit()
 
     salvo_pagamento = session.query(Pagamento).one()
-    assert salvo_pagamento.funcionario_consumo.nome == "Atendente"
+    assert salvo_pagamento.funcionario_consumo.nome == "Garçom"
 
     salva_quitacao = session.query(QuitacaoConsumo).one()
-    assert salva_quitacao.funcionario.nome == "Atendente"
+    assert salva_quitacao.funcionario.nome == "Garçom"
     assert salva_quitacao.autorizado_por.nome == "Gerente"
     assert atendente.pagamentos_consumo == [salvo_pagamento]
     assert atendente.quitacoes == [salva_quitacao]

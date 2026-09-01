@@ -14,9 +14,11 @@ class QuitacaoConsumo(Base):
     valor_quitado: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     quitado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     funcionario_id: Mapped[int] = mapped_column(ForeignKey("funcionarios.id"), nullable=False)
-    autorizado_por_id: Mapped[int] = mapped_column(ForeignKey("funcionarios.id"), nullable=False)
+    autorizado_por_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False)
 
     funcionario: Mapped["Funcionario"] = relationship(
         foreign_keys=[funcionario_id], back_populates="quitacoes"
     )
-    autorizado_por: Mapped["Funcionario"] = relationship(foreign_keys=[autorizado_por_id])
+    autorizado_por: Mapped["Usuario"] = relationship(
+        foreign_keys=[autorizado_por_id], back_populates="quitacoes_autorizadas"
+    )

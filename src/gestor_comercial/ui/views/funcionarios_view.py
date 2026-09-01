@@ -1,12 +1,12 @@
-"""Funcionários: cadastro, desativação e dívida de consumo interno — porte
-visual da tela de funcionários do front-end web
-(`GESTOR COMERCIAL/.../desktop/js/app.js`, funções
-`salvarFuncionario`/`quitarConsumo`).
+"""Funcionários de atendimento: cadastro, edição, (des)ativação, exclusão e
+dívida de consumo interno.
 
-Cadastrar e desativar exigem gerente logado, e quitar dívida exige o PIN de
-um gerente digitado na hora (reautenticação, não a sessão corrente) — quem
-barra isso é `AuthService`/`PagamentoService`; aqui só se mostra o erro que
-o service levantar.
+`Funcionario` não loga (ver `LoginView`/`AuthService`, restritos a
+`Usuario`) — esta tela é só gestão de quem atende a mesa/comanda. Cadastrar,
+editar, (des)ativar e excluir exigem gerente logado (`FuncionarioService`);
+quitar dívida exige o PIN de um gerente digitado na hora (reautenticação, não
+a sessão corrente) — quem barra isso é `PagamentoService`, aqui só se mostra
+o erro que o service levantar.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -29,38 +30,34 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from gestor_comercial.domain.enums import PerfilFuncionario
 from gestor_comercial.domain.funcionario import Funcionario
-from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
     NaoAutorizadoError,
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.pagamento_service import PagamentoService
 
-_COLUNAS = ["Nome", "Perfil", "Status", "Consumo"]
+_COLUNAS = ["Nome", "Cargo", "Status", "Consumo"]
 
-_ROTULOS_PERFIL = {
-    PerfilFuncionario.ATENDENTE: "Atendente",
-    PerfilFuncionario.GERENTE: "Gerente",
-}
+_CARGOS_SUGERIDOS = ["Garçom", "Atendente", "Cozinha", "Caixa"]
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
 
 class FuncionariosView(QWidget):
-    """CRUD básico de funcionário e baixa de consumo interno (descontado do salário)."""
+    """CRUD de funcionário de atendimento + baixa de consumo interno."""
 
     def __init__(
         self,
-        auth_service: AuthService,
+        funcionario_service: FuncionarioService,
         pagamento_service: PagamentoService,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._auth = auth_service
+        self._funcionarios_service = funcionario_service
         self._pagamentos = pagamento_service
         self._funcionarios: list[Funcionario] = []
         self._saldos: dict[int, Decimal] = {}
@@ -89,10 +86,20 @@ class FuncionariosView(QWidget):
         layout.addWidget(self._tabela)
 
         acoes = QHBoxLayout()
-        self._botao_desativar = QPushButton("Desativar")
-        self._botao_desativar.setProperty("variante", "perigo")
-        self._botao_desativar.clicked.connect(self._desativar)
-        acoes.addWidget(self._botao_desativar)
+        self._botao_editar = QPushButton("Editar")
+        self._botao_editar.setProperty("variante", "secundario")
+        self._botao_editar.clicked.connect(self._editar)
+        acoes.addWidget(self._botao_editar)
+
+        self._botao_status = QPushButton("Desativar")
+        self._botao_status.setProperty("variante", "perigo")
+        self._botao_status.clicked.connect(self._alternar_status)
+        acoes.addWidget(self._botao_status)
+
+        self._botao_excluir = QPushButton("Excluir")
+        self._botao_excluir.setProperty("variante", "perigo")
+        self._botao_excluir.clicked.connect(self._excluir)
+        acoes.addWidget(self._botao_excluir)
 
         self._botao_quitar = QPushButton("Dar baixa no Consumo")
         self._botao_quitar.setProperty("variante", "neutro")
@@ -105,15 +112,13 @@ class FuncionariosView(QWidget):
 
     def atualizar(self) -> None:
         self._label_erro.setText("")
-        self._funcionarios = self._auth.listar_todos()
+        self._funcionarios = self._funcionarios_service.listar_todos()
         self._saldos = self._carregar_saldos()
 
         self._tabela.setRowCount(len(self._funcionarios))
         for linha, funcionario in enumerate(self._funcionarios):
             self._tabela.setItem(linha, 0, QTableWidgetItem(funcionario.nome))
-            self._tabela.setItem(
-                linha, 1, QTableWidgetItem(_ROTULOS_PERFIL.get(funcionario.perfil, funcionario.perfil.value))
-            )
+            self._tabela.setItem(linha, 1, QTableWidgetItem(funcionario.cargo or "—"))
             status = "Ativo" if funcionario.ativo else "Desativado"
             self._tabela.setItem(linha, 2, QTableWidgetItem(status))
             saldo = self._saldos.get(funcionario.id, Decimal("0"))
@@ -121,7 +126,7 @@ class FuncionariosView(QWidget):
 
     def _carregar_saldos(self) -> dict[int, Decimal]:
         # Consultar a dívida exige gerente logado (§3.8); num app sem gerente
-        # na sessão, a coluna some por ora — a listagem de nome/perfil/status
+        # na sessão, a coluna some por ora — a listagem de nome/cargo/status
         # continua útil pra quem só quer ver quem está cadastrado.
         try:
             saldos = self._pagamentos.listar_funcionarios_com_saldo()
@@ -136,26 +141,68 @@ class FuncionariosView(QWidget):
         return self._funcionarios[linha]
 
     def _criar(self) -> None:
-        modal = _FuncionarioDialog(self)
+        modal = _FuncionarioDialog(parent=self)
         if modal.exec() != QDialog.DialogCode.Accepted:
             return
-        nome, pin, perfil = modal.resultado()
+        nome, cargo, telefone = modal.resultado()
 
         self._label_erro.setText("")
         try:
-            self._auth.criar_funcionario(nome, pin, perfil)
+            self._funcionarios_service.criar(nome, cargo, telefone)
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
         self.atualizar()
 
-    def _desativar(self) -> None:
+    def _editar(self) -> None:
+        funcionario = self._funcionario_selecionado()
+        if funcionario is None:
+            return
+        modal = _FuncionarioDialog(funcionario=funcionario, parent=self)
+        if modal.exec() != QDialog.DialogCode.Accepted:
+            return
+        nome, cargo, telefone = modal.resultado()
+
+        self._label_erro.setText("")
+        try:
+            self._funcionarios_service.editar(funcionario.id, nome, cargo, telefone)
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+            return
+        self.atualizar()
+
+    def _alternar_status(self) -> None:
         funcionario = self._funcionario_selecionado()
         if funcionario is None:
             return
         self._label_erro.setText("")
         try:
-            self._auth.desativar_funcionario(funcionario.id)
+            if funcionario.ativo:
+                self._funcionarios_service.desativar(funcionario.id)
+            else:
+                self._funcionarios_service.ativar(funcionario.id)
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+            return
+        self.atualizar()
+
+    def _excluir(self) -> None:
+        funcionario = self._funcionario_selecionado()
+        if funcionario is None:
+            return
+        confirmacao = QMessageBox.question(
+            self,
+            "Excluir funcionário",
+            f"Excluir {funcionario.nome} definitivamente? Esta ação não pode ser desfeita.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirmacao != QMessageBox.StandardButton.Yes:
+            return
+
+        self._label_erro.setText("")
+        try:
+            self._funcionarios_service.excluir(funcionario.id)
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
@@ -189,27 +236,32 @@ class FuncionariosView(QWidget):
 
 
 class _FuncionarioDialog(QDialog):
-    """Modal de cadastro: nome, PIN e perfil."""
+    """Modal de cadastro/edição: nome, cargo e telefone."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, funcionario: Funcionario | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Novo funcionário")
+        self.setWindowTitle("Editar funcionário" if funcionario else "Novo funcionário")
 
         layout = QVBoxLayout(self)
         formulario = QFormLayout()
 
-        self._campo_nome = QLineEdit()
+        self._campo_nome = QLineEdit(funcionario.nome if funcionario else "")
         formulario.addRow("Nome", self._campo_nome)
 
-        self._campo_pin = QLineEdit()
-        self._campo_pin.setEchoMode(QLineEdit.EchoMode.Password)
-        self._campo_pin.setPlaceholderText("4 a 8 dígitos")
-        formulario.addRow("PIN", self._campo_pin)
+        self._campo_cargo = QComboBox()
+        self._campo_cargo.setEditable(True)
+        self._campo_cargo.addItems(_CARGOS_SUGERIDOS)
+        if funcionario and funcionario.cargo:
+            if funcionario.cargo not in _CARGOS_SUGERIDOS:
+                self._campo_cargo.addItem(funcionario.cargo)
+            self._campo_cargo.setCurrentText(funcionario.cargo)
+        else:
+            self._campo_cargo.setCurrentIndex(-1)
+        formulario.addRow("Cargo", self._campo_cargo)
 
-        self._seletor_perfil = QComboBox()
-        for perfil, rotulo in _ROTULOS_PERFIL.items():
-            self._seletor_perfil.addItem(rotulo, perfil)
-        formulario.addRow("Perfil", self._seletor_perfil)
+        self._campo_telefone = QLineEdit(funcionario.telefone if funcionario and funcionario.telefone else "")
+        self._campo_telefone.setPlaceholderText("Opcional")
+        formulario.addRow("Telefone", self._campo_telefone)
 
         layout.addLayout(formulario)
 
@@ -220,11 +272,11 @@ class _FuncionarioDialog(QDialog):
         botoes.rejected.connect(self.reject)
         layout.addWidget(botoes)
 
-    def resultado(self) -> tuple[str, str, PerfilFuncionario]:
+    def resultado(self) -> tuple[str, str | None, str | None]:
         nome = self._campo_nome.text().strip()
-        pin = self._campo_pin.text().strip()
-        perfil = self._seletor_perfil.currentData()
-        return nome, pin, perfil
+        cargo = self._campo_cargo.currentText().strip() or None
+        telefone = self._campo_telefone.text().strip() or None
+        return nome, cargo, telefone
 
 
 class _QuitarConsumoDialog(QDialog):

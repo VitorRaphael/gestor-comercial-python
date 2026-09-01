@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from gestor_comercial.domain.funcionario import Funcionario
+from gestor_comercial.domain.usuario import Usuario
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.exceptions import NaoAutorizadoError
 
@@ -26,7 +26,7 @@ from gestor_comercial.services.exceptions import NaoAutorizadoError
 class LoginView(QWidget):
     """Tela de login moderna: dropdown de usuário + campo de senha + teclado físico."""
 
-    autenticado = Signal(Funcionario)
+    autenticado = Signal(Usuario)
 
     def __init__(self, auth_service: AuthService, parent: QWidget | None = None) -> None:
         super().__init__(parent)

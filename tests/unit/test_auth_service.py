@@ -3,8 +3,8 @@ from decimal import Decimal
 
 import pytest
 
-from gestor_comercial.domain.enums import PerfilFuncionario
-from gestor_comercial.domain.funcionario import Funcionario
+from gestor_comercial.domain.enums import PerfilUsuario
+from gestor_comercial.domain.usuario import Usuario
 from gestor_comercial.repository import seed
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
@@ -101,14 +101,14 @@ def test_hash_bate_bit_a_bit_com_o_seed():
     )
 
 
-def test_funcionario_do_seed_consegue_logar(uow, auth):
+def test_usuario_do_seed_consegue_logar(uow, auth):
     salt = seed.gerar_salt()
-    uow.funcionarios.salvar(
-        Funcionario(
+    uow.usuarios.salvar(
+        Usuario(
             nome=seed.ADMIN_NOME,
             pin_hash=seed.hash_pin(seed.ADMIN_PIN_PADRAO, salt),
             salt=salt,
-            perfil=PerfilFuncionario.GERENTE,
+            perfil=PerfilUsuario.GERENTE,
         )
     )
     logado = auth.login(seed.ADMIN_PIN_PADRAO)
@@ -133,7 +133,7 @@ def test_login_com_pin_invalido_nao_abre_sessao(auth, gerente):
 
 
 def test_login_com_funcionario_desativado_e_negado(auth, gerente, atendente):
-    auth.desativar_funcionario(atendente.id)
+    auth.desativar_usuario(atendente.id)
     with pytest.raises(NaoAutorizadoError):
         auth.login(PIN_ATENDENTE)
 
@@ -171,59 +171,58 @@ def test_exigir_gerente_sem_ninguem_logado(auth):
 # ----------------------------------------------------------------------
 
 
-def test_criar_funcionario_grava_ativo_com_hash_conferivel(auth, uow):
-    funcionario = auth.criar_funcionario("Maria", "5678", PerfilFuncionario.ATENDENTE)
+def test_criar_usuario_grava_ativo_com_hash_conferivel(auth, uow):
+    usuario = auth.criar_usuario("Maria", "5678", PerfilUsuario.OPERADOR_CAIXA)
 
-    assert funcionario.id is not None
-    assert funcionario.nome == "Maria"
-    assert funcionario.ativo is True
-    assert funcionario.perfil is PerfilFuncionario.ATENDENTE
-    assert funcionario.saldo_devedor == Decimal("0.00")
-    assert AuthService.confere_pin("5678", funcionario.salt, funcionario.pin_hash)
+    assert usuario.id is not None
+    assert usuario.nome == "Maria"
+    assert usuario.ativo is True
+    assert usuario.perfil is PerfilUsuario.OPERADOR_CAIXA
+    assert AuthService.confere_pin("5678", usuario.salt, usuario.pin_hash)
     # o PIN em claro não pode sobrar em lugar nenhum
-    assert "5678" not in funcionario.pin_hash
+    assert "5678" not in usuario.pin_hash
 
 
 def test_criar_funcionario_nao_deixa_sessao_logada(auth):
-    auth.criar_funcionario("Maria", "5678", PerfilFuncionario.ATENDENTE)
+    auth.criar_usuario("Maria", "5678", PerfilUsuario.OPERADOR_CAIXA)
     assert auth.usuario_logado is None
 
 
 def test_criar_funcionario_com_nome_vazio(auth):
     with pytest.raises(RegraDeNegocioError):
-        auth.criar_funcionario("   ", "5678", PerfilFuncionario.ATENDENTE)
+        auth.criar_usuario("   ", "5678", PerfilUsuario.OPERADOR_CAIXA)
 
 
 def test_criar_funcionario_com_pin_nao_numerico(auth):
     with pytest.raises(RegraDeNegocioError):
-        auth.criar_funcionario("Maria", "12a4", PerfilFuncionario.ATENDENTE)
+        auth.criar_usuario("Maria", "12a4", PerfilUsuario.OPERADOR_CAIXA)
 
 
 def test_criar_funcionario_com_pin_curto_demais(auth):
     with pytest.raises(RegraDeNegocioError):
-        auth.criar_funcionario("Maria", "123", PerfilFuncionario.ATENDENTE)
+        auth.criar_usuario("Maria", "123", PerfilUsuario.OPERADOR_CAIXA)
 
 
 def test_criar_funcionario_com_pin_longo_demais(auth):
     with pytest.raises(RegraDeNegocioError):
-        auth.criar_funcionario("Maria", "123456789", PerfilFuncionario.ATENDENTE)
+        auth.criar_usuario("Maria", "123456789", PerfilUsuario.OPERADOR_CAIXA)
 
 
 def test_criar_funcionario_com_perfil_invalido(auth):
     with pytest.raises(RegraDeNegocioError):
-        auth.criar_funcionario("Maria", "5678", "GERENTE")
+        auth.criar_usuario("Maria", "5678", "GERENTE")
 
 
 def test_criar_funcionario_com_pin_de_outro_ativo(auth, gerente):
     with pytest.raises(RegraDeNegocioError):
-        auth.criar_funcionario("Maria", PIN_GERENTE, PerfilFuncionario.ATENDENTE)
+        auth.criar_usuario("Maria", PIN_GERENTE, PerfilUsuario.OPERADOR_CAIXA)
 
 
 def test_pin_de_funcionario_desativado_pode_ser_reaproveitado(auth, gerente):
-    antigo = auth.criar_funcionario("Antigo", PIN_LIVRE, PerfilFuncionario.ATENDENTE)
-    auth.desativar_funcionario(antigo.id)
+    antigo = auth.criar_usuario("Antigo", PIN_LIVRE, PerfilUsuario.OPERADOR_CAIXA)
+    auth.desativar_usuario(antigo.id)
 
-    novo = auth.criar_funcionario("Novo", PIN_LIVRE, PerfilFuncionario.ATENDENTE)
+    novo = auth.criar_usuario("Novo", PIN_LIVRE, PerfilUsuario.OPERADOR_CAIXA)
     assert novo.id != antigo.id
     assert auth.autenticar_por_pin(PIN_LIVRE) is novo
 
@@ -231,71 +230,71 @@ def test_pin_de_funcionario_desativado_pode_ser_reaproveitado(auth, gerente):
 def test_listar_ativos_ignora_desativados(auth, gerente, atendente):
     assert {f.nome for f in auth.listar_ativos()} == {"Gerente", "Atendente"}
 
-    auth.desativar_funcionario(atendente.id)
+    auth.desativar_usuario(atendente.id)
     assert [f.nome for f in auth.listar_ativos()] == ["Gerente"]
 
 
 def test_buscar_funcionario_por_id(auth, gerente):
-    assert auth.buscar_funcionario(gerente.id) is gerente
+    assert auth.buscar_usuario(gerente.id) is gerente
 
 
 def test_buscar_funcionario_inexistente(auth):
     with pytest.raises(RecursoNaoEncontradoError):
-        auth.buscar_funcionario(9999)
+        auth.buscar_usuario(9999)
 
 
 def test_desativar_funcionario_marca_como_inativo(auth, gerente, atendente):
-    desativado = auth.desativar_funcionario(atendente.id)
+    desativado = auth.desativar_usuario(atendente.id)
     assert desativado.ativo is False
 
 
 def test_desativar_funcionario_ja_desativado(auth, gerente, atendente):
-    auth.desativar_funcionario(atendente.id)
+    auth.desativar_usuario(atendente.id)
     with pytest.raises(RegraDeNegocioError):
-        auth.desativar_funcionario(atendente.id)
+        auth.desativar_usuario(atendente.id)
 
 
 def test_desativar_ultimo_gerente_ativo_e_bloqueado(auth, gerente, atendente):
     with pytest.raises(RegraDeNegocioError):
-        auth.desativar_funcionario(gerente.id)
+        auth.desativar_usuario(gerente.id)
     assert gerente.ativo is True
 
 
 def test_desativar_gerente_e_permitido_se_sobrar_outro(auth, gerente):
-    auth.criar_funcionario("Segundo Gerente", PIN_OUTRO_GERENTE, PerfilFuncionario.GERENTE)
+    auth.criar_usuario("Segundo Gerente", PIN_OUTRO_GERENTE, PerfilUsuario.GERENTE)
 
-    desativado = auth.desativar_funcionario(gerente.id)
+    desativado = auth.desativar_usuario(gerente.id)
     assert desativado.ativo is False
     assert [f.nome for f in auth.listar_ativos()] == ["Segundo Gerente"]
 
 
 def test_desativar_funcionario_inexistente(auth, gerente):
     with pytest.raises(RecursoNaoEncontradoError):
-        auth.desativar_funcionario(9999)
+        auth.desativar_usuario(9999)
 
 
 def test_criar_funcionario_sem_gerente_logado_e_bloqueado(auth, gerente):
     auth.logout()
     with pytest.raises(NaoAutorizadoError):
-        auth.criar_funcionario("Fantoche", "999999", PerfilFuncionario.GERENTE)
+        auth.criar_usuario("Fantoche", "999999", PerfilUsuario.GERENTE)
 
 
 def test_criar_funcionario_com_atendente_logado_e_bloqueado(auth, gerente, atendente):
     auth.login(PIN_ATENDENTE)
     with pytest.raises(AcessoNegadoError):
-        auth.criar_funcionario("Fantoche", "999999", PerfilFuncionario.GERENTE)
+        auth.criar_usuario("Fantoche", "999999", PerfilUsuario.GERENTE)
 
 
 def test_criar_primeiro_funcionario_do_sistema_nao_exige_gerente(auth):
     # Bootstrap: o seed (ou o primeiro cadastro manual) não tem quem autorizar.
-    funcionario = auth.criar_funcionario("Gerente", "111111", PerfilFuncionario.GERENTE)
-    assert funcionario.perfil is PerfilFuncionario.GERENTE
+    funcionario = auth.criar_usuario("Gerente", "111111", PerfilUsuario.GERENTE)
+    assert funcionario.perfil is PerfilUsuario.GERENTE
 
 
 def test_desativar_funcionario_com_atendente_logado_e_bloqueado(auth, gerente, atendente):
     auth.login(PIN_ATENDENTE)
     with pytest.raises(AcessoNegadoError):
-        auth.desativar_funcionario(gerente.id)
+        auth.desativar_usuario(gerente.id)
     assert gerente.ativo is True
 
 
@@ -335,10 +334,10 @@ def test_validar_pin_gerente_com_pin_inexistente(auth, gerente):
 
 
 def test_validar_pin_gerente_de_gerente_desativado(auth, gerente):
-    segundo = auth.criar_funcionario(
-        "Segundo Gerente", PIN_OUTRO_GERENTE, PerfilFuncionario.GERENTE
+    segundo = auth.criar_usuario(
+        "Segundo Gerente", PIN_OUTRO_GERENTE, PerfilUsuario.GERENTE
     )
-    auth.desativar_funcionario(segundo.id)
+    auth.desativar_usuario(segundo.id)
 
     with pytest.raises(NaoAutorizadoError):
         auth.validar_pin_gerente(PIN_OUTRO_GERENTE)
@@ -346,7 +345,7 @@ def test_validar_pin_gerente_de_gerente_desativado(auth, gerente):
 
 def test_regra_bloqueada_nao_deixa_lixo_gravado(auth, gerente, uow):
     with pytest.raises(RegraDeNegocioError):
-        auth.criar_funcionario("Clone", PIN_GERENTE, PerfilFuncionario.ATENDENTE)
+        auth.criar_usuario("Clone", PIN_GERENTE, PerfilUsuario.OPERADOR_CAIXA)
 
     uow.rollback()
     assert [f.nome for f in auth.listar_ativos()] == ["Gerente"]

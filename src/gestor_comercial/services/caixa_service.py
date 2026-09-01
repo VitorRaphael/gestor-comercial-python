@@ -292,10 +292,10 @@ class CaixaService:
         *,
         inicio: date | None = None,
         fim: date | None = None,
-        funcionario_id: int | None = None,
+        usuario_id: int | None = None,
     ) -> list[Caixa]:
         """Fechamentos passados para a tela de Histórico, do mais recente pro mais antigo."""
-        return self.uow.caixas.listar_historico(inicio=inicio, fim=fim, funcionario_id=funcionario_id)
+        return self.uow.caixas.listar_historico(inicio=inicio, fim=fim, usuario_id=usuario_id)
 
     def listar_historico_mensal(self, ano: int, mes: int) -> list[Caixa]:
         """Fechamentos cuja COMPETÊNCIA (§ virada de noite) é o mês `ano`/`mes`.
@@ -403,9 +403,9 @@ class CaixaService:
                 "(forma Consumo Interno), não como movimento de caixa."
             )
         if tipo in TIPOS_QUE_EXIGEM_GERENTE:
-            funcionario = self.auth.exigir_gerente()
+            usuario = self.auth.exigir_gerente()
         else:
-            funcionario = self.auth.usuario_atual()
+            usuario = self.auth.usuario_atual()
 
         montante = self._valor_monetario(valor, "valor do movimento")
         if montante <= ZERO:
@@ -418,7 +418,7 @@ class CaixaService:
             descricao=self._texto_ou_nulo(descricao),
             registrado_em=datetime.now(),
             caixa_id=caixa.id,
-            funcionario_id=funcionario.id,
+            usuario_id=usuario.id,
         )
         self.uow.movimentos.salvar(movimento)
         self.uow.commit()

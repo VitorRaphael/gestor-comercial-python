@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from gestor_comercial.domain import *  # noqa: F401,F403 - registra os mappers
 from gestor_comercial.domain.caixa import Caixa
 from gestor_comercial.domain.categoria import Categoria
-from gestor_comercial.domain.enums import PerfilFuncionario
+from gestor_comercial.domain.enums import PerfilUsuario
 from gestor_comercial.domain.impressora import Impressora
 from gestor_comercial.domain.mesa import Mesa
 from gestor_comercial.domain.produto import Produto
@@ -17,6 +17,7 @@ from gestor_comercial.hardware.impressora_escpos import BlocoTexto, ErroDeImpres
 from gestor_comercial.repository.base import Base
 from gestor_comercial.repository.unit_of_work import UnitOfWork
 from gestor_comercial.services.auth_service import AuthService
+from gestor_comercial.services.funcionario_service import FuncionarioService
 
 PIN_GERENTE = "111111"
 PIN_ATENDENTE = "222222"
@@ -42,16 +43,28 @@ def auth(uow):
 
 
 @pytest.fixture
+def funcionarios(uow, auth):
+    return FuncionarioService(uow, auth)
+
+
+@pytest.fixture
 def gerente(uow, auth):
-    """Gerente já cadastrado e logado — o estado normal do app em operação."""
-    funcionario = auth.criar_funcionario("Gerente", PIN_GERENTE, PerfilFuncionario.GERENTE)
+    """Gerente (Usuario) já cadastrado e logado — o estado normal do app em operação."""
+    usuario = auth.criar_usuario("Gerente", PIN_GERENTE, PerfilUsuario.GERENTE)
     auth.login(PIN_GERENTE)
-    return funcionario
+    return usuario
 
 
 @pytest.fixture
 def atendente(uow, auth, gerente):
-    return auth.criar_funcionario("Atendente", PIN_ATENDENTE, PerfilFuncionario.ATENDENTE)
+    """Usuario operador de caixa (era ATENDENTE) — continua logando, só perfil renomeado."""
+    return auth.criar_usuario("Atendente", PIN_ATENDENTE, PerfilUsuario.OPERADOR_CAIXA)
+
+
+@pytest.fixture
+def funcionario(funcionarios, gerente):
+    """Funcionario de atendimento (garçom), sem login — para vincular a `Comanda.atendente_id`."""
+    return funcionarios.criar("Garçom", "Garçom")
 
 
 @pytest.fixture

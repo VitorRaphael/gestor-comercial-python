@@ -2,6 +2,12 @@
 
 > Progresso da V1. Marcar `[x]` conforme cada etapa for concluída e testada. Detalhes de regras/escopo em [`docs/arquitetura.md`](docs/arquitetura.md).
 
+> **2026-08-28 — Refatoração Usuario/Funcionario:** `Funcionario` (Fases 1-3 abaixo)
+> foi cindida em `Usuario` (login/PIN, tela de login) e `Funcionario` (atendimento,
+> sem login). Os itens marcados `[x]` abaixo que mencionam "Funcionario" descrevem
+> o estado *antes* dessa cisão — ver §3.1/§3.11 de `docs/arquitetura.md` para o
+> estado atual. Migration: `d23a4f888a77`.
+
 ## Fase 0 — Setup do repositório
 - [x] `.gitignore` (Python/PySide6/venv/PyInstaller)
 - [x] `README.md`
@@ -51,7 +57,8 @@
 - [ ] Gerar `.exe` e testar em máquina limpa (sem Python instalado) — roteiro em [`docs/checklist-maquina-limpa.md`](docs/checklist-maquina-limpa.md)
 - [x] Simular quedas de energia / fechamento forçado — checar integridade do SQLite — automatizado em `tests/integration/test_resiliencia_queda_energia.py` (mata o processo de verdade no meio da escrita; confirma rollback automático sem commit e persistência com commit)
 - [x] Testes de estresse: inputs inválidos, digitação errada, dupla submissão — coberto pela suíte de services (PIN errado, quantidade 0/negativa, cancelar sem PIN de gerente, fechar sem pagamento, e o novo `test_confirmar_pagamento_duas_vezes_seguidas_e_bloqueado`)
-- [ ] Ícone `.ico` do app (`resources/`) + `icon=` no `build.spec` (hoje `icon=None`) e instalador (Inno Setup) que cria atalho no Menu Iniciar/Desktop
+- [x] Ícone `.ico` do app (`resources/icons/app.ico`, gerado por `packaging/gerar_icone.py`) + `icon=` no `build.spec` e instalador (`packaging/instalador.iss`, Inno Setup) que cria atalho no Menu Iniciar/Desktop — 2026-09-01
+- [ ] Gerar em máquina limpa de verdade na loja do pai do Vitor (levar `packaging/output/GestorComercial-Setup.exe` no pendrive) e rodar o roteiro de [`docs/checklist-maquina-limpa.md`](docs/checklist-maquina-limpa.md)
 - [ ] Validação final com o pai antes de ir para produção real
 
 ## Backlog (V2/V3 — não iniciar antes da V1 estar em produção)

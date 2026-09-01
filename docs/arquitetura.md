@@ -24,11 +24,12 @@ Uma tentativa anterior deste porte (pasta `PVD Python`, repositório `pvd-food-t
 Portado integralmente do Gestor Comercial, **exceto** os itens cortados abaixo (ver §5 Backlog).
 
 ### 3.1 Autenticação e Sessão
-- Login por PIN numérico (hash SHA-256 + salt por funcionário), sem usuário/senha.
+- **`Usuario` é a única entidade de login** — não confundir com `Funcionario` (§3.11), que não loga. Login por PIN numérico (hash SHA-256 + salt por usuário), sem usuário/senha tradicional.
 - Usuário autenticado mantido em memória do processo (não há token HTTP — é um app de processo único).
 - Reautenticação de PIN de Gerente para ações críticas, sem trocar o usuário da sessão principal.
-- Perfis: `ATENDENTE` / `GERENTE`. Ações administrativas exigem PIN de Gerente.
-- Não permite dois funcionários ativos com o mesmo PIN.
+- Perfis: `ADMIN` / `GERENTE` / `OPERADOR_CAIXA`. Ações administrativas (`exigir_gerente`) exigem `ADMIN` ou `GERENTE`.
+- Não permite dois usuários ativos com o mesmo PIN.
+- Migração de 2026-08-28 (separação Usuario/Funcionario): todo `ATENDENTE` existente virou `Usuario(OPERADOR_CAIXA)` — continuam logando normalmente. Atendentes/garçons sem login são cadastrados à parte como `Funcionario` (§3.11).
 
 ### 3.2 Cardápio — Categorias e Produtos
 - CRUD de categoria (nome único); exclusão bloqueada se houver produtos vinculados; desativação soft.
@@ -62,7 +63,7 @@ Portado integralmente do Gestor Comercial, **exceto** os itens cortados abaixo (
 - Formas: `CREDITO`, `DEBITO`, `DINHEIRO`, `PIX`, `CONSUMO_INTERNO`.
 
 ### 3.8 Consumo Interno / Quitação de Funcionários
-- Consulta de saldo devedor por funcionário e histórico de consumos/quitações — só gerente (mesma exigência de §3.1).
+- Devedor é sempre um `Funcionario` (§3.11, sem login) — não um `Usuario`. Consulta de saldo devedor e histórico de consumos/quitações — só gerente/admin logado (mesma exigência de §3.1).
 - Quitação (total ou parcial, PIN de Gerente), abatendo os consumos mais antigos primeiro (FIFO).
 
 ### 3.9 Caixa
@@ -74,14 +75,18 @@ Portado integralmente do Gestor Comercial, **exceto** os itens cortados abaixo (
 #### 3.9.1 Sequência diária de fechamentos e Histórico
 - `Caixa.numero_sequencial_dia` é a ordem do fechamento dentro do dia **civil de `fechado_em`**, nunca de `aberto_em`: um turno aberto às 17h e fechado 01h do dia seguinte é o **1º fechamento do dia seguinte**, não do dia da abertura. Só existe depois de fechado, calculado uma única vez em `CaixaService.fechar` (contagem antes de sujar o próprio `caixa` no `Session`, senão o autoflush do SQLAlchemy contaria o caixa em fechamento como se já fosse um fechamento anterior) e nunca recalculado — fechar de novo o mesmo caixa já é bloqueado, então o número é imutável desde que gravado.
 - `CaixaService.titulo_fechamento` monta a identificação oficial: `"Xº Fechamento do dia DD/MM/AAAA"`.
-- `CaixaService.listar_historico(inicio, fim, funcionario_id)` alimenta a tela de Histórico de Fechamentos: filtra por `fechado_em` (mesmo eixo da sequência diária) e por operador — casando com `aberto_por_id` OU `fechado_por_id`, porque quem consulta pode não lembrar qual das duas pontas do turno era o funcionário procurado.
+- `CaixaService.listar_historico(inicio, fim, usuario_id)` alimenta a tela de Histórico de Fechamentos: filtra por `fechado_em` (mesmo eixo da sequência diária) e por operador — casando com `aberto_por_id` OU `fechado_por_id`, porque quem consulta pode não lembrar qual das duas pontas do turno era o usuário procurado.
 - App single-user/single-processo (mesma premissa de `UnitOfWork`, §"Repository"): não há concorrência real entre dois fechamentos, então a contagem-e-gravação dentro da mesma transação de commit é suficiente sem lock adicional.
 
 ### 3.10 Movimentos de Caixa
 - Registro de `SANGRIA` / `REFORCO` / `DESPESA` / `CONSUMO_FUNCIONARIO`, vinculado ao caixa aberto.
 
 ### 3.11 Funcionários
-- Cadastro (nome, PIN, perfil), listagem de ativos, desativação soft.
+- `Funcionario` é o colaborador de atendimento (garçom, cozinha, ...) — **não loga** (login é `Usuario`, §3.1). Serve só para vincular quem atendeu a comanda (`Comanda.atendente_id`, opcional) e para consumo interno (§3.8).
+- Cadastro (nome, cargo livre, telefone opcional), edição, listagem de ativos/todos.
+- Desativação soft: some da busca de atendimento, mas histórico (comandas atendidas, consumo, quitações) é preservado.
+- Exclusão física, bloqueada se houver histórico vinculado (sugere desativar em vez de excluir).
+- Tela de mesas/comanda mostra um seletor de busca rápida só com `Funcionario` ativos, para setar/trocar `Comanda.atendente_id` a qualquer momento (`ComandaService.definir_atendente`).
 
 ### 3.12 Impressoras e Roteamento
 - **Cadastro de impressora** (`cardapio_service`, tela de Impressoras, tudo ação de Gerente): nome único, largura da bobina em colunas (32 = 58mm, 48 = 80mm), ativa/inativa, padrão, e os parâmetros de **5 tipos de conexão** — `USB` (vendor/product id), `SERIAL` (porta + baudrate), `REDE` (host + porta), `WINDOWS` (nome da fila instalada) e `ARQUIVO`. O tipo `ARQUIVO` grava o cupom num `.txt` legível e é o padrão de quem cadastra sem informar nada: permite rodar o food truck inteiro antes de a impressora física chegar.
