@@ -17,6 +17,8 @@ fora do diretório do app, para sobreviver a uma reinstalação do .exe.
 
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_data_files
+
 RAIZ = Path(SPECPATH).parent
 
 a = Analysis(
@@ -27,6 +29,11 @@ a = Analysis(
         (str(RAIZ / "alembic.ini"), "."),
         (str(RAIZ / "migrations"), "migrations"),
         (str(RAIZ / "resources"), "resources"),
+        # python-escpos lê capabilities.json do próprio pacote em runtime
+        # (perfis de comando por modelo de impressora) — sem isso a
+        # impressora tipo Windows falha com "No such file or directory:
+        # ...\escpos\capabilities.json" (visto em campo, 2026-09-01).
+        *collect_data_files("escpos"),
     ],
     hiddenimports=[
         # `migrations/env.py` só existe pro PyInstaller como arquivo de
