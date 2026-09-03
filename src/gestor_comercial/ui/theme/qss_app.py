@@ -169,6 +169,21 @@ def construir_qss_app(t: dict[str, str]) -> str:
 
     /* ---------- Pílulas do cabeçalho da Comanda ---------- */
 
+    /* "← Mesas": ponto de saída da tela — precisa se destacar dos botões
+       neutros ao lado (+ Item, 2ª via) pra ficar óbvio que é a saída, não
+       mais uma ação da comanda. Borda âmbar + peso maior que o padrão. */
+    QPushButton[variante="pilula-voltar"] {{
+      background: #1F1D1B;
+      color: #DF9F3D;
+      border: 1.5px solid #DF9F3D;
+      border-radius: 18px;
+      padding: 7px 18px;
+      font-size: 13px;
+      font-weight: 800;
+    }}
+    QPushButton[variante="pilula-voltar"]:hover {{ background: #2A2723; }}
+    QPushButton[variante="pilula-voltar"]:disabled {{ color: #6B655D; border-color: #3A362E; }}
+
     QPushButton[variante="pilula-secundario"] {{
       background: #1F1D1B;
       color: #FFFFFF;

@@ -17,10 +17,10 @@ from decimal import Decimal
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
-    QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -104,7 +104,8 @@ class ComandaView(QWidget):
         cabecalho.setSpacing(8)
 
         self._botao_voltar = QPushButton("← Mesas")
-        self._botao_voltar.setProperty("variante", "pilula-secundario")
+        self._botao_voltar.setProperty("variante", "pilula-voltar")
+        self._botao_voltar.setToolTip("Voltar para a grade de mesas.")
         self._botao_voltar.clicked.connect(self._voltar_clicado)
         cabecalho.addWidget(self._botao_voltar)
 
@@ -846,12 +847,16 @@ class _AdicionarItemDialog(QDialog):
         self._busca.foco_busca()
 
 
-class _FecharConferenciaDialog(QDialog):
-    """Modal do botão "Fechar conta": taxa de serviço e desconto opcionais.
+_TAXA_SERVICO_PADRAO = Decimal("10")
 
-    Ambos ficam em branco por padrão (0%) — a maioria das contas do food
-    truck não tem nenhum dos dois, e o atendente não deveria precisar
-    confirmar "nenhum" a cada fechamento.
+
+class _FecharConferenciaDialog(QDialog):
+    """Modal do botão "Fechar conta": taxa de serviço fixa de 10%, opcional.
+
+    Sem campo de desconto e sem valor livre de taxa — o food truck só cobra
+    os 10% padrão de gorjeta/serviço quando o garçom decide marcar a caixa,
+    então não há por que dar espaço pra digitar um percentual ou desconto
+    arbitrário a cada fechamento (fonte de erro de digitação no balcão).
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -868,23 +873,8 @@ class _FecharConferenciaDialog(QDialog):
         aviso.setStyleSheet("color: #94a3b8; font-size: 11px;")
         layout.addWidget(aviso)
 
-        formulario = QFormLayout()
-
-        self._campo_taxa = QDoubleSpinBox()
-        self._campo_taxa.setSuffix(" %")
-        self._campo_taxa.setMinimum(0)
-        self._campo_taxa.setMaximum(100)
-        self._campo_taxa.setDecimals(2)
-        formulario.addRow("Taxa de serviço", self._campo_taxa)
-
-        self._campo_desconto = QDoubleSpinBox()
-        self._campo_desconto.setPrefix("R$ ")
-        self._campo_desconto.setMinimum(0)
-        self._campo_desconto.setMaximum(999_999)
-        self._campo_desconto.setDecimals(2)
-        formulario.addRow("Desconto", self._campo_desconto)
-
-        layout.addLayout(formulario)
+        self._marcar_taxa_servico = QCheckBox(f"Cobrar taxa de serviço ({_TAXA_SERVICO_PADRAO:g}%)")
+        layout.addWidget(self._marcar_taxa_servico)
 
         botoes = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -895,11 +885,8 @@ class _FecharConferenciaDialog(QDialog):
         layout.addWidget(botoes)
 
     def resultado(self) -> tuple[Decimal | None, Decimal | None]:
-        taxa = Decimal(str(self._campo_taxa.value())) if self._campo_taxa.value() > 0 else None
-        desconto = (
-            Decimal(str(self._campo_desconto.value())) if self._campo_desconto.value() > 0 else None
-        )
-        return taxa, desconto
+        taxa = _TAXA_SERVICO_PADRAO if self._marcar_taxa_servico.isChecked() else None
+        return taxa, None
 
 
 def _formatar_reais(valor: Decimal) -> str:
