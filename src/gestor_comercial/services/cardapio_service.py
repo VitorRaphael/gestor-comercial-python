@@ -137,6 +137,23 @@ class CardapioService:
         self.uow.commit()
         return categoria
 
+    def desassociar_impressora(self, categoria_id: int) -> Categoria:
+        self.auth.exigir_gerente()
+        categoria = self.buscar_categoria(categoria_id)
+
+        categoria.impressora = None
+        self.uow.categorias.salvar(categoria)
+        self.uow.commit()
+        return categoria
+
+    def listar_categorias_da_impressora(self, impressora_id: int) -> list[Categoria]:
+        """Categorias hoje vinculadas a esta impressora (para a tela Impressoras)."""
+        return [
+            categoria
+            for categoria in self.uow.categorias.listar_todos()
+            if categoria.impressora_id == impressora_id
+        ]
+
     # ------------------------------------------------------------------
     # Produtos (porte de ProdutoService.java)
     # ------------------------------------------------------------------

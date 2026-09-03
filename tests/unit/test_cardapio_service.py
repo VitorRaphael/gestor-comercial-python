@@ -223,6 +223,49 @@ def test_associar_impressora_exige_gerente(cardapio, categoria, como_atendente):
         cardapio.associar_impressora(categoria.id, 1)
 
 
+def test_desassociar_impressora_de_categoria(cardapio, categoria):
+    impressora = cardapio.criar_impressora("Cozinha")
+    cardapio.associar_impressora(categoria.id, impressora.id)
+
+    desassociada = cardapio.desassociar_impressora(categoria.id)
+
+    assert desassociada.impressora_id is None
+
+
+def test_desassociar_impressora_categoria_inexistente(cardapio):
+    with pytest.raises(RecursoNaoEncontradoError):
+        cardapio.desassociar_impressora(9999)
+
+
+def test_desassociar_impressora_exige_gerente(cardapio, categoria, como_atendente):
+    with pytest.raises(AcessoNegadoError):
+        cardapio.desassociar_impressora(categoria.id)
+
+
+def test_listar_categorias_da_impressora(cardapio, categoria):
+    outra_categoria = cardapio.criar_categoria("Bebidas")
+    impressora = cardapio.criar_impressora("Cozinha")
+    outra_impressora = cardapio.criar_impressora("Bar")
+
+    cardapio.associar_impressora(categoria.id, impressora.id)
+    cardapio.associar_impressora(outra_categoria.id, outra_impressora.id)
+
+    vinculadas = cardapio.listar_categorias_da_impressora(impressora.id)
+
+    assert [c.id for c in vinculadas] == [categoria.id]
+
+
+def test_listar_categorias_da_impressora_troca_nao_duplica(cardapio, categoria):
+    impressora_a = cardapio.criar_impressora("Cozinha")
+    impressora_b = cardapio.criar_impressora("Bar")
+
+    cardapio.associar_impressora(categoria.id, impressora_a.id)
+    cardapio.associar_impressora(categoria.id, impressora_b.id)
+
+    assert cardapio.listar_categorias_da_impressora(impressora_a.id) == []
+    assert [c.id for c in cardapio.listar_categorias_da_impressora(impressora_b.id)] == [categoria.id]
+
+
 # ----------------------------------------------------------------------
 # Produtos
 # ----------------------------------------------------------------------

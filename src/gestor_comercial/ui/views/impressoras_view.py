@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -34,6 +36,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from PySide6.QtCore import Qt
 
 from gestor_comercial.domain.enums import TipoConexaoImpressora
 from gestor_comercial.domain.impressora import COLUNAS_PADRAO, Impressora
@@ -110,7 +113,12 @@ class ImpressorasView(QWidget):
         self._tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._tabela.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self._tabela)
+        self._tabela.itemSelectionChanged.connect(self._atualizar_categorias)
+
+        linha_principal = QHBoxLayout()
+        linha_principal.addWidget(self._tabela, stretch=3)
+        linha_principal.addWidget(self._montar_painel_categorias(), stretch=1)
+        layout.addLayout(linha_principal)
 
         acoes = QHBoxLayout()
         self._botao_editar = QPushButton("Editar")
@@ -143,6 +151,32 @@ class ImpressorasView(QWidget):
         self._label_ajuda.setWordWrap(True)
         layout.addWidget(self._label_ajuda)
 
+    def _montar_painel_categorias(self) -> QWidget:
+        painel = QWidget()
+        layout = QVBoxLayout(painel)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        titulo = QLabel("Categorias desta impressora")
+        titulo.setStyleSheet("font-weight: 600;")
+        layout.addWidget(titulo)
+
+        self._lista_categorias = QListWidget()
+        # Uma categoria só tem uma impressora (§3.2, FK 1:N): marcar aqui
+        # troca o vínculo, nunca soma — reflete exatamente o que
+        # `associar_impressora`/`desassociar_impressora` fazem no banco.
+        self._lista_categorias.itemChanged.connect(self._ao_marcar_categoria)
+        layout.addWidget(self._lista_categorias)
+
+        ajuda = QLabel(
+            "Marque as categorias que devem sair nesta impressora. Uma "
+            "categoria marcada em outra impressora troca para esta."
+        )
+        ajuda.setProperty("variante", "fraco")
+        ajuda.setWordWrap(True)
+        layout.addWidget(ajuda)
+
+        return painel
+
     def atualizar(self) -> None:
         self._label_erro.setText("")
         # Cadastro alterado envelhece o aviso do último teste: a impressora que
@@ -152,6 +186,48 @@ class ImpressorasView(QWidget):
         self._tabela.setRowCount(len(self._impressoras))
         for linha, impressora in enumerate(self._impressoras):
             self._preencher_linha(linha, impressora)
+        self._atualizar_categorias()
+
+    def _atualizar_categorias(self) -> None:
+        # `blockSignals` evita que popular a lista dispare `_ao_marcar_categoria`
+        # como se o gerente tivesse clicado em cada checkbox.
+        self._lista_categorias.blockSignals(True)
+        self._lista_categorias.clear()
+
+        impressora = self._impressora_selecionada()
+        if impressora is None:
+            self._lista_categorias.blockSignals(False)
+            return
+
+        vinculadas = {c.id for c in self._service.listar_categorias_da_impressora(impressora.id)}
+        for categoria in self._service.listar_categorias():
+            item = QListWidgetItem(categoria.nome)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.CheckState.Checked if categoria.id in vinculadas else Qt.CheckState.Unchecked
+            )
+            item.setData(Qt.ItemDataRole.UserRole, categoria.id)
+            self._lista_categorias.addItem(item)
+
+        self._lista_categorias.blockSignals(False)
+
+    def _ao_marcar_categoria(self, item: QListWidgetItem) -> None:
+        impressora = self._impressora_selecionada()
+        if impressora is None:
+            return
+        categoria_id = item.data(Qt.ItemDataRole.UserRole)
+
+        self._mostrar_erro("")
+        try:
+            if item.checkState() == Qt.CheckState.Checked:
+                self._service.associar_impressora(categoria_id, impressora.id)
+            else:
+                self._service.desassociar_impressora(categoria_id)
+        except _ERROS_SERVICE as erro:
+            self._mostrar_erro(str(erro))
+        # Outra impressora pode ter perdido essa categoria (troca de vínculo);
+        # a checklist dela só se atualiza quando o gerente clicar nela de novo,
+        # então não há duplicidade visível, só desatualizada até o próximo clique.
 
     def _preencher_linha(self, linha: int, impressora: Impressora) -> None:
         tipo = _ROTULOS_TIPO.get(impressora.tipo_conexao, impressora.tipo_conexao.value)
