@@ -14,7 +14,7 @@ SAIDA = RAIZ / "resources" / "icons" / "app.ico"
 
 FUNDO = "#0b0d16"
 BORDA = "#2a2f47"
-ROXO = "#7c5cff"
+ACENTO = "#f5b942"
 TEXTO = "#f3f4f8"
 
 TAMANHO = 256
@@ -49,7 +49,7 @@ def gerar() -> None:
         width=6,
     )
 
-    # "GC" (Gestor Comercial) centralizado, em roxo -- mesma cor de destaque
+    # "GC" (Gestor Comercial) centralizado, em dourado -- mesma cor de destaque
     # usada nos botões primários e no foco de campos no QSS.
     texto = "GC"
     fonte = _fonte(120)
@@ -57,7 +57,7 @@ def gerar() -> None:
     largura = bbox[2] - bbox[0]
     altura = bbox[3] - bbox[1]
     pos = ((TAMANHO - largura) / 2 - bbox[0], (TAMANHO - altura) / 2 - bbox[1])
-    draw.text(pos, texto, font=fonte, fill=ROXO)
+    draw.text(pos, texto, font=fonte, fill=ACENTO)
 
     # Sublinhado curto, remete ao "cursor piscando" da tela de PIN.
     linha_y = int(TAMANHO * 0.74)

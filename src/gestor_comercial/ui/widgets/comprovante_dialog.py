@@ -65,7 +65,7 @@ class ComprovanteFechamentoDialog(QDialog):
                 border: 1px solid {tokens.BORDA};
                 border-radius: {tokens.RAIO}px;
                 padding: 16px;
-                selection-background-color: {tokens.ROXO};
+                selection-background-color: {tokens.ACENTO};
             }}
             """
         )

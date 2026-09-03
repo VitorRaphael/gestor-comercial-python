@@ -190,10 +190,8 @@ class _CardKpi(QFrame):
 
     def __init__(self, titulo: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet(
-            "QFrame { border: 1px solid #333; border-radius: 8px; padding: 8px; }"
-        )
+        self.setProperty("variante", "cartao")
+        self.setStyleSheet("QFrame { padding: 8px; }")
         layout = QVBoxLayout(self)
         rotulo = QLabel(titulo)
         rotulo.setProperty("variante", "fraco")

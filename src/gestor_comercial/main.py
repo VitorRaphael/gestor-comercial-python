@@ -13,6 +13,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 
@@ -47,14 +48,22 @@ def _rodar_seed() -> None:
     run_seed()
 
 
-def _carregar_qss() -> str:
-    caminho = _RAIZ_PROJETO / "resources" / "qss" / "base.qss"
-    return caminho.read_text(encoding="utf-8") if caminho.exists() else ""
+def _registrar_fonte_marca() -> None:
+    """Carrega a fonte "Archivo Black" (letra de forma, grossa e forte, ver
+    `resources/fonts/`) para todo o app poder usá-la via `font-family` no
+    QSS — não é fonte de sistema, então precisa ser embutida e registrada
+    manualmente."""
+    caminho_fonte = _RAIZ_PROJETO / "resources" / "fonts" / "ArchivoBlack-Regular.ttf"
+    QFontDatabase.addApplicationFont(str(caminho_fonte))
 
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setStyleSheet(_carregar_qss())
+    _registrar_fonte_marca()
+
+    from gestor_comercial.ui.theme.controller import ThemeController
+
+    ThemeController.instancia().aplicar_inicial()
 
     try:
         _aplicar_migrations()

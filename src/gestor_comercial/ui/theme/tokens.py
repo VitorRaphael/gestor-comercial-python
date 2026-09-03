@@ -1,36 +1,103 @@
-"""Paleta de cores do Gestor Comercial, portada de
-`GESTOR COMERCIAL/src/main/resources/static/css/tokens.css`.
+"""Paleta de cores do Gestor Comercial Python — tema "Axiom Solvir".
 
-QSS não suporta `var()`, então os valores ficam duplicados aqui e no
-`base.qss`. Ao alterar uma cor, atualize os dois arquivos.
+Duas paletas completas (`TEMA_ESCURO` "Concreto" e `TEMA_CLARO` "Vívido"),
+compartilhadas entre a tela de login (`ui/views/login_view.py`) e o resto do
+shell (`ui/theme/qss_app.py`, aplicado via `ThemeController` em
+`ui/theme/controller.py`) — um único lugar de verdade para as cores do app
+inteiro, escuro ou claro.
+
+QSS não suporta `var()`, então os dicts abaixo são interpolados direto nos
+templates de `qss_app.py` / `login_view.py` a cada troca de tema.
 """
 
-# Fundos
-BG = "#0b0d16"
-BG_ELEVADO = "#10131f"
-SUPERFICIE = "#161a29"
-SUPERFICIE_2 = "#1f2436"
-SUPERFICIE_3 = "#2a2f47"
-BORDA = "#2a2f47"
+TEMA_ESCURO: dict[str, str] = {
+    "bg_marca": "#0F0E0D",
+    "bg_terminal": "#0F0E0D",
+    "canto_azul": "#2f5bd6",
+    "superficie": "#161514",
+    "superficie_2": "#1C1B19",
+    "borda": "#242220",
+    "texto": "#F1F3F5",
+    "texto_fraco": "#9195ac",
+    "texto_fraquissimo": "#6a6f89",
+    "acento": "#E5A93C",
+    "acento_texto": "#0C0E12",
+    "sucesso": "#22c55e",
+    "perigo": "#DC2626",
+    "perigo_hover": "#ef4444",
+    "rosa": "#ec4899",
+    "aviso": "#eab308",
+    # Status "Mesa Ocupada" (§ paleta oficial): roxo profundo com acento
+    # violeta — não é vermelho/rosa porque ocupada é estado normal (mesa em
+    # atendimento), não um alerta.
+    "mesa_ocupada_bg": "#1E1635",
+    "mesa_ocupada_borda": "#7C3AED",
+    # Mesa livre: grafite neutro (§ paleta oficial) — a borda verde já vem de
+    # `sucesso` no `border-top` do QSS.
+    "mesa_livre_bg": "#1F242D",
+    # Logo isométrico na mesma tonalidade vívida do acento (botão ENTER/pílula
+    # ESCURO), só com camadas mais escuras por baixo pra dar profundidade.
+    "logo_clara": "#ffd873",
+    "logo_media": "#E5A93C",
+    "logo_escura": "#9c6f10",
+}
 
-# Texto
-TEXTO = "#f3f4f8"
-TEXTO_FRACO = "#9195ac"
-TEXTO_FRAQUISSIMO = "#6a6f89"
+TEMA_CLARO: dict[str, str] = {
+    "bg_marca": "#F4F2EB",
+    "bg_terminal": "#F4F2EB",
+    "canto_azul": "#0055FF",
+    "superficie": "#FFFFFF",
+    "superficie_2": "#f4f6fb",
+    "borda": "#d8deec",
+    "texto": "#0F141C",
+    "texto_fraco": "#5b6178",
+    "texto_fraquissimo": "#8a90a8",
+    "acento": "#0055FF",
+    "acento_texto": "#ffffff",
+    "sucesso": "#16a34a",
+    "perigo": "#DC2626",
+    "perigo_hover": "#ef4444",
+    "rosa": "#db2777",
+    "aviso": "#b45309",
+    # Status "Mesa Ocupada" no claro: mesmo par roxo/violeta do escuro — é
+    # cor de estado, não de marca, então não varia com o tema.
+    "mesa_ocupada_bg": "#1E1635",
+    "mesa_ocupada_borda": "#7C3AED",
+    "mesa_livre_bg": "#f4f6fb",
+    # Logo isométrico "concreto claro": face frontal quase branca, profundidade em cinza-azulado.
+    "logo_clara": "#f5f7fb",
+    "logo_media": "#c3cadb",
+    "logo_escura": "#8991a8",
+}
 
-# Acentos
-ROXO = "#7c5cff"
-ROSA = "#ec4899"
+# ----------------------------------------------------------------------
+# Constantes planas (tema escuro) -- usadas por widgets que ainda não
+# reagem à troca de tema (diálogos pontuais como `comprovante_dialog.py`).
+# Ao tornar um widget reativo, prefira ler de `TEMA_ESCURO`/`TEMA_CLARO`
+# via `ThemeController` em vez de importar estas constantes.
+# ----------------------------------------------------------------------
+
+BG = TEMA_ESCURO["bg_marca"]
+BG_ELEVADO = TEMA_ESCURO["bg_terminal"]
+SUPERFICIE = TEMA_ESCURO["superficie"]
+SUPERFICIE_2 = TEMA_ESCURO["superficie_2"]
+SUPERFICIE_3 = TEMA_ESCURO["borda"]
+BORDA = TEMA_ESCURO["borda"]
+
+TEXTO = TEMA_ESCURO["texto"]
+TEXTO_FRACO = TEMA_ESCURO["texto_fraco"]
+TEXTO_FRAQUISSIMO = TEMA_ESCURO["texto_fraquissimo"]
+
+ACENTO = TEMA_ESCURO["acento"]
+ACENTO_TEXTO = TEMA_ESCURO["acento_texto"]
+ROSA = TEMA_ESCURO["rosa"]
 AZUL = "#3b82f6"
-INDIGO = "#6366f1"
 
-# Semânticas
-SUCESSO = "#22c55e"
-PERIGO = "#f43f5e"
-AVISO = "#f59e0b"
+SUCESSO = TEMA_ESCURO["sucesso"]
+PERIGO = TEMA_ESCURO["perigo"]
+AVISO = TEMA_ESCURO["aviso"]
 INFO = AZUL
 
-# Raios (px)
 RAIO_SM = 8
 RAIO = 14
 RAIO_LG = 20

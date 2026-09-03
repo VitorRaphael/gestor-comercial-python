@@ -14,8 +14,8 @@ from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
 
-from PySide6.QtCore import Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -58,9 +59,9 @@ _COLUNAS = ["Descrição", "Preço", "Qtd", "Total", ""]
 # Largura suficiente para "Cancelar" em negrito 12px + padding do botão
 # (ver `QPushButton[variante="perigo-tabela"]` em ui/theme/qss_app.py).
 _LARGURA_COLUNA_ACAO = 110
-# Ver comentário em `_criar_tabela`: precisa sobrar altura suficiente depois
-# do inset de `QTableWidget::item { padding: 8px 12px; }` pro botão de ação
-# (variante "perigo-tabela", ~24px de altura) caber sem cortar o texto.
+# `#tabela-comanda::item` usa padding vertical reduzido (4px, ver
+# ui/theme/qss_app.py) justamente para sobrar altura suficiente pro botão de
+# ação (perigo-tabela/remover-tabela, ~26px) caber sem cortar o texto.
 _ALTURA_LINHA = 44
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
@@ -96,36 +97,42 @@ class ComandaView(QWidget):
 
     def _montar_layout(self) -> None:
         layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(24, 20, 24, 20)
+        layout_externo.setSpacing(14)
 
         cabecalho = QHBoxLayout()
+        cabecalho.setSpacing(8)
 
         self._botao_voltar = QPushButton("← Mesas")
-        self._botao_voltar.setProperty("variante", "secundario")
+        self._botao_voltar.setProperty("variante", "pilula-secundario")
         self._botao_voltar.clicked.connect(self._voltar_clicado)
         cabecalho.addWidget(self._botao_voltar)
 
         self._label_titulo = QLabel("")
-        self._label_titulo.setStyleSheet("font-weight: 600; font-size: 18px;")
+        self._label_titulo.setStyleSheet("font-weight: 800; font-size: 32px; color: #FFFFFF;")
         cabecalho.addWidget(self._label_titulo)
 
+        # Indicador de tempo na cozinha: continua calculado em `atualizar()`
+        # (outras telas/testes podem inspecionar o texto), mas fica oculto do
+        # cabeçalho para não poluir a barra de ações com texto colorido.
         self._label_horario = QLabel("")
-        self._label_horario.setStyleSheet("font-size: 13px; margin-left: 8px;")
-        cabecalho.addWidget(self._label_horario)
+        self._label_horario.setStyleSheet("font-size: 12px; margin-left: 8px;")
+        self._label_horario.hide()
         cabecalho.addStretch()
 
         self._botao_add_item = QPushButton("+ Item")
-        self._botao_add_item.setProperty("variante", "secundario")
+        self._botao_add_item.setProperty("variante", "pilula-secundario")
         self._botao_add_item.clicked.connect(self._abrir_modal_adicionar_item)
         cabecalho.addWidget(self._botao_add_item)
 
         self._botao_segunda_via = QPushButton("2ª via")
-        self._botao_segunda_via.setProperty("variante", "secundario")
+        self._botao_segunda_via.setProperty("variante", "pilula-secundario")
         self._botao_segunda_via.setToolTip("Repete a comanda inteira, para cupom rasgado ou perdido.")
         self._botao_segunda_via.clicked.connect(self._imprimir_segunda_via)
         cabecalho.addWidget(self._botao_segunda_via)
 
         self._botao_fechar_conferencia = QPushButton("Fechar conta")
-        self._botao_fechar_conferencia.setProperty("variante", "secundario")
+        self._botao_fechar_conferencia.setProperty("variante", "pilula-secundario")
         self._botao_fechar_conferencia.setToolTip(
             "Trava novos itens e emite a pré-conta para o cliente conferir na mesa."
         )
@@ -133,26 +140,29 @@ class ComandaView(QWidget):
         cabecalho.addWidget(self._botao_fechar_conferencia)
 
         self._botao_reabrir = QPushButton("Reabrir")
-        self._botao_reabrir.setProperty("variante", "secundario")
+        self._botao_reabrir.setProperty("variante", "pilula-secundario")
         self._botao_reabrir.setToolTip("Volta a aceitar itens. Exige PIN de gerente.")
         self._botao_reabrir.clicked.connect(self._reabrir_comanda)
         cabecalho.addWidget(self._botao_reabrir)
 
         self._botao_pagamento = QPushButton("Receber pagamento")
-        self._botao_pagamento.setProperty("variante", "primario")
+        self._botao_pagamento.setProperty("variante", "pilula-destaque")
         self._botao_pagamento.clicked.connect(self._solicitar_pagamento)
         cabecalho.addWidget(self._botao_pagamento)
 
         self._botao_cancelar_comanda = QPushButton("Cancelar comanda")
-        self._botao_cancelar_comanda.setProperty("variante", "perigo")
+        self._botao_cancelar_comanda.setProperty("variante", "pilula-perigo")
         self._botao_cancelar_comanda.clicked.connect(self._cancelar_comanda)
         cabecalho.addWidget(self._botao_cancelar_comanda)
         layout_externo.addLayout(cabecalho)
 
         linha_atendente = QHBoxLayout()
-        linha_atendente.addWidget(QLabel("Atendeu:"))
+        label_atendeu = QLabel("Atendeu:")
+        label_atendeu.setStyleSheet("color: #A8A29E; font-size: 13px; font-weight: 500;")
+        linha_atendente.addWidget(label_atendeu)
         self._combo_atendente = QComboBox()
         self._combo_atendente.setObjectName("combo-atendente")
+        self._combo_atendente.setFixedHeight(22)
         self._combo_atendente.currentIndexChanged.connect(self._ao_trocar_atendente)
         linha_atendente.addWidget(self._combo_atendente)
         linha_atendente.addStretch()
@@ -169,25 +179,26 @@ class ComandaView(QWidget):
         self._secao_pendentes = QFrame()
         self._secao_pendentes.setObjectName("secao-pendentes")
         layout_pendentes = QVBoxLayout(self._secao_pendentes)
+        layout_pendentes.setContentsMargins(14, 10, 14, 10)
+        layout_pendentes.setSpacing(6)
 
+        cabecalho_pendentes = QHBoxLayout()
         titulo_pendentes = QLabel("Itens Pendentes de Envio")
         titulo_pendentes.setObjectName("titulo-secao-pendentes")
-        layout_pendentes.addWidget(titulo_pendentes)
+        cabecalho_pendentes.addWidget(titulo_pendentes)
+        cabecalho_pendentes.addStretch()
 
-        self._tabela_pendentes = self._criar_tabela()
-        layout_pendentes.addWidget(self._tabela_pendentes)
-
-        rodape_pendentes = QHBoxLayout()
-        rodape_pendentes.addStretch()
         self._botao_enviar_pedido = QPushButton("Enviar Pedido à Produção")
-        self._botao_enviar_pedido.setProperty("variante", "sucesso")
-        self._botao_enviar_pedido.setMinimumHeight(40)
+        self._botao_enviar_pedido.setProperty("variante", "enviar-pedido")
         self._botao_enviar_pedido.setToolTip(
             "Manda para a produção todos os itens pendentes desta comanda. (Ctrl+Enter ou F5)"
         )
         self._botao_enviar_pedido.clicked.connect(self._imprimir_producao)
-        rodape_pendentes.addWidget(self._botao_enviar_pedido)
-        layout_pendentes.addLayout(rodape_pendentes)
+        cabecalho_pendentes.addWidget(self._botao_enviar_pedido)
+        layout_pendentes.addLayout(cabecalho_pendentes)
+
+        self._tabela_pendentes = self._criar_tabela()
+        layout_pendentes.addWidget(self._tabela_pendentes)
 
         layout_externo.addWidget(self._secao_pendentes)
 
@@ -199,25 +210,50 @@ class ComandaView(QWidget):
         self._atalho_enviar_f5.activated.connect(self._imprimir_producao)
 
         # ---------- Seção "Lançados" ----------
+        self._secao_lancados = QFrame()
+        self._secao_lancados.setObjectName("secao-lancados")
+        layout_lancados = QVBoxLayout(self._secao_lancados)
+        layout_lancados.setContentsMargins(14, 10, 14, 10)
+        layout_lancados.setSpacing(6)
+
         titulo_lancados = QLabel("Itens Lançados")
         titulo_lancados.setObjectName("titulo-secao-lancados")
-        layout_externo.addWidget(titulo_lancados)
+        layout_lancados.addWidget(titulo_lancados)
 
         self._tabela_lancados = self._criar_tabela()
-        layout_externo.addWidget(self._tabela_lancados)
+        layout_lancados.addWidget(self._tabela_lancados)
 
-        linha_total = QHBoxLayout()
-        linha_total.addStretch()
-        linha_total.addWidget(QLabel("Total"))
+        layout_externo.addWidget(self._secao_lancados)
+
+        # ---------- Barra de total ----------
+        self._barra_total = QFrame()
+        self._barra_total.setObjectName("barra-total")
+        self._barra_total.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._barra_total.setFixedHeight(34)
+        layout_total = QHBoxLayout(self._barra_total)
+        layout_total.setContentsMargins(24, 0, 24, 0)
+        layout_total.addStretch()
+
+        rotulo_total = QLabel("TOTAL")
+        rotulo_total.setObjectName("barra-total-rotulo")
+        layout_total.addWidget(rotulo_total)
+
         self._label_total = QLabel("R$ 0,00")
-        self._label_total.setStyleSheet("font-weight: 700; font-size: 16px;")
-        linha_total.addWidget(self._label_total)
-        layout_externo.addLayout(linha_total)
+        self._label_total.setObjectName("barra-total-valor")
+        layout_total.addWidget(self._label_total)
+
+        # As margens de 24px do `layout_externo` já alinham o card com os
+        # demais (tabelas/cards acima) e evitam colar nas bordas da janela.
+        layout_externo.addWidget(self._barra_total)
+        layout_externo.addStretch()
 
     def _criar_tabela(self) -> QTableWidget:
         tabela = QTableWidget(0, len(_COLUNAS))
+        tabela.setObjectName("tabela-comanda")
         tabela.setHorizontalHeaderLabels(_COLUNAS)
         tabela.verticalHeader().setVisible(False)
+        tabela.setShowGrid(False)
+        tabela.setFrameShape(QFrame.Shape.NoFrame)
         tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         tabela.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         tabela.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -235,7 +271,18 @@ class ComandaView(QWidget):
         # cabe nem o próprio padding do botão, e o Qt para de desenhar o texto
         # (fica uma barra vermelha vazia). Linha mais alta garante folga.
         tabela.verticalHeader().setDefaultSectionSize(_ALTURA_LINHA)
+        # Sem isto a tabela herda a política padrão (Expanding) e cada
+        # QVBoxLayout de card estica a tabela pra ocupar todo o espaço
+        # sobrando na tela — mesmo com 1 ou 2 linhas de conteúdo. O card deve
+        # encolher até a altura real dos dados, como no mockup de referência.
+        tabela.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return tabela
+
+    def _ajustar_altura_tabela(self, tabela: QTableWidget) -> None:
+        altura_cabecalho = tabela.horizontalHeader().height()
+        altura_linhas = tabela.rowCount() * _ALTURA_LINHA
+        # +2 para a borda inferior da última linha não ser cortada.
+        tabela.setFixedHeight(altura_cabecalho + altura_linhas + 2)
 
     def carregar_comanda(self, comanda: Comanda) -> None:
         self._comanda = comanda
@@ -275,11 +322,13 @@ class ComandaView(QWidget):
         self._tabela_pendentes.setRowCount(len(itens_pendentes))
         for linha, item in enumerate(itens_pendentes):
             self._preencher_linha_pendente(linha, item)
+        self._ajustar_altura_tabela(self._tabela_pendentes)
 
         grupos_lancados = self._agrupar_para_exibicao(itens_lancados)
         self._tabela_lancados.setRowCount(len(grupos_lancados))
         for linha, grupo in enumerate(grupos_lancados):
             self._preencher_linha_lancada(linha, grupo)
+        self._ajustar_altura_tabela(self._tabela_lancados)
 
         total = self._comanda_service.calcular_total(self._comanda.id)
         self._label_total.setText(_formatar_reais(total))
@@ -359,14 +408,30 @@ class ComandaView(QWidget):
         self._label_horario.setStyleSheet(f"font-size: 13px; margin-left: 8px; color: {cor};")
         return f"Na cozinha desde {primeiro_envio.strftime('%H:%M')} · há {tempo}"
 
+    # Nome do produto em destaque (branco puro); preço/qtd/total em cinza
+    # claro mais discreto, alinhados à direita — mesma hierarquia do mockup.
+    _COR_VALOR = QColor("#E7E5E4")
+
     def _preencher_celulas_basicas(
         self, tabela: QTableWidget, linha: int, descricao: str, preco_unit: Decimal, quantidade: int
     ) -> None:
         total_item = preco_unit * quantidade
-        tabela.setItem(linha, 0, QTableWidgetItem(descricao))
-        tabela.setItem(linha, 1, QTableWidgetItem(_formatar_reais(preco_unit)))
-        tabela.setItem(linha, 2, QTableWidgetItem(str(quantidade)))
-        tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(total_item)))
+
+        item_descricao = QTableWidgetItem(descricao)
+        tabela.setItem(linha, 0, item_descricao)
+
+        for coluna, texto in (
+            (1, _formatar_reais(preco_unit)),
+            (2, str(quantidade)),
+            (3, _formatar_reais(total_item)),
+        ):
+            item_valor = QTableWidgetItem(texto)
+            item_valor.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            item_valor.setForeground(self._COR_VALOR)
+            font = item_valor.font()
+            font.setWeight(QFont.Weight.Medium)
+            item_valor.setFont(font)
+            tabela.setItem(linha, coluna, item_valor)
 
     @staticmethod
     def _aplicar_variante(botao: QPushButton, variante: str) -> None:
@@ -409,7 +474,7 @@ class ComandaView(QWidget):
         # padding/fonte menores) só é aplicada depois, a tabela já capturou o
         # tamanho do botão "genérico" (maior) e nunca recalcula — o texto
         # fica cortado dentro de uma caixa pequena demais pra ele.
-        self._aplicar_variante(botao_remover, "perigo-tabela")
+        self._aplicar_variante(botao_remover, "remover-tabela")
         botao_remover.setToolTip("Remover item da lista (ainda não foi enviado à produção).")
         botao_remover.clicked.connect(lambda _checked=False, i=item: self._remover_item(i))
         layout_acoes.addWidget(botao_remover)

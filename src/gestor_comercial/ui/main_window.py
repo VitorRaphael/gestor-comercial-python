@@ -12,7 +12,9 @@ view isolada, como os testes manuais desta sessão já fizeram.
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -50,6 +52,7 @@ from gestor_comercial.ui.views.login_view import LoginView
 from gestor_comercial.ui.views.mesas_view import MesasView
 from gestor_comercial.ui.views.pagamento_dialog import PagamentoDialog
 from gestor_comercial.ui.views.relatorios_view import RelatoriosView
+from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.loja_pin_dialog import LojaPinDialog
 
@@ -167,14 +170,18 @@ class MainWindow(QMainWindow):
     def _montar_sidebar(self) -> QWidget:
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(200)
+        sidebar.setFixedWidth(212)
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(12, 20, 12, 20)
+        layout.setContentsMargins(12, 24, 12, 20)
         layout.setSpacing(4)
 
-        marca = QLabel("Gestor Comercial")
-        marca.setStyleSheet("font-weight: 600; font-size: 14px; padding: 0 12px 16px 12px;")
+        selo = QLabel("●  GESTOR COMERCIAL")
+        selo.setObjectName("sidebarSelo")
+        layout.addWidget(selo)
+        marca = QLabel("Ponto de Venda")
+        marca.setObjectName("sidebarMarca")
         layout.addWidget(marca)
+        layout.addSpacing(20)
 
         # Cada destino recarrega a própria página antes de mostrá-la, para
         # nunca exibir dado velho de quando o app ainda estava no login.
@@ -203,18 +210,27 @@ class MainWindow(QMainWindow):
             layout.addWidget(botao)
             self._botoes_nav[rotulo] = botao
 
+        layout.addStretch()
+        layout.addWidget(self._montar_pilula_tema())
+        layout.addSpacing(8)
+
         # "Loja" substitui os 4 acessos diretos (Cardápio, Impressoras,
         # Funcionários, Relatórios): um único item na sidebar, atrás de PIN
         # de supervisor (ver LojaPinDialog/_abrir_loja), pra não exigir
         # logout/login do operador de caixa cada vez que alguém precisa
         # mexer no cardápio ou conferir faturamento no meio do expediente.
+        # Fica no rodapé, junto de "Sair" — separado dos destinos do dia a
+        # dia (Mesas/Caixa) por ser administrativo, não operacional.
+        divisor = QFrame()
+        divisor.setObjectName("sidebarDivisor")
+        layout.addWidget(divisor)
+        layout.addSpacing(8)
+
         botao_loja = QPushButton("Loja")
         botao_loja.setProperty("variante", "nav")
         botao_loja.clicked.connect(self._abrir_loja)
         layout.addWidget(botao_loja)
         self._botoes_nav["Loja"] = botao_loja
-
-        layout.addStretch()
 
         botao_sair = QPushButton("Sair")
         botao_sair.setProperty("variante", "nav")
@@ -222,6 +238,42 @@ class MainWindow(QMainWindow):
         layout.addWidget(botao_sair)
 
         return sidebar
+
+    def _montar_pilula_tema(self) -> QWidget:
+        """Mesmo alternador claro/escuro da tela de login (ver
+        `LoginView._montar_barra_tema`), agora também na sidebar -- o tema
+        vale pro app inteiro (`ThemeController`), então precisa dar pra
+        trocar sem passar pelo login de novo."""
+        pilula = QFrame()
+        pilula.setObjectName("sidebarTemaPilula")
+        layout = QHBoxLayout(pilula)
+        layout.setContentsMargins(3, 3, 3, 3)
+        layout.setSpacing(0)
+
+        botao_claro = QPushButton("CLARO")
+        botao_escuro = QPushButton("ESCURO")
+        for botao in (botao_claro, botao_escuro):
+            botao.setProperty("variante", "temaBotao")
+            botao.setCheckable(True)
+            botao.setCursor(Qt.CursorShape.PointingHandCursor)
+            layout.addWidget(botao)
+
+        controlador = ThemeController.instancia()
+        grupo = QButtonGroup(pilula)
+        grupo.setExclusive(True)
+        grupo.addButton(botao_claro)
+        grupo.addButton(botao_escuro)
+        botao_claro.setChecked(controlador.claro)
+        botao_escuro.setChecked(not controlador.claro)
+        botao_claro.toggled.connect(lambda marcado: marcado and controlador.alternar_para(True))
+        botao_escuro.toggled.connect(lambda marcado: marcado and controlador.alternar_para(False))
+        # Se o tema mudar por fora (ex.: usuário deslogou e trocou na tela de
+        # login), a pílula da sidebar reflete sem precisar recriar o shell.
+        # `setChecked` não reemite `toggled` quando o valor não muda, então
+        # não há risco de loop entre esta pílula e a do login.
+        controlador.mudou.connect(lambda _tokens: botao_claro.setChecked(controlador.claro))
+
+        return pilula
 
     def _montar_barra_usuario(self) -> QHBoxLayout:
         barra = QHBoxLayout()
