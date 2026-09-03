@@ -38,14 +38,17 @@ def burger(uow, categoria):
 
 @pytest.fixture
 def conta_36(comandas, gerente, caixa_aberto, mesa, burger):
-    """Comanda aberta na mesa 1 com três itens de R$ 12,00 = R$ 36,00.
+    """Comanda em conferência na mesa 1 com três itens de R$ 12,00 = R$ 36,00.
 
     São três lançamentos separados (e não um de quantidade 3) para os testes
-    conseguirem cancelar parte da conta depois de um pagamento parcial.
+    conseguirem cancelar parte da conta depois de um pagamento parcial (via
+    `reabrir`, já que a comanda sai daqui em EM_CONFERENCIA — pagamento só
+    é aceito depois da pré-conta emitida, § Fechamento de Comanda).
     """
     comanda = comandas.abrir_por_mesa(mesa.id)
     for _ in range(3):
         comandas.lancar_item(comanda.id, burger.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
     return comanda
 
 
@@ -53,6 +56,7 @@ def lancar_consumo(comandas, pagamentos, produto, quantidade, funcionario_id):
     """Abre uma comanda de balcão e paga tudo como consumo interno do funcionário."""
     comanda = comandas.abrir_balcao()
     comandas.lancar_item(comanda.id, produto.id, quantidade)
+    comandas.fechar_para_conferencia(comanda.id)
     pagamentos.registrar(
         comanda.id,
         FormaPagamento.CONSUMO_INTERNO,
@@ -116,7 +120,7 @@ def test_registrar_pagamento_parcial_em_duas_formas_ate_quitar(pagamentos, coman
     assert parcial.total_pago == Decimal("20.00")
     assert parcial.restante == Decimal("16.00")
     assert parcial.comanda_fechada is False
-    assert comandas.buscar(conta_36.id).status is StatusComanda.ABERTA
+    assert comandas.buscar(conta_36.id).status is StatusComanda.EM_CONFERENCIA
 
     final = pagamentos.registrar(conta_36.id, FormaPagamento.DINHEIRO, Decimal("16.00"))
 
@@ -202,15 +206,26 @@ def test_registrar_em_comanda_sem_itens_e_bloqueado(pagamentos, comandas, gerent
         pagamentos.registrar(comanda.id, FormaPagamento.DINHEIRO, Decimal("10.00"))
 
 
+def test_registrar_em_comanda_ainda_aberta_e_bloqueado(pagamentos, comandas, gerente, caixa_aberto, mesa, burger):
+    """§ Fechamento de Comanda: sem pré-conta emitida, não há o que pagar."""
+    comanda = comandas.abrir_por_mesa(mesa.id)
+    comandas.lancar_item(comanda.id, burger.id, 1)
+
+    with pytest.raises(RegraDeNegocioError, match="conferência"):
+        pagamentos.registrar(comanda.id, FormaPagamento.DINHEIRO, Decimal("12.00"))
+
+
 def test_registrar_em_comanda_ja_quitada_e_bloqueado(pagamentos, comandas, conta_36):
-    """Conta quitada sem ter fechado: itens cancelados depois do pagamento."""
+    """Conta quitada sem ter fechado: itens cancelados (via reabertura) depois do pagamento."""
     pagamentos.registrar(conta_36.id, FormaPagamento.DINHEIRO, Decimal("12.00"))
+    comandas.reabrir(conta_36.id, PIN_GERENTE)
     itens = comandas.listar_itens(conta_36.id)
     comandas.cancelar_item(itens[0].id, "Cliente desistiu", PIN_GERENTE)
     comandas.cancelar_item(itens[1].id, "Cliente desistiu", PIN_GERENTE)
+    comandas.fechar_para_conferencia(conta_36.id)
 
     assert pagamentos.calcular_restante(conta_36.id) == Decimal("0.00")
-    assert comandas.buscar(conta_36.id).status is StatusComanda.ABERTA
+    assert comandas.buscar(conta_36.id).status is StatusComanda.EM_CONFERENCIA
 
     with pytest.raises(RegraDeNegocioError):
         pagamentos.registrar(conta_36.id, FormaPagamento.DINHEIRO, Decimal("5.00"))
@@ -235,11 +250,13 @@ def test_registrar_em_comanda_fechada_e_bloqueado(pagamentos, comandas, conta_36
         pagamentos.registrar(conta_36.id, FormaPagamento.DINHEIRO, Decimal("36.00"))
 
 
-def test_registrar_em_comanda_cancelada_e_bloqueado(pagamentos, comandas, conta_36):
-    comandas.cancelar(conta_36.id, "Pedido errado", PIN_GERENTE)
+def test_registrar_em_comanda_cancelada_e_bloqueado(pagamentos, comandas, gerente, caixa_aberto, mesa, burger):
+    comanda = comandas.abrir_por_mesa(mesa.id)
+    comandas.lancar_item(comanda.id, burger.id, 1)
+    comandas.cancelar(comanda.id, "Pedido errado", PIN_GERENTE)
 
     with pytest.raises(RegraDeNegocioError):
-        pagamentos.registrar(conta_36.id, FormaPagamento.DINHEIRO, Decimal("36.00"))
+        pagamentos.registrar(comanda.id, FormaPagamento.DINHEIRO, Decimal("12.00"))
 
 
 def test_registrar_em_comanda_inexistente(pagamentos, gerente, caixa_aberto):
@@ -389,6 +406,7 @@ def test_calcular_total_pago_de_comanda_inexistente(pagamentos, gerente, caixa_a
 
 def test_calcular_restante_nunca_fica_negativo(pagamentos, comandas, conta_36):
     pagamentos.registrar(conta_36.id, FormaPagamento.DINHEIRO, Decimal("24.00"))
+    comandas.reabrir(conta_36.id, PIN_GERENTE)
     itens = comandas.listar_itens(conta_36.id)
     comandas.cancelar_item(itens[0].id, "Saiu errado", PIN_GERENTE)
     comandas.cancelar_item(itens[1].id, "Saiu errado", PIN_GERENTE)

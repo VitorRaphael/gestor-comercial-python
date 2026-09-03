@@ -149,8 +149,31 @@ class ComandaService:
         return min(enviados) if enviados else None
 
     def calcular_total(self, comanda_id: int) -> Decimal:
-        """Soma dos itens não cancelados, pelo preço congelado no lançamento."""
+        """Soma dos itens não cancelados, pelo preço congelado no lançamento.
+
+        Não inclui taxa de serviço nem desconto — isso é `calcular_total_a_pagar`.
+        """
         self.buscar(comanda_id)
+        return self._calcular_subtotal(comanda_id)
+
+    def calcular_total_a_pagar(self, comanda_id: int) -> Decimal:
+        """Subtotal dos itens, com taxa de serviço somada e desconto subtraído.
+
+        Antes da conferência (`taxa_servico_percentual` ainda `None` e
+        `valor_desconto` ainda zero, valores padrão da comanda aberta) é igual
+        a `calcular_total` — a conta só passa a ter taxa/desconto a partir de
+        `fechar_para_conferencia`.
+        """
+        comanda = self.buscar(comanda_id)
+        subtotal = self._calcular_subtotal(comanda_id)
+        acrescimo = ZERO
+        if comanda.taxa_servico_percentual:
+            acrescimo = dinheiro(subtotal * dinheiro(comanda.taxa_servico_percentual) / Decimal("100"))
+        desconto = dinheiro(comanda.valor_desconto or ZERO)
+        # Nunca negativo: um desconto maior que a conta não pode virar crédito.
+        return dinheiro(max(subtotal + acrescimo - desconto, ZERO))
+
+    def _calcular_subtotal(self, comanda_id: int) -> Decimal:
         total = ZERO
         for item in self.uow.itens.listar_por_comanda(comanda_id):
             if not item.cancelado:
@@ -259,18 +282,85 @@ class ComandaService:
         return item
 
     # ------------------------------------------------------------------
+    # Conferência / pré-conta (fechamento do lançamento de itens)
+    # ------------------------------------------------------------------
+
+    def fechar_para_conferencia(
+        self,
+        comanda_id: int,
+        taxa_servico_percentual: Decimal | None = None,
+        desconto: Decimal | None = None,
+    ) -> Comanda:
+        """ABERTA -> EM_CONFERENCIA: trava novos itens e congela taxa/desconto.
+
+        A partir daqui `lancar_item`/`remover_item`/`cancelar_item` recusam a
+        comanda (mesmo caminho de `_exigir_aberta` que já barra FECHADA e
+        CANCELADA) até que `reabrir` devolva o controle ao garçom. É o ponto
+        em que a pré-conta pode ser impressa e o cliente pode pagar direto na
+        mesa, sem passar pelo caixa central.
+        """
+        comanda = self.buscar(comanda_id)
+        if comanda.status is not StatusComanda.ABERTA:
+            situacao = {
+                StatusComanda.EM_CONFERENCIA: "já está em conferência",
+                StatusComanda.FECHADA: "já foi fechada",
+                StatusComanda.CANCELADA: "foi cancelada",
+            }[comanda.status]
+            raise RegraDeNegocioError(
+                f"A comanda {comanda_id} {situacao} e não pode ser enviada para conferência."
+            )
+
+        comanda.taxa_servico_percentual = self._validar_taxa_servico(taxa_servico_percentual)
+        comanda.valor_desconto = self._validar_desconto(desconto, comanda_id)
+        comanda.status = StatusComanda.EM_CONFERENCIA
+        comanda.em_conferencia_em = datetime.now()
+        self.uow.comandas.salvar(comanda)
+        self.uow.commit()
+        return comanda
+
+    def reabrir(self, comanda_id: int, pin_gerente: str) -> Comanda:
+        """EM_CONFERENCIA -> ABERTA: volta a aceitar itens (conta fechada errado, cliente pediu mais).
+
+        Exige gerente pelo mesmo motivo de `cancelar_item`: destravar uma
+        comanda que já teve a pré-conta emitida ao cliente é uma decisão que
+        não pode ficar na mão de qualquer atendente. Taxa e desconto voltam a
+        zero — se a conta for fechada de novo, são decididos outra vez.
+        """
+        comanda = self.buscar(comanda_id)
+        if comanda.status is not StatusComanda.EM_CONFERENCIA:
+            raise RegraDeNegocioError(
+                f"A comanda {comanda_id} não está em conferência e não pode ser reaberta."
+            )
+
+        self.auth.validar_pin_gerente(pin_gerente)
+
+        comanda.status = StatusComanda.ABERTA
+        comanda.em_conferencia_em = None
+        comanda.taxa_servico_percentual = None
+        comanda.valor_desconto = ZERO
+        self.uow.comandas.salvar(comanda)
+        self.uow.commit()
+        return comanda
+
+    # ------------------------------------------------------------------
     # Fechamento e cancelamento (porte de ComandaService.fechar / cancelar)
     # ------------------------------------------------------------------
 
     def fechar(self, comanda_id: int, pin_gerente: str | None = None) -> Comanda:
-        """Fecha a comanda. Exige que ela esteja quitada, a menos que um gerente
-        autorize fechar com saldo em aberto (venda fiada, brinde, erro de conta)."""
+        """Fecha (quita) a comanda que já está em conferência. Exige que ela
+        esteja quitada, a menos que um gerente autorize fechar com saldo em
+        aberto (venda fiada, brinde, erro de conta)."""
         comanda = self.buscar(comanda_id)
         if comanda.status is StatusComanda.FECHADA:
             raise RegraDeNegocioError(f"A comanda {comanda_id} já está fechada.")
-        if comanda.status is not StatusComanda.ABERTA:
+        if comanda.status is StatusComanda.CANCELADA:
             raise RegraDeNegocioError(
                 f"A comanda {comanda_id} foi cancelada e não pode ser fechada."
+            )
+        if comanda.status is not StatusComanda.EM_CONFERENCIA:
+            raise RegraDeNegocioError(
+                f"A comanda {comanda_id} ainda está aberta. "
+                "Feche para conferência (emita a pré-conta) antes de finalizar o pagamento."
             )
 
         # Fechar sem receber é a mesma classe de risco que cancelar (§3.7):
@@ -300,11 +390,32 @@ class ComandaService:
         return comanda
 
     def _restante(self, comanda_id: int) -> Decimal:
-        total = self.calcular_total(comanda_id)
+        total = self.calcular_total_a_pagar(comanda_id)
         pago = ZERO
         for pagamento in self.uow.pagamentos.listar_por_comanda(comanda_id):
             pago += dinheiro(pagamento.valor)
         return dinheiro(max(total - dinheiro(pago), ZERO))
+
+    def _validar_taxa_servico(self, taxa: Decimal | None) -> Decimal | None:
+        if taxa is None:
+            return None
+        try:
+            valor = Decimal(taxa)
+        except (TypeError, ValueError, ArithmeticError):
+            raise RegraDeNegocioError("A taxa de serviço deve ser um percentual numérico, como 10.") from None
+        if valor < ZERO or valor > Decimal("100"):
+            raise RegraDeNegocioError("A taxa de serviço deve estar entre 0 e 100%.")
+        return valor
+
+    def _validar_desconto(self, desconto: Decimal | None, comanda_id: int) -> Decimal:
+        if desconto is None:
+            return ZERO
+        valor = dinheiro(desconto)
+        if valor < ZERO:
+            raise RegraDeNegocioError("O desconto não pode ser negativo.")
+        if valor > self._calcular_subtotal(comanda_id):
+            raise RegraDeNegocioError("O desconto não pode ser maior que o total da conta.")
+        return valor
 
     def cancelar(self, comanda_id: int, motivo: str, pin_gerente: str) -> Comanda:
         comanda = self.buscar(comanda_id)
@@ -312,7 +423,8 @@ class ComandaService:
             raise RegraDeNegocioError(f"A comanda {comanda_id} já está cancelada.")
         if comanda.status is not StatusComanda.ABERTA:
             raise RegraDeNegocioError(
-                f"A comanda {comanda_id} já foi fechada. Só é possível cancelar comanda aberta."
+                f"A comanda {comanda_id} não está aberta (está {comanda.status.value}). "
+                "Só é possível cancelar comanda aberta."
             )
 
         motivo_limpo = self._exigir_motivo(motivo)
@@ -361,7 +473,11 @@ class ComandaService:
     def _exigir_aberta(comanda: Comanda, acao: str) -> None:
         if comanda.status is StatusComanda.ABERTA:
             return
-        situacao = "já foi fechada" if comanda.status is StatusComanda.FECHADA else "foi cancelada"
+        situacao = {
+            StatusComanda.EM_CONFERENCIA: "está em conferência (pré-conta já emitida)",
+            StatusComanda.FECHADA: "já foi fechada",
+            StatusComanda.CANCELADA: "foi cancelada",
+        }[comanda.status]
         raise RegraDeNegocioError(f"A comanda {comanda.id} {situacao} e não permite {acao}.")
 
     @staticmethod

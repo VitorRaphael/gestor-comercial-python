@@ -1156,6 +1156,7 @@ def test_da_comanda_ao_recibo_pelo_caminho_de_verdade(
     comanda = comandas.abrir_por_mesa(mesa.id)
     comandas.lancar_item(comanda.id, lanche.id, 2, "sem cebola")
     envios = impressao.imprimir_comanda(comanda.id)
+    comandas.fechar_para_conferencia(comanda.id)
     resumo = pagamentos.registrar(comanda.id, FormaPagamento.DINHEIRO, dinheiro("50.00"))
     recibo = impressao.imprimir_recibo(comanda.id)
 
@@ -1173,6 +1174,31 @@ def test_da_comanda_ao_recibo_pelo_caminho_de_verdade(
     assert impressao.imprimir_comanda(comanda.id) == []
 
 
+def test_pre_conta_impressa_pelo_caminho_de_verdade(
+    uow, auth, driver, gerente, caixa_aberto, mesa
+):
+    """§ Fechamento de Comanda: pré-conta não lista pagamento, mostra total a pagar."""
+    nova_impressora(uow, "Balcão", padrao=True)
+    lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger", "20.00")
+    comandas = ComandaService(uow, auth)
+    impressao = ImpressaoService(uow, auth, abrir_driver=driver)
+
+    comanda = comandas.abrir_por_mesa(mesa.id)
+    comandas.lancar_item(comanda.id, lanche.id, 2)
+    comandas.fechar_para_conferencia(comanda.id, taxa_servico_percentual=Decimal("10"))
+
+    resultado = impressao.imprimir_pre_conta(comanda.id)
+
+    assert resultado.sucesso
+    cupom = driver.texto_de("Balcão")
+    assert "CONFERÊNCIA" in cupom
+    assert "2x X-Burger" in cupom
+    assert "TOTAL A PAGAR" in cupom and "44,00" in cupom
+    assert "Taxa de serviço" in cupom
+    assert "documento fiscal" in cupom.replace("\n", " ")
+    assert "Dinheiro" not in cupom
+
+
 def test_o_fechamento_impresso_bate_com_o_que_o_caixa_service_calcula(
     uow, auth, driver, gerente, caixa_aberto, mesa
 ):
@@ -1186,6 +1212,7 @@ def test_o_fechamento_impresso_bate_com_o_que_o_caixa_service_calcula(
 
     comanda = comandas.abrir_por_mesa(mesa.id)
     comandas.lancar_item(comanda.id, lanche.id, 2)
+    comandas.fechar_para_conferencia(comanda.id)
     pagamentos.registrar(comanda.id, FormaPagamento.DINHEIRO, dinheiro("40.00"))
     caixas.registrar_movimento(TipoMovimento.SANGRIA, dinheiro("50.00"))
     fechado = caixas.fechar(caixa_aberto.id, dinheiro("85.00"))

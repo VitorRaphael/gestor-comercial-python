@@ -1,6 +1,7 @@
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String
+from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from gestor_comercial.domain.enums import StatusComanda
@@ -13,6 +14,14 @@ class Comanda(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     status: Mapped[StatusComanda] = mapped_column(Enum(StatusComanda), default=StatusComanda.ABERTA, nullable=False)
     aberta_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # Marca a transição ABERTA -> EM_CONFERENCIA (pré-conta emitida, itens
+    # travados). `fechada_em` continua sendo só o instante da quitação final.
+    em_conferencia_em: Mapped[datetime | None] = mapped_column(DateTime)
+    # Decididos no momento do fechamento p/ conferência (§ Fechamento de
+    # Comanda) e congelados aqui pelo mesmo motivo do preço do item: se o
+    # percentual padrão mudar depois, a conta já emitida não pode mudar junto.
+    taxa_servico_percentual: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    valor_desconto: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"), nullable=False)
     fechada_em: Mapped[datetime | None] = mapped_column(DateTime)
     cancelada_em: Mapped[datetime | None] = mapped_column(DateTime)
     motivo_cancelamento: Mapped[str | None] = mapped_column(String(500))

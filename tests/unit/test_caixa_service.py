@@ -208,6 +208,15 @@ def test_fechar_pluraliza_a_contagem_de_comandas_abertas(
         caixas.fechar(caixa_aberto.id, Decimal("100.00"))
 
 
+def test_fechar_bloqueia_com_comanda_em_conferencia(uow, caixas, gerente, caixa_aberto, produto):
+    """Pré-conta emitida não é pagamento recebido — mesma trava de comanda ABERTA."""
+    comanda = _nova_comanda(uow, caixa_aberto, gerente, status=StatusComanda.EM_CONFERENCIA)
+    _novo_item(uow, comanda, produto)
+
+    with pytest.raises(RegraDeNegocioError, match="1 comanda aberta"):
+        caixas.fechar(caixa_aberto.id, Decimal("100.00"))
+
+
 def test_fechar_ignora_comanda_aberta_sem_item(uow, caixas, gerente, caixa_aberto):
     # Rascunho: nasce quando o atendente toca na mesa e desiste antes de
     # lançar qualquer item. Invisível em ComandaService.listar_abertas(), então

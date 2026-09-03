@@ -217,10 +217,14 @@ class CaixaService:
         # ComandaService.listar_abertas() já esconde (criada ao tocar na mesa
         # e desistir) — bloquear o fechamento por causa dela deixaria o
         # gerente sem como achá-la em tela nenhuma pra resolver.
+        # EM_CONFERENCIA entra na mesma trava: pré-conta emitida não é
+        # pagamento recebido, e o dinheiro dela some do fechamento do mesmo
+        # jeito que uma comanda ABERTA esquecida.
         abertas = [
             comanda
             for comanda in self.uow.comandas.listar_por_caixa(caixa_id)
-            if comanda.status is StatusComanda.ABERTA and self.uow.itens.existe_na_comanda(comanda.id)
+            if comanda.status in (StatusComanda.ABERTA, StatusComanda.EM_CONFERENCIA)
+            and self.uow.itens.existe_na_comanda(comanda.id)
         ]
         if abertas:
             pendencia = (

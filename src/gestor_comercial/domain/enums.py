@@ -17,6 +17,7 @@ class StatusMesa(enum.Enum):
 
 class StatusComanda(enum.Enum):
     ABERTA = "ABERTA"
+    EM_CONFERENCIA = "EM_CONFERENCIA"
     FECHADA = "FECHADA"
     CANCELADA = "CANCELADA"
 

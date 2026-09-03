@@ -61,14 +61,31 @@ def test_abrir_por_mesa_e_idempotente(comandas, gerente, caixa_aberto, mesa):
     assert len(comandas.uow.comandas.listar_todos()) == 1
 
 
-def test_abrir_por_mesa_cria_nova_apos_fechar_a_anterior(comandas, gerente, caixa_aberto, mesa):
+def test_abrir_por_mesa_cria_nova_apos_fechar_a_anterior(comandas, gerente, caixa_aberto, mesa, produto):
     primeira = comandas.abrir_por_mesa(mesa.id)
-    comandas.fechar(primeira.id)
+    comandas.lancar_item(primeira.id, produto.id, 1)
+    comandas.fechar_para_conferencia(primeira.id)
+    comandas.fechar(primeira.id, pin_gerente=PIN_GERENTE)
 
     segunda = comandas.abrir_por_mesa(mesa.id)
 
     assert segunda.id != primeira.id
     assert segunda.status is StatusComanda.ABERTA
+
+
+def test_abrir_por_mesa_devolve_a_em_conferencia_em_vez_de_criar_outra(
+    comandas, gerente, caixa_aberto, mesa, produto
+):
+    """Sem isso, reabrir a tela de uma mesa com pré-conta já emitida criaria
+    uma segunda comanda por cima da primeira, ainda não paga."""
+    primeira = comandas.abrir_por_mesa(mesa.id)
+    comandas.lancar_item(primeira.id, produto.id, 1)
+    comandas.fechar_para_conferencia(primeira.id)
+
+    segunda = comandas.abrir_por_mesa(mesa.id)
+
+    assert segunda.id == primeira.id
+    assert segunda.status is StatusComanda.EM_CONFERENCIA
 
 
 def test_abrir_por_mesa_com_mesa_inexistente(comandas, gerente, caixa_aberto):
@@ -151,6 +168,7 @@ def test_listar_abertas_ignora_comanda_sem_item(comandas, comanda, produto):
 
 def test_listar_abertas_ignora_fechadas_e_canceladas(comandas, comanda, produto):
     comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
     comandas.fechar(comanda.id, pin_gerente=PIN_GERENTE)
 
     assert comandas.listar_abertas() == []
@@ -212,6 +230,7 @@ def test_lancar_item_observacao_vazia_vira_nulo(comandas, comanda, produto):
 
 def test_lancar_item_em_comanda_fechada(comandas, comanda, produto):
     comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
     comandas.fechar(comanda.id, pin_gerente=PIN_GERENTE)
 
     with pytest.raises(RegraDeNegocioError):
@@ -272,6 +291,7 @@ def test_remover_item_apaga_de_vez(comandas, comanda, produto, refri):
 
 def test_remover_item_de_comanda_fechada(comandas, comanda, produto):
     item = comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
     comandas.fechar(comanda.id, pin_gerente=PIN_GERENTE)
 
     with pytest.raises(RegraDeNegocioError):
@@ -350,6 +370,7 @@ def test_cancelar_item_ja_cancelado(comandas, comanda, produto):
 
 def test_cancelar_item_de_comanda_fechada(comandas, comanda, produto):
     item = comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
     comandas.fechar(comanda.id, pin_gerente=PIN_GERENTE)
 
     with pytest.raises(RegraDeNegocioError):
@@ -410,12 +431,135 @@ def test_calcular_total_de_comanda_inexistente(comandas, gerente):
 
 
 # ----------------------------------------------------------------------
+# fechar_para_conferencia / reabrir (§ Fechamento de Comanda)
+# ----------------------------------------------------------------------
+
+
+def test_fechar_para_conferencia_trava_novos_itens(comandas, comanda, produto):
+    comandas.lancar_item(comanda.id, produto.id, 1)
+
+    conferencia = comandas.fechar_para_conferencia(comanda.id)
+
+    assert conferencia.status is StatusComanda.EM_CONFERENCIA
+    assert isinstance(conferencia.em_conferencia_em, datetime)
+    with pytest.raises(RegraDeNegocioError, match="conferência"):
+        comandas.lancar_item(comanda.id, produto.id, 1)
+
+
+def test_fechar_para_conferencia_calcula_taxa_de_servico(comandas, comanda, produto):
+    comandas.lancar_item(comanda.id, produto.id, 1)  # R$ 10,00
+
+    comandas.fechar_para_conferencia(comanda.id, taxa_servico_percentual=Decimal("10"))
+
+    assert comandas.calcular_total(comanda.id) == Decimal("10.00")
+    assert comandas.calcular_total_a_pagar(comanda.id) == Decimal("11.00")
+
+
+def test_fechar_para_conferencia_aplica_desconto(comandas, comanda, produto):
+    comandas.lancar_item(comanda.id, produto.id, 1)  # R$ 10,00
+
+    comandas.fechar_para_conferencia(comanda.id, desconto=Decimal("3.00"))
+
+    assert comandas.calcular_total_a_pagar(comanda.id) == Decimal("7.00")
+
+
+def test_fechar_para_conferencia_taxa_e_desconto_juntos(comandas, comanda, produto):
+    comandas.lancar_item(comanda.id, produto.id, 2)  # R$ 20,00
+
+    comandas.fechar_para_conferencia(
+        comanda.id, taxa_servico_percentual=Decimal("10"), desconto=Decimal("2.00")
+    )
+
+    # 20,00 + 10% (2,00) - desconto (2,00) = 20,00
+    assert comandas.calcular_total_a_pagar(comanda.id) == Decimal("20.00")
+
+
+def test_fechar_para_conferencia_desconto_maior_que_a_conta_e_bloqueado(comandas, comanda, produto):
+    comandas.lancar_item(comanda.id, produto.id, 1)  # R$ 10,00
+
+    with pytest.raises(RegraDeNegocioError):
+        comandas.fechar_para_conferencia(comanda.id, desconto=Decimal("50.00"))
+
+
+def test_fechar_para_conferencia_taxa_fora_da_faixa_e_bloqueada(comandas, comanda, produto):
+    comandas.lancar_item(comanda.id, produto.id, 1)
+
+    with pytest.raises(RegraDeNegocioError):
+        comandas.fechar_para_conferencia(comanda.id, taxa_servico_percentual=Decimal("150"))
+
+
+def test_fechar_para_conferencia_de_comanda_ja_em_conferencia(comandas, comanda, produto):
+    comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
+
+    with pytest.raises(RegraDeNegocioError):
+        comandas.fechar_para_conferencia(comanda.id)
+
+
+def test_fechar_para_conferencia_de_comanda_fechada(comandas, comanda, produto):
+    comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
+    comandas.fechar(comanda.id, pin_gerente=PIN_GERENTE)
+
+    with pytest.raises(RegraDeNegocioError):
+        comandas.fechar_para_conferencia(comanda.id)
+
+
+def test_fechar_para_conferencia_de_comanda_cancelada(comandas, comanda, produto):
+    comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.cancelar(comanda.id, "cliente desistiu", PIN_GERENTE)
+
+    with pytest.raises(RegraDeNegocioError):
+        comandas.fechar_para_conferencia(comanda.id)
+
+
+def test_fechar_para_conferencia_de_comanda_inexistente(comandas, gerente):
+    with pytest.raises(RecursoNaoEncontradoError):
+        comandas.fechar_para_conferencia(4242)
+
+
+def test_reabrir_devolve_para_aberta_e_libera_itens(comandas, comanda, produto):
+    comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id, taxa_servico_percentual=Decimal("10"))
+
+    reaberta = comandas.reabrir(comanda.id, PIN_GERENTE)
+
+    assert reaberta.status is StatusComanda.ABERTA
+    assert reaberta.em_conferencia_em is None
+    assert reaberta.taxa_servico_percentual is None
+    assert reaberta.valor_desconto == Decimal("0.00")
+    # Item continua liberado de novo.
+    comandas.lancar_item(comanda.id, produto.id, 1)
+
+
+def test_reabrir_exige_pin_de_gerente(comandas, comanda, produto, atendente):
+    comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
+
+    with pytest.raises(AcessoNegadoError):
+        comandas.reabrir(comanda.id, PIN_ATENDENTE)
+
+
+def test_reabrir_comanda_que_nao_esta_em_conferencia(comandas, comanda, produto):
+    comandas.lancar_item(comanda.id, produto.id, 1)
+
+    with pytest.raises(RegraDeNegocioError):
+        comandas.reabrir(comanda.id, PIN_GERENTE)
+
+
+def test_reabrir_comanda_inexistente(comandas, gerente):
+    with pytest.raises(RecursoNaoEncontradoError):
+        comandas.reabrir(4242, PIN_GERENTE)
+
+
+# ----------------------------------------------------------------------
 # fechar
 # ----------------------------------------------------------------------
 
 
 def test_fechar_libera_a_mesa(comandas, uow, comanda, mesa, produto):
     comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
 
     fechada = comandas.fechar(comanda.id, pin_gerente=PIN_GERENTE)
 
@@ -427,27 +571,41 @@ def test_fechar_libera_a_mesa(comandas, uow, comanda, mesa, produto):
 def test_fechar_comanda_de_balcao(comandas, gerente, caixa_aberto, produto):
     balcao = comandas.abrir_balcao()
     comandas.lancar_item(balcao.id, produto.id, 1)
+    comandas.fechar_para_conferencia(balcao.id)
 
     assert comandas.fechar(balcao.id, pin_gerente=PIN_GERENTE).status is StatusComanda.FECHADA
 
 
-def test_fechar_comanda_ja_fechada(comandas, comanda):
-    comandas.fechar(comanda.id)
+def test_fechar_comanda_ja_fechada(comandas, comanda, produto):
+    comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
+    comandas.fechar(comanda.id, pin_gerente=PIN_GERENTE)
 
     with pytest.raises(RegraDeNegocioError):
         comandas.fechar(comanda.id)
 
 
+def test_fechar_comanda_ainda_aberta_e_bloqueado(comandas, comanda, produto):
+    """§ Fechamento de Comanda: pagamento exige pré-conta emitida antes."""
+    comandas.lancar_item(comanda.id, produto.id, 1)
+
+    with pytest.raises(RegraDeNegocioError, match="conferência"):
+        comandas.fechar(comanda.id, pin_gerente=PIN_GERENTE)
+    assert comandas.buscar(comanda.id).status is StatusComanda.ABERTA
+
+
 def test_fechar_com_saldo_em_aberto_e_bloqueado_sem_gerente(comandas, comanda, produto):
     comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
 
     with pytest.raises(RegraDeNegocioError, match="a receber"):
         comandas.fechar(comanda.id)
-    assert comandas.buscar(comanda.id).status is StatusComanda.ABERTA
+    assert comandas.buscar(comanda.id).status is StatusComanda.EM_CONFERENCIA
 
 
 def test_fechar_com_saldo_em_aberto_e_liberado_com_pin_de_gerente(comandas, comanda, produto):
     comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
 
     fechada = comandas.fechar(comanda.id, pin_gerente=PIN_GERENTE)
     assert fechada.status is StatusComanda.FECHADA
@@ -455,12 +613,14 @@ def test_fechar_com_saldo_em_aberto_e_liberado_com_pin_de_gerente(comandas, coma
 
 def test_fechar_com_pin_de_atendente_e_bloqueado(comandas, comanda, produto, atendente):
     comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
 
     with pytest.raises(AcessoNegadoError):
         comandas.fechar(comanda.id, pin_gerente=PIN_ATENDENTE)
 
 
 def test_fechar_sem_ninguem_logado_e_bloqueado(auth, comandas, comanda, produto):
+    comandas.fechar_para_conferencia(comanda.id)
     auth.logout()
 
     with pytest.raises(NaoAutorizadoError):
@@ -474,6 +634,7 @@ def test_fechar_quando_restante_zera_so_por_cancelamento_de_item(comandas, coman
     # de PIN de gerente aqui — é a mesma regra de uma comanda que nunca teve item.
     item = comandas.lancar_item(comanda.id, produto.id, 1)
     comandas.cancelar_item(item.id, "não vai levar", PIN_GERENTE)
+    comandas.fechar_para_conferencia(comanda.id)
 
     fechada = comandas.fechar(comanda.id)
     assert fechada.status is StatusComanda.FECHADA
@@ -548,6 +709,7 @@ def test_cancelar_comanda_com_pagamento_registrado(comandas, uow, comanda, produ
 
 def test_cancelar_comanda_ja_fechada(comandas, comanda, produto):
     comandas.lancar_item(comanda.id, produto.id, 1)
+    comandas.fechar_para_conferencia(comanda.id)
     comandas.fechar(comanda.id, pin_gerente=PIN_GERENTE)
 
     with pytest.raises(RegraDeNegocioError):

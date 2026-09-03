@@ -91,7 +91,12 @@ class PagamentoService:
         self.auth.usuario_atual()
 
         comanda = self.comandas.buscar(comanda_id)
-        if comanda.status is not StatusComanda.ABERTA:
+        if comanda.status is StatusComanda.ABERTA:
+            raise RegraDeNegocioError(
+                f"A comanda {comanda_id} ainda está aberta. "
+                "Feche para conferência (emita a pré-conta) antes de receber o pagamento."
+            )
+        if comanda.status is not StatusComanda.EM_CONFERENCIA:
             situacao = (
                 "já foi fechada" if comanda.status is StatusComanda.FECHADA else "foi cancelada"
             )
@@ -112,7 +117,7 @@ class PagamentoService:
         if forma is FormaPagamento.CONSUMO_INTERNO:
             consumidor = self._autorizar_consumo_interno(pin_gerente, funcionario_consumo_id)
 
-        total_conta = self.comandas.calcular_total(comanda_id)
+        total_conta = self.comandas.calcular_total_a_pagar(comanda_id)
         if total_conta <= ZERO:
             raise RegraDeNegocioError(
                 f"A comanda {comanda_id} não tem nenhum item lançado. "
@@ -189,7 +194,7 @@ class PagamentoService:
         return dinheiro(total)
 
     def calcular_restante(self, comanda_id: int) -> Decimal:
-        restante = self.comandas.calcular_total(comanda_id) - self.calcular_total_pago(comanda_id)
+        restante = self.comandas.calcular_total_a_pagar(comanda_id) - self.calcular_total_pago(comanda_id)
         # Nunca negativo: se um item for cancelado depois da conta já paga, a
         # tela precisa dizer "nada a receber", não mostrar um valor negativo.
         return dinheiro(max(restante, ZERO))

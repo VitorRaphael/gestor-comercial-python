@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -118,6 +119,20 @@ class ComandaView(QWidget):
         self._botao_segunda_via.setToolTip("Repete a comanda inteira, para cupom rasgado ou perdido.")
         self._botao_segunda_via.clicked.connect(self._imprimir_segunda_via)
         cabecalho.addWidget(self._botao_segunda_via)
+
+        self._botao_fechar_conferencia = QPushButton("Fechar conta")
+        self._botao_fechar_conferencia.setProperty("variante", "secundario")
+        self._botao_fechar_conferencia.setToolTip(
+            "Trava novos itens e emite a pré-conta para o cliente conferir na mesa."
+        )
+        self._botao_fechar_conferencia.clicked.connect(self._fechar_para_conferencia)
+        cabecalho.addWidget(self._botao_fechar_conferencia)
+
+        self._botao_reabrir = QPushButton("Reabrir")
+        self._botao_reabrir.setProperty("variante", "secundario")
+        self._botao_reabrir.setToolTip("Volta a aceitar itens. Exige PIN de gerente.")
+        self._botao_reabrir.clicked.connect(self._reabrir_comanda)
+        cabecalho.addWidget(self._botao_reabrir)
 
         self._botao_pagamento = QPushButton("Receber pagamento")
         self._botao_pagamento.setProperty("variante", "primario")
@@ -259,9 +274,15 @@ class ComandaView(QWidget):
         self._label_total.setText(_formatar_reais(total))
 
         aberta = self._comanda.status is StatusComanda.ABERTA
+        em_conferencia = self._comanda.status is StatusComanda.EM_CONFERENCIA
         self._botao_add_item.setEnabled(aberta)
-        self._botao_pagamento.setEnabled(aberta)
         self._botao_cancelar_comanda.setEnabled(aberta)
+        # Pagamento só entra depois da pré-conta emitida (§ Fechamento de
+        # Comanda): a conta em ABERTA ainda pode ganhar item, e taxa/desconto
+        # só existem a partir da conferência.
+        self._botao_pagamento.setEnabled(em_conferencia)
+        self._botao_fechar_conferencia.setEnabled(aberta and bool(itens_ativos))
+        self._botao_reabrir.setEnabled(em_conferencia)
         # Botão de envio só faz sentido havendo algo pendente na comanda
         # aberta — a fechada não recebe mais item. A 2ª via continua
         # liberada: cupom da cozinha some ou rasga depois do pagamento também.
@@ -574,6 +595,58 @@ class ComandaView(QWidget):
             self._comanda_service.remover_item(item.id)
         ao_sair()
 
+    def _fechar_para_conferencia(self) -> None:
+        """Trava os itens, decide taxa/desconto e emite a pré-conta na impressora padrão."""
+        if self._comanda is None:
+            return
+        modal = _FecharConferenciaDialog(self)
+        if modal.exec() != QDialog.DialogCode.Accepted:
+            return
+        taxa, desconto = modal.resultado()
+
+        self._label_erro.setText("")
+        comanda_id = self._comanda.id
+        try:
+            self._comanda_service.fechar_para_conferencia(comanda_id, taxa, desconto)
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+            return
+
+        try:
+            resultado = executar_impressao(
+                lambda: self._impressao_service.imprimir_pre_conta(comanda_id)
+            )
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+            self.atualizar()
+            return
+
+        self.atualizar()
+        self._aviso_impressao.mostrar([resultado])
+        if resultado.sucesso:
+            self._mostrar_mensagem(
+                "Conta fechada para conferência. Pré-conta impressa — leve até a mesa.",
+                sucesso=True,
+            )
+
+    def _reabrir_comanda(self) -> None:
+        """Volta a comanda para ABERTA, com PIN de gerente — a pré-conta já foi emitida."""
+        if self._comanda is None:
+            return
+        modal = CancelamentoDialog(f"Reabrir comanda {self._comanda.id}", self)
+        if modal.exec() != QDialog.DialogCode.Accepted:
+            return
+        _motivo, pin_gerente = modal.resultado()
+
+        self._label_erro.setText("")
+        try:
+            self._comanda_service.reabrir(self._comanda.id, pin_gerente)
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+            return
+        self.atualizar()
+        self._mostrar_mensagem("Comanda reaberta. Itens liberados novamente.", sucesso=True)
+
     def _solicitar_pagamento(self) -> None:
         if self._comanda is None:
             return
@@ -682,6 +755,62 @@ class _AdicionarItemDialog(QDialog):
         self._campo_quantidade.setValue(1)
         self._campo_observacao.clear()
         self._busca.foco_busca()
+
+
+class _FecharConferenciaDialog(QDialog):
+    """Modal do botão "Fechar conta": taxa de serviço e desconto opcionais.
+
+    Ambos ficam em branco por padrão (0%) — a maioria das contas do food
+    truck não tem nenhum dos dois, e o atendente não deveria precisar
+    confirmar "nenhum" a cada fechamento.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Fechar conta para conferência")
+        self.setMinimumWidth(360)
+
+        layout = QVBoxLayout(self)
+        aviso = QLabel(
+            "Isto trava novos itens e imprime a pré-conta. "
+            "Use 'Reabrir' (com PIN de gerente) para desfazer."
+        )
+        aviso.setWordWrap(True)
+        aviso.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        layout.addWidget(aviso)
+
+        formulario = QFormLayout()
+
+        self._campo_taxa = QDoubleSpinBox()
+        self._campo_taxa.setSuffix(" %")
+        self._campo_taxa.setMinimum(0)
+        self._campo_taxa.setMaximum(100)
+        self._campo_taxa.setDecimals(2)
+        formulario.addRow("Taxa de serviço", self._campo_taxa)
+
+        self._campo_desconto = QDoubleSpinBox()
+        self._campo_desconto.setPrefix("R$ ")
+        self._campo_desconto.setMinimum(0)
+        self._campo_desconto.setMaximum(999_999)
+        self._campo_desconto.setDecimals(2)
+        formulario.addRow("Desconto", self._campo_desconto)
+
+        layout.addLayout(formulario)
+
+        botoes = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        botoes.button(QDialogButtonBox.StandardButton.Ok).setText("Fechar e imprimir")
+        botoes.accepted.connect(self.accept)
+        botoes.rejected.connect(self.reject)
+        layout.addWidget(botoes)
+
+    def resultado(self) -> tuple[Decimal | None, Decimal | None]:
+        taxa = Decimal(str(self._campo_taxa.value())) if self._campo_taxa.value() > 0 else None
+        desconto = (
+            Decimal(str(self._campo_desconto.value())) if self._campo_desconto.value() > 0 else None
+        )
+        return taxa, desconto
 
 
 def _formatar_reais(valor: Decimal) -> str:

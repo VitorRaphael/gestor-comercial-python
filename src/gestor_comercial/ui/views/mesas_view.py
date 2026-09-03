@@ -97,7 +97,12 @@ class MesasView(QWidget):
             alerta = False
             if ocupada:
                 comanda_aberta = next(
-                    (c for c in mesa.comandas if c.status is StatusComanda.ABERTA), None
+                    (
+                        c
+                        for c in mesa.comandas
+                        if c.status in (StatusComanda.ABERTA, StatusComanda.EM_CONFERENCIA)
+                    ),
+                    None,
                 )
                 if comanda_aberta is not None:
                     # O relógio só corre a partir do primeiro item que a

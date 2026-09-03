@@ -183,6 +183,30 @@ class ImpressaoService:
         return self._enviar(padrao, documento, len(itens))
 
     # ------------------------------------------------------------------
+    # Pré-conta (fechamento para conferência)
+    # ------------------------------------------------------------------
+
+    def imprimir_pre_conta(self, comanda_id: int) -> ResultadoImpressao:
+        """Extrato de conferência: o garçom leva até a mesa, cliente confere e paga.
+
+        Diferente de `imprimir_recibo` (que mostra o que já foi pago e o que
+        falta), este cupom não lista pagamento nenhum — a comanda em
+        EM_CONFERENCIA ainda não recebeu baixa. Sempre na impressora padrão,
+        igual ao recibo: é o cupom do cliente, não o da cozinha.
+        """
+        comanda = self._buscar_comanda(comanda_id)
+        itens = [
+            item for item in self.uow.itens.listar_por_comanda(comanda.id) if not item.cancelado
+        ]
+
+        padrao = self.uow.impressoras.buscar_padrao()
+        if padrao is None:
+            return self._sem_impressora_padrao("a pré-conta", len(itens))
+
+        documento = self._documento_pre_conta(comanda, itens, padrao, datetime.now())
+        return self._enviar(padrao, documento, len(itens))
+
+    # ------------------------------------------------------------------
     # Fechamento de caixa
     # ------------------------------------------------------------------
 
@@ -465,6 +489,77 @@ class ImpressaoService:
         # cadastro — nenhuma das duas frases cabe inteira, e texto estourado sai
         # cortado pela impressora, não continuado na linha de baixo.
         for texto in ("Não é documento fiscal", "Obrigado e volte sempre!"):
+            for linha in cupom.quebrar(texto, largura):
+                documento.append(BlocoTexto(linha, centralizado=True))
+        return documento
+
+    def _documento_pre_conta(
+        self,
+        comanda: Comanda,
+        itens: list[ItemComanda],
+        impressora: Impressora,
+        agora: datetime,
+    ) -> Documento:
+        """Extrato de conferência: itens, subtotal, taxa/desconto e total a pagar.
+
+        Sem seção de pagamento — a conta ainda não foi quitada. O rodapé
+        avisa explicitamente que isto não substitui o recibo/pagamento, para
+        o cliente não confundir a pré-conta com prova de quitação.
+        """
+        largura = cupom.largura_util(impressora.colunas)
+        subtotal = self._comandas.calcular_total(comanda.id)
+        total_a_pagar = self._comandas.calcular_total_a_pagar(comanda.id)
+
+        documento: Documento = [
+            BlocoTexto("CONFERÊNCIA", negrito=True, centralizado=True),
+            BlocoTexto(
+                f"Comanda {comanda.id} - {self._destino_da_comanda(comanda)}",
+                centralizado=True,
+            ),
+            BlocoTexto(
+                f"Aberta em: {cupom.data_hora(comanda.aberta_em)}"
+                if comanda.aberta_em
+                else "",
+            ),
+        ]
+        if comanda.em_conferencia_em is not None:
+            documento.append(
+                BlocoTexto(f"Fechada em: {cupom.data_hora(comanda.em_conferencia_em)}")
+            )
+        documento.append(BlocoTexto(cupom.separador(largura)))
+
+        for item in itens:
+            valor = dinheiro(item.preco_unit_congelado) * item.quantidade
+            for linha in cupom.linha_de_item(
+                item.quantidade, item.produto.nome, largura, valor=valor
+            ):
+                documento.append(BlocoTexto(linha))
+            for linha in cupom.linha_secundaria(item.observacao, largura):
+                documento.append(BlocoTexto(linha))
+
+        documento.append(BlocoTexto(cupom.separador(largura)))
+        documento.append(BlocoTexto(cupom.linha_de_valor("Subtotal", subtotal, largura)))
+
+        if comanda.taxa_servico_percentual:
+            valor_taxa = dinheiro(total_a_pagar - subtotal + dinheiro(comanda.valor_desconto or ZERO))
+            rotulo = f"Taxa de serviço ({cupom.moeda(comanda.taxa_servico_percentual)}%)"
+            documento.append(BlocoTexto(cupom.linha_de_valor(rotulo, valor_taxa, largura)))
+        if comanda.valor_desconto:
+            documento.append(BlocoTexto(cupom.linha_de_valor("Desconto", -dinheiro(comanda.valor_desconto), largura)))
+
+        documento.append(
+            BlocoTexto(
+                cupom.duas_colunas(
+                    "TOTAL A PAGAR", f"R$ {cupom.moeda(total_a_pagar)}", largura, preenchimento="."
+                ),
+                negrito=True,
+            )
+        )
+
+        documento.append(BlocoTexto(cupom.separador(largura)))
+        for linha in cupom.quebrar(f"Atendente: {self._nome_do_atendente(comanda)}", largura):
+            documento.append(BlocoTexto(linha))
+        for texto in ("Conferência - Não é documento fiscal", "Pague na mesa ou no caixa"):
             for linha in cupom.quebrar(texto, largura):
                 documento.append(BlocoTexto(linha, centralizado=True))
         return documento
