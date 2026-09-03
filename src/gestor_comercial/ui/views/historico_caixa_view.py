@@ -207,7 +207,14 @@ class HistoricoCaixaView(QWidget):
         operador = caixa.fechado_por.nome if caixa.fechado_por is not None else "—"
         resumo = self._caixas.resumo(caixa.id)
         faturamento = resumo.total_dinheiro + resumo.total_maquininha + resumo.total_consumo_interno
-        diferenca = "—" if resumo.diferenca is None else _formatar_reais(resumo.diferenca)
+        # Coluna única da tabela: soma dinheiro + maquininha, mesma regra da
+        # linha "Total" de `conferencia_pagamentos`.
+        diferenca_total = (
+            None
+            if resumo.diferenca_dinheiro is None
+            else resumo.diferenca_dinheiro + resumo.diferenca_maquininha
+        )
+        diferenca = "—" if diferenca_total is None else _formatar_reais(diferenca_total)
         turno = "—" if caixa.numero_sequencial_dia is None else f"{caixa.numero_sequencial_dia}º"
 
         self._tabela.setItem(linha, 0, QTableWidgetItem(caixa.aberto_em.strftime("%d/%m")))
@@ -215,7 +222,7 @@ class HistoricoCaixaView(QWidget):
         self._tabela.setItem(linha, 2, QTableWidgetItem(operador))
         self._tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(faturamento)))
         item_diferenca = QTableWidgetItem(diferenca)
-        if resumo.diferenca is not None and resumo.diferenca != 0:
+        if diferenca_total is not None and diferenca_total != 0:
             item_diferenca.setForeground(Qt.GlobalColor.red)
         self._tabela.setItem(linha, 4, item_diferenca)
 
