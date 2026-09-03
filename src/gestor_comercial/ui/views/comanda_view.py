@@ -55,9 +55,13 @@ from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, execut
 from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
 
 _COLUNAS = ["Descrição", "Preço", "Qtd", "Total", ""]
-# Largura suficiente para "Cancelar" em negrito 13px + padding do botão
-# (ver `QPushButton[variante="perigo"]` em resources/qss/base.qss).
+# Largura suficiente para "Cancelar" em negrito 12px + padding do botão
+# (ver `QPushButton[variante="perigo-tabela"]` em ui/theme/qss_app.py).
 _LARGURA_COLUNA_ACAO = 110
+# Ver comentário em `_criar_tabela`: precisa sobrar altura suficiente depois
+# do inset de `QTableWidget::item { padding: 8px 12px; }` pro botão de ação
+# (variante "perigo-tabela", ~24px de altura) caber sem cortar o texto.
+_ALTURA_LINHA = 44
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
 _NADA_NOVO_PARA_IMPRIMIR = (
@@ -224,6 +228,13 @@ class ComandaView(QWidget):
         # Largura fixa evita essa armadilha do Qt.
         tabela.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         tabela.setColumnWidth(4, _LARGURA_COLUNA_ACAO)
+        # `QTableWidget::item { padding: 8px 12px; }` (ver ui/theme/qss_app.py)
+        # não é só o texto: o Qt usa essa mesma folga como inset na geometria
+        # de QUALQUER widget de célula, `setCellWidget` incluso. Numa linha de
+        # ~30px isso deixa só ~13px de altura pro botão Remover/Cancelar — não
+        # cabe nem o próprio padding do botão, e o Qt para de desenhar o texto
+        # (fica uma barra vermelha vazia). Linha mais alta garante folga.
+        tabela.verticalHeader().setDefaultSectionSize(_ALTURA_LINHA)
         return tabela
 
     def carregar_comanda(self, comanda: Comanda) -> None:
@@ -361,12 +372,15 @@ class ComandaView(QWidget):
     def _aplicar_variante(botao: QPushButton, variante: str) -> None:
         # Botões criados no __init__ (voltar, +Item, etc.) já existem antes da
         # janela ser exibida, então o `setProperty` sozinho basta: o Qt
-        # calcula o estilo pela primeira vez já com a propriedade presente.
-        # Estes aqui (Remover/Cancelar) nascem depois, a cada `atualizar()`,
-        # e vão direto para uma tabela já visível via `setCellWidget` — sem
-        # unpolish/polish o seletor `[variante="perigo"]` só pinta o fundo e
-        # o texto branco não é recalculado, some (bug conhecido do Qt com
-        # QSS + propriedade dinâmica em widget inserido após o polish inicial).
+        # calcula o estilo (e o sizeHint) pela primeira vez já com a
+        # propriedade presente. Estes aqui (Remover/Cancelar) nascem a cada
+        # `atualizar()` e são inseridos numa `QTableWidget` via
+        # `setCellWidget`, que dimensiona a célula pelo `sizeHint()` do botão
+        # NO INSTANTE da inserção — por isso os chamadores SEMPRE aplicam a
+        # variante antes de `setCellWidget`. Se a variante (e o padding/fonte
+        # que ela traz) só é aplicada depois, a tabela já reservou o tamanho
+        # do botão genérico e nunca reconsulta o sizeHint, deixando o texto
+        # cortado numa caixa pequena demais pra ele.
         botao.setProperty("variante", variante)
         botao.style().unpolish(botao)
         botao.style().polish(botao)
@@ -389,7 +403,13 @@ class ComandaView(QWidget):
         # emoji: o glifo some em fontes sem suporte a emoji colorido e o
         # botão vira um quadrado vazio, sem afordância nenhuma.
         botao_remover = QPushButton("Remover")
-        self._aplicar_variante(botao_remover, "perigo")
+        # Variante ANTES de `addWidget`/`setCellWidget`: `setCellWidget` tira
+        # um retrato do `sizeHint()` do botão no instante da inserção pra
+        # dimensionar a célula. Se a variante compacta (`perigo-tabela`, com
+        # padding/fonte menores) só é aplicada depois, a tabela já capturou o
+        # tamanho do botão "genérico" (maior) e nunca recalcula — o texto
+        # fica cortado dentro de uma caixa pequena demais pra ele.
+        self._aplicar_variante(botao_remover, "perigo-tabela")
         botao_remover.setToolTip("Remover item da lista (ainda não foi enviado à produção).")
         botao_remover.clicked.connect(lambda _checked=False, i=item: self._remover_item(i))
         layout_acoes.addWidget(botao_remover)
@@ -415,7 +435,10 @@ class ComandaView(QWidget):
         # docs/arquitetura §3.6) — mesmo agrupado na tela, cada `ItemComanda`
         # do grupo é cancelado individualmente por baixo.
         botao_cancelar = QPushButton("Cancelar")
-        self._aplicar_variante(botao_cancelar, "perigo")
+        # Ver comentário equivalente em `_preencher_linha_pendente`: variante
+        # antes de `addWidget`/`setCellWidget`, senão a tabela captura o
+        # tamanho do botão genérico (maior) e o texto fica cortado.
+        self._aplicar_variante(botao_cancelar, "perigo-tabela")
         botao_cancelar.setToolTip(
             "Solicitar cancelamento do item. Já foi enviado à produção — exige senha do gerente."
         )
@@ -423,6 +446,7 @@ class ComandaView(QWidget):
         layout_acoes.addWidget(botao_cancelar)
 
         self._tabela_lancados.setCellWidget(linha, 4, acoes_item)
+        self._aplicar_variante(botao_cancelar, "perigo-tabela")
 
     def _mostrar_mensagem(self, texto: str, *, sucesso: bool) -> None:
         cor = "#22c55e" if sucesso else "#f43f5e"
