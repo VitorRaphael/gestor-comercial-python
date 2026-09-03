@@ -197,6 +197,35 @@ def linha_secundaria(texto: str | None, largura: int, prefixo: str = "") -> list
     return quebrar(f"{prefixo}{limpo}", largura, recuo=RECUO)
 
 
+def agrupar_itens_producao(
+    itens: list[tuple[int, str, int, str | None]],
+) -> list[tuple[int, str, int, str | None]]:
+    """Consolida `(produto_id, nome, quantidade, observacao)` repetidos num cupom de produção.
+
+    A chave é `(produto_id, observação normalizada)`, não o nome: nome é texto
+    livre de exibição, e dois produtos diferentes que por coincidência tenham
+    o mesmo nome cadastrado não podem se fundir numa linha só. A observação
+    entra normalizada (sem diferença de espaço/caixa — "Sem cebola" e
+    "sem  cebola" são a mesma instrução pra cozinha) e observação diferente
+    mantém a linha separada de propósito: "sem gelo" e "com gelo" não podem
+    virar uma linha só, senão a cozinha não sabe qual fazer de qual jeito.
+
+    A ordem de saída é a da primeira aparição de cada chave — mesma regra do
+    resto do cupom, que segue a ordem em que o atendente lançou os itens.
+    """
+    grupos: dict[tuple[int, str], list] = {}
+    ordem: list[tuple[int, str]] = []
+    for produto_id, nome, quantidade, observacao in itens:
+        obs_normalizada = " ".join(str(observacao).split()).casefold() if observacao else ""
+        chave = (produto_id, obs_normalizada)
+        if chave not in grupos:
+            grupos[chave] = [produto_id, nome, 0, observacao]
+            ordem.append(chave)
+        grupos[chave][2] += int(quantidade)
+
+    return [tuple(grupos[chave]) for chave in ordem]
+
+
 def regua(largura: int) -> str:
     """Régua '1234567890...' para conferir a largura da bobina no cupom de teste.
 

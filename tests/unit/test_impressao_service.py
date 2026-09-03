@@ -523,7 +523,7 @@ def test_cupom_de_producao_mostra_mesa_comanda_atendente_e_observacao(
     assert f"MESA {mesa.numero}" in texto
     assert f"Comanda {comanda.id}" in texto
     assert f"Atendente: {gerente.nome}" in texto
-    assert "obs: sem cebola" in texto
+    assert "[!] OBS: sem cebola" in texto
     assert "Pão, hambúrguer 180g e queijo" in texto
 
 
@@ -1162,7 +1162,7 @@ def test_da_comanda_ao_recibo_pelo_caminho_de_verdade(
 
     assert [(r.impressora_nome, r.sucesso) for r in envios] == [("Cozinha", True)]
     assert "2x X-Burger" in driver.texto_de("Cozinha")
-    assert "obs: sem cebola" in driver.texto_de("Cozinha")
+    assert "[!] OBS: sem cebola" in driver.texto_de("Cozinha")
 
     assert resumo.troco == dinheiro("10.00")
     assert recibo.sucesso

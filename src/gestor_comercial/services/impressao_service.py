@@ -414,15 +414,36 @@ class ImpressaoService:
             documento.append(BlocoTexto(linha))
         documento.append(BlocoTexto(cupom.separador(largura)))
 
-        for item in grupo.itens:
-            for linha in cupom.linha_de_item(item.quantidade, item.produto.nome, largura):
+        # Consolida itens idênticos (mesmo produto e mesma observação) antes de
+        # renderizar: "1x Coca" + "1x Coca" na mesma comanda vira "2x Coca" no
+        # papel, e não duas linhas repetidas confundindo a cozinha.
+        agrupados = cupom.agrupar_itens_producao(
+            [
+                (item.produto.id, item.produto.nome, item.quantidade, item.observacao)
+                for item in grupo.itens
+            ]
+        )
+        descricoes = {item.produto.id: item.produto.descricao for item in grupo.itens}
+
+        for produto_id, nome, quantidade, observacao in agrupados:
+            for linha in cupom.linha_de_item(quantidade, nome, largura):
                 # Nome do item em negrito: é o que a cozinha procura primeiro.
                 documento.append(BlocoTexto(linha, negrito=True))
-            for linha in cupom.linha_secundaria(item.observacao, largura, prefixo="obs: "):
+            for linha in cupom.linha_secundaria(descricoes.get(produto_id), largura):
                 documento.append(BlocoTexto(linha))
-            for linha in cupom.linha_secundaria(item.produto.descricao, largura):
-                documento.append(BlocoTexto(linha))
+            # "[!]" chama atenção do cozinheiro pra uma instrução que muda o
+            # preparo padrão — negrito exclusivo desta linha, é o que não pode
+            # passar batido no meio da correria. Descrição e observação nunca
+            # imprimem nada quando vazias: `linha_secundaria` devolve lista
+            # vazia, sem placeholder e sem linha em branco no papel.
+            for linha in cupom.linha_secundaria(observacao, largura, prefixo="[!] OBS: "):
+                documento.append(BlocoTexto(linha, negrito=True))
 
+        documento.append(BlocoTexto(cupom.separador(largura)))
+        total_itens = sum(quantidade for _, _, quantidade, _ in agrupados)
+        documento.append(
+            BlocoTexto(cupom.duas_colunas("TOTAL DE ITENS", str(total_itens), largura))
+        )
         documento.append(BlocoTexto(cupom.separador(largura)))
         return documento
 

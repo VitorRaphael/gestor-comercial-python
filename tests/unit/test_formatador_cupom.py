@@ -173,6 +173,47 @@ def test_largura_util_com_valor_ilegivel():
     assert cupom.largura_util("quarenta e oito") == cupom.LARGURA_MINIMA
 
 
+def test_agrupar_itens_producao_soma_quantidade_de_itens_identicos():
+    itens = [(1, "Coca-Cola Lata", 1, None), (1, "Coca-Cola Lata", 1, None)]
+
+    assert cupom.agrupar_itens_producao(itens) == [(1, "Coca-Cola Lata", 2, None)]
+
+
+def test_agrupar_itens_producao_mantem_observacoes_diferentes_separadas():
+    itens = [(1, "Suco", 1, "sem gelo"), (1, "Suco", 1, "com gelo")]
+
+    assert cupom.agrupar_itens_producao(itens) == [
+        (1, "Suco", 1, "sem gelo"),
+        (1, "Suco", 1, "com gelo"),
+    ]
+
+
+def test_agrupar_itens_producao_ignora_diferenca_de_espaco_e_caixa_na_observacao():
+    itens = [(1, "Suco", 1, "Sem Gelo"), (1, "Suco", 2, "sem   gelo")]
+
+    assert cupom.agrupar_itens_producao(itens) == [(1, "Suco", 3, "Sem Gelo")]
+
+
+def test_agrupar_itens_producao_preserva_ordem_da_primeira_aparicao():
+    itens = [(1, "X-Burger", 1, None), (2, "Coca-Cola", 1, None), (1, "X-Burger", 1, None)]
+
+    assert cupom.agrupar_itens_producao(itens) == [
+        (1, "X-Burger", 2, None),
+        (2, "Coca-Cola", 1, None),
+    ]
+
+
+def test_agrupar_itens_producao_nao_funde_produtos_diferentes_com_mesmo_nome():
+    # Chave é produto_id, não o nome: dois produtos distintos que por
+    # coincidência tenham o mesmo texto cadastrado não podem virar 1 linha.
+    itens = [(1, "Combo", 1, None), (2, "Combo", 1, None)]
+
+    assert cupom.agrupar_itens_producao(itens) == [
+        (1, "Combo", 1, None),
+        (2, "Combo", 1, None),
+    ]
+
+
 def test_duas_colunas_prefere_estourar_a_largura_a_perder_o_valor():
     """O valor é o que o cliente confere; o rótulo é quem cede espaço."""
     linha = cupom.duas_colunas("TOTAL", "1.234.567,89", 10)
