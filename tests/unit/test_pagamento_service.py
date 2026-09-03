@@ -240,7 +240,9 @@ def test_registrar_em_comanda_ja_quitada_e_bloqueado(pagamentos, comandas, conta
 
     caixas = CaixaService(comandas.uow, comandas.auth)
     caixa_aberto = caixas.buscar_aberto()
-    assert caixas.fechar(caixa_aberto.id, Decimal("112.00")).status.value == "FECHADO"
+    assert caixas.fechar(
+        caixa_aberto.id, Decimal("112.00"), Decimal("0.00")
+    ).status.value == "FECHADO"
 
 
 def test_registrar_em_comanda_fechada_e_bloqueado(pagamentos, comandas, conta_36):

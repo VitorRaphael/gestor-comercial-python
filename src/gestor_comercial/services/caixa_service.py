@@ -53,8 +53,10 @@ class ResumoCaixa:
     sangrias: Decimal
     despesas: Decimal
     saldo_esperado: Decimal
-    valor_contado: Decimal | None
-    diferenca: Decimal | None
+    valor_contado_dinheiro: Decimal | None
+    diferenca_dinheiro: Decimal | None
+    valor_contado_maquininha: Decimal | None
+    diferenca_maquininha: Decimal | None
 
 
 @dataclass(frozen=True)
@@ -109,12 +111,13 @@ class LinhaConferenciaPagamento:
     """Uma linha do 'Cabeçalho Financeiro' do comprovante de fechamento.
 
     `esperado` é o que o sistema registrou como vendido naquela forma;
-    `conferido` é o que foi de fato contado na conferência. Hoje só o
-    Dinheiro tem contagem manual própria (a da gaveta) — Cartão/PIX não têm
-    uma conferência independente no sistema, então `conferido` é igual a
-    `esperado` para elas e a diferença sai sempre zero. É uma limitação
-    conhecida, não um bug: se um dia existir conferência de maquininha por
-    forma, é aqui que ela entra.
+    `conferido` é o que foi de fato contado na conferência. Dinheiro e
+    Maquininha (num único valor consolidado) têm contagem manual própria;
+    a conferência de maquininha não é quebrada por bandeira/forma, então
+    Crédito/Débito/PIX individualmente sempre têm `conferido` igual a
+    `esperado` e diferença zero — a diferença real de maquininha só aparece
+    agregada na linha "Total". É uma limitação conhecida, não um bug: se um
+    dia existir conferência de maquininha por forma, é aqui que ela entra.
     """
 
     forma: FormaPagamento | None  # None só na linha "Total".
@@ -200,15 +203,26 @@ class CaixaService:
         self.uow.commit()
         return caixa
 
-    def fechar(self, caixa_id: int, valor_contado: Decimal, observacao: str | None = None) -> Caixa:
+    def fechar(
+        self,
+        caixa_id: int,
+        valor_contado_dinheiro: Decimal,
+        valor_contado_maquininha: Decimal,
+        observacao: str | None = None,
+    ) -> Caixa:
         gerente = self.auth.exigir_gerente()
         caixa = self.buscar(caixa_id)
         if caixa.status is StatusCaixa.FECHADO:
             raise RegraDeNegocioError(f"O caixa {caixa_id} já está fechado.")
 
-        valor = self._valor_monetario(valor_contado, "valor contado")
-        if valor < ZERO:
-            raise RegraDeNegocioError("O valor contado não pode ser negativo.")
+        valor_dinheiro = self._valor_monetario(valor_contado_dinheiro, "valor contado em dinheiro")
+        if valor_dinheiro < ZERO:
+            raise RegraDeNegocioError("O valor contado em dinheiro não pode ser negativo.")
+        valor_maquininha = self._valor_monetario(
+            valor_contado_maquininha, "valor contado na maquininha"
+        )
+        if valor_maquininha < ZERO:
+            raise RegraDeNegocioError("O valor contado na maquininha não pode ser negativo.")
 
         # Divergência intencional do Java: fechar com mesa em aberto some com a
         # venda — a comanda fica presa num caixa que já foi conferido e o
@@ -254,7 +268,8 @@ class CaixaService:
 
         caixa.status = StatusCaixa.FECHADO
         caixa.fechado_em = fechado_em
-        caixa.valor_contado = valor
+        caixa.valor_contado_dinheiro = valor_dinheiro
+        caixa.valor_contado_maquininha = valor_maquininha
         caixa.observacao_fechamento = self._texto_ou_nulo(observacao)
         caixa.fechado_por_id = gerente.id
         caixa.numero_sequencial_dia = numero_sequencial_dia
@@ -331,20 +346,23 @@ class CaixaService:
     def conferencia_pagamentos(self, caixa_id: int) -> list[LinhaConferenciaPagamento]:
         """Cabeçalho financeiro do comprovante: esperado x conferido x diferença.
 
-        Só o Dinheiro tem contagem manual própria (a da gaveta). A diferença
-        apurada em `resumo().diferenca` é toda atribuída à linha de Dinheiro
-        porque abertura, reforços, sangrias e despesas já entram exatas no
-        cálculo do saldo esperado — qualquer sobra/falta na gaveta só pode
-        vir do dinheiro em espécie que foi contado à mão. Cartão/PIX não têm
-        conferência manual independente hoje: `conferido` repete `esperado`
-        e a diferença sai zero.
+        Dinheiro e Maquininha têm cada um sua própria contagem manual
+        (gaveta e extrato da maquininha, respectivamente). A diferença de
+        Dinheiro (`resumo().diferenca_dinheiro`) vai na linha de Dinheiro, e a
+        diferença de Maquininha (`resumo().diferenca_maquininha`) só aparece
+        agregada na linha "Total" — a conferência de maquininha hoje é feita
+        num único valor contado (o extrato consolidado), não por bandeira/
+        forma, então Crédito/Débito/PIX individualmente continuam com
+        `conferido` igual a `esperado` e diferença zero: é uma limitação
+        conhecida, não um bug — se um dia existir conferência de maquininha
+        por forma, é aqui que ela entra.
         """
         resumo = self.resumo(caixa_id)
-        conferido_fechado = resumo.valor_contado is not None
+        conferido_fechado = resumo.valor_contado_dinheiro is not None
 
         linhas: list[LinhaConferenciaPagamento] = []
         dinheiro_conferido = (
-            dinheiro(resumo.total_dinheiro + (resumo.diferenca or ZERO))
+            dinheiro(resumo.total_dinheiro + (resumo.diferenca_dinheiro or ZERO))
             if conferido_fechado
             else None
         )
@@ -354,7 +372,7 @@ class CaixaService:
                 rotulo="Dinheiro",
                 esperado=resumo.total_dinheiro,
                 conferido=dinheiro_conferido,
-                diferenca=resumo.diferenca,
+                diferenca=resumo.diferenca_dinheiro,
             )
         )
 
@@ -375,7 +393,14 @@ class CaixaService:
 
         esperado_total = dinheiro(sum((linha.esperado for linha in linhas), ZERO))
         conferido_total = (
-            dinheiro(sum((linha.conferido for linha in linhas), ZERO)) if conferido_fechado else None
+            dinheiro(sum((linha.conferido for linha in linhas), ZERO) + (resumo.diferenca_maquininha or ZERO))
+            if conferido_fechado
+            else None
+        )
+        diferenca_total = (
+            None
+            if resumo.diferenca_dinheiro is None
+            else dinheiro(resumo.diferenca_dinheiro + (resumo.diferenca_maquininha or ZERO))
         )
         linhas.append(
             LinhaConferenciaPagamento(
@@ -383,7 +408,7 @@ class CaixaService:
                 rotulo="Total",
                 esperado=esperado_total,
                 conferido=conferido_total,
-                diferenca=resumo.diferenca,
+                diferenca=diferenca_total,
             )
         )
         return linhas
@@ -473,14 +498,22 @@ class CaixaService:
             elif movimento.tipo is TipoMovimento.DESPESA:
                 despesas += dinheiro(movimento.valor)
 
-        valor_contado = None if caixa.valor_contado is None else dinheiro(caixa.valor_contado)
+        valor_contado_dinheiro = (
+            None if caixa.valor_contado_dinheiro is None else dinheiro(caixa.valor_contado_dinheiro)
+        )
+        valor_contado_maquininha = (
+            None
+            if caixa.valor_contado_maquininha is None
+            else dinheiro(caixa.valor_contado_maquininha)
+        )
         saldo_esperado = self.calcular_saldo_esperado(caixa_id)
+        total_maquininha = self._somar(self._pagamentos(caixa_id, *FORMAS_MAQUININHA))
 
         return ResumoCaixa(
             caixa_id=caixa.id,
             valor_abertura=dinheiro(caixa.valor_abertura),
             total_dinheiro=self._somar(self._pagamentos(caixa_id, FormaPagamento.DINHEIRO)),
-            total_maquininha=self._somar(self._pagamentos(caixa_id, *FORMAS_MAQUININHA)),
+            total_maquininha=total_maquininha,
             # Consumo interno é venda que nunca virou dinheiro na gaveta: fica em
             # linha própria pra explicar a diferença entre o que foi vendido e o
             # que dá pra contar na hora do fechamento.
@@ -491,8 +524,18 @@ class CaixaService:
             sangrias=sangrias,
             despesas=despesas,
             saldo_esperado=saldo_esperado,
-            valor_contado=valor_contado,
-            diferenca=None if valor_contado is None else dinheiro(valor_contado - saldo_esperado),
+            valor_contado_dinheiro=valor_contado_dinheiro,
+            diferenca_dinheiro=(
+                None
+                if valor_contado_dinheiro is None
+                else dinheiro(valor_contado_dinheiro - saldo_esperado)
+            ),
+            valor_contado_maquininha=valor_contado_maquininha,
+            diferenca_maquininha=(
+                None
+                if valor_contado_maquininha is None
+                else dinheiro(valor_contado_maquininha - total_maquininha)
+            ),
         )
 
     # ------------------------------------------------------------------

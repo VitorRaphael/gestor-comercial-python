@@ -85,7 +85,8 @@ def _caixa_fechado(
         Caixa(
             status=StatusCaixa.FECHADO,
             valor_abertura=dinheiro(valor_abertura),
-            valor_contado=dinheiro(valor_abertura),
+            valor_contado_dinheiro=dinheiro(valor_abertura),
+            valor_contado_maquininha=dinheiro("0.00"),
             aberto_em=datetime(2026, 8, 19, 8, 0),
             fechado_em=fechado_em,
             resumo_produtos_json=snapshot,
@@ -162,27 +163,27 @@ def test_abrir_exige_alguem_logado(caixas):
 
 
 def test_fechar_grava_contagem_e_observacao(caixas, gerente, caixa_aberto):
-    caixa = caixas.fechar(caixa_aberto.id, Decimal("180.00"), "Faltou trocado de 2 reais")
+    caixa = caixas.fechar(caixa_aberto.id, Decimal("180.00"), dinheiro("0.00"), "Faltou trocado de 2 reais")
 
     assert caixa.status is StatusCaixa.FECHADO
-    assert caixa.valor_contado == Decimal("180.00")
+    assert caixa.valor_contado_dinheiro == Decimal("180.00")
     assert caixa.observacao_fechamento == "Faltou trocado de 2 reais"
     assert caixa.fechado_em is not None
 
 
 def test_fechar_sem_observacao_deixa_o_campo_nulo(caixas, gerente, caixa_aberto):
-    assert caixas.fechar(caixa_aberto.id, Decimal("100.00"), "   ").observacao_fechamento is None
+    assert caixas.fechar(caixa_aberto.id, Decimal("100.00"), dinheiro("0.00"), "   ").observacao_fechamento is None
 
 
 def test_fechar_bloqueia_caixa_ja_fechado(caixas, gerente, caixa_aberto):
-    caixas.fechar(caixa_aberto.id, Decimal("100.00"))
+    caixas.fechar(caixa_aberto.id, Decimal("100.00"), dinheiro("0.00"))
     with pytest.raises(RegraDeNegocioError):
-        caixas.fechar(caixa_aberto.id, Decimal("100.00"))
+        caixas.fechar(caixa_aberto.id, Decimal("100.00"), dinheiro("0.00"))
 
 
 def test_fechar_recusa_valor_contado_negativo(caixas, gerente, caixa_aberto):
     with pytest.raises(RegraDeNegocioError):
-        caixas.fechar(caixa_aberto.id, Decimal("-0.01"))
+        caixas.fechar(caixa_aberto.id, Decimal("-0.01"), dinheiro("0.00"))
     assert caixa_aberto.status is StatusCaixa.ABERTO
 
 
@@ -193,7 +194,7 @@ def test_fechar_bloqueia_com_comanda_aberta_e_diz_quantas(
     _novo_item(uow, comanda, produto)
 
     with pytest.raises(RegraDeNegocioError, match="1 comanda aberta"):
-        caixas.fechar(caixa_aberto.id, Decimal("100.00"))
+        caixas.fechar(caixa_aberto.id, Decimal("100.00"), dinheiro("0.00"))
     assert caixa_aberto.status is StatusCaixa.ABERTO
 
 
@@ -205,7 +206,7 @@ def test_fechar_pluraliza_a_contagem_de_comandas_abertas(
         _novo_item(uow, comanda, produto)
 
     with pytest.raises(RegraDeNegocioError, match="2 comandas abertas"):
-        caixas.fechar(caixa_aberto.id, Decimal("100.00"))
+        caixas.fechar(caixa_aberto.id, Decimal("100.00"), dinheiro("0.00"))
 
 
 def test_fechar_bloqueia_com_comanda_em_conferencia(uow, caixas, gerente, caixa_aberto, produto):
@@ -214,7 +215,7 @@ def test_fechar_bloqueia_com_comanda_em_conferencia(uow, caixas, gerente, caixa_
     _novo_item(uow, comanda, produto)
 
     with pytest.raises(RegraDeNegocioError, match="1 comanda aberta"):
-        caixas.fechar(caixa_aberto.id, Decimal("100.00"))
+        caixas.fechar(caixa_aberto.id, Decimal("100.00"), dinheiro("0.00"))
 
 
 def test_fechar_ignora_comanda_aberta_sem_item(uow, caixas, gerente, caixa_aberto):
@@ -224,32 +225,32 @@ def test_fechar_ignora_comanda_aberta_sem_item(uow, caixas, gerente, caixa_abert
     # fechar (o gerente não teria como achá-la em tela nenhuma).
     _nova_comanda(uow, caixa_aberto, gerente)
 
-    assert caixas.fechar(caixa_aberto.id, Decimal("100.00")).status is StatusCaixa.FECHADO
+    assert caixas.fechar(caixa_aberto.id, Decimal("100.00"), dinheiro("0.00")).status is StatusCaixa.FECHADO
 
 
 def test_fechar_ignora_comandas_fechadas_e_canceladas(uow, caixas, gerente, caixa_aberto):
     _nova_comanda(uow, caixa_aberto, gerente, status=StatusComanda.FECHADA)
     _nova_comanda(uow, caixa_aberto, gerente, status=StatusComanda.CANCELADA)
 
-    assert caixas.fechar(caixa_aberto.id, Decimal("100.00")).status is StatusCaixa.FECHADO
+    assert caixas.fechar(caixa_aberto.id, Decimal("100.00"), dinheiro("0.00")).status is StatusCaixa.FECHADO
 
 
 def test_fechar_ignora_comanda_aberta_de_outro_caixa(uow, caixas, gerente, caixa_aberto):
     outro = _caixa_fechado(uow)
     _nova_comanda(uow, outro, gerente)
 
-    assert caixas.fechar(caixa_aberto.id, Decimal("100.00")).status is StatusCaixa.FECHADO
+    assert caixas.fechar(caixa_aberto.id, Decimal("100.00"), dinheiro("0.00")).status is StatusCaixa.FECHADO
 
 
 def test_fechar_caixa_inexistente(caixas, gerente):
     with pytest.raises(RecursoNaoEncontradoError):
-        caixas.fechar(999, Decimal("100.00"))
+        caixas.fechar(999, Decimal("100.00"), dinheiro("0.00"))
 
 
 def test_fechar_negado_para_atendente(caixas, auth, gerente, atendente, caixa_aberto):
     auth.login(PIN_ATENDENTE)
     with pytest.raises(AcessoNegadoError):
-        caixas.fechar(caixa_aberto.id, Decimal("100.00"))
+        caixas.fechar(caixa_aberto.id, Decimal("100.00"), dinheiro("0.00"))
 
 
 # ----------------------------------------------------------------------
@@ -512,8 +513,10 @@ def test_resumo_de_caixa_aberto_nao_tem_diferenca(uow, caixas, gerente, caixa_ab
     assert resumo.sangrias == Decimal("30.00")
     assert resumo.despesas == Decimal("20.00")
     assert resumo.saldo_esperado == Decimal("136.00")
-    assert resumo.valor_contado is None
-    assert resumo.diferenca is None
+    assert resumo.valor_contado_dinheiro is None
+    assert resumo.diferenca_dinheiro is None
+    assert resumo.valor_contado_maquininha is None
+    assert resumo.diferenca_maquininha is None
 
 
 def test_resumo_zerado_logo_apos_a_abertura(caixas, caixa_aberto):
@@ -531,19 +534,19 @@ def test_resumo_zerado_logo_apos_a_abertura(caixas, caixa_aberto):
 def test_resumo_acusa_falta_na_gaveta(uow, caixas, gerente, caixa_aberto):
     comanda = _nova_comanda(uow, caixa_aberto, gerente, status=StatusComanda.FECHADA)
     _novo_pagamento(uow, comanda, FormaPagamento.DINHEIRO, "36.00")
-    caixas.fechar(caixa_aberto.id, Decimal("130.00"))
+    caixas.fechar(caixa_aberto.id, Decimal("130.00"), dinheiro("0.00"))
 
     resumo = caixas.resumo(caixa_aberto.id)
 
     assert resumo.saldo_esperado == Decimal("136.00")
-    assert resumo.valor_contado == Decimal("130.00")
-    assert resumo.diferenca == Decimal("-6.00")
+    assert resumo.valor_contado_dinheiro == Decimal("130.00")
+    assert resumo.diferenca_dinheiro == Decimal("-6.00")
 
 
 def test_resumo_acusa_sobra_na_gaveta(caixas, gerente, caixa_aberto):
-    caixas.fechar(caixa_aberto.id, Decimal("102.50"))
+    caixas.fechar(caixa_aberto.id, Decimal("102.50"), dinheiro("0.00"))
 
-    assert caixas.resumo(caixa_aberto.id).diferenca == Decimal("2.50")
+    assert caixas.resumo(caixa_aberto.id).diferenca_dinheiro == Decimal("2.50")
 
 
 def test_resumo_de_caixa_inexistente(caixas):
@@ -562,7 +565,7 @@ def test_abrir_grava_quem_abriu(caixas, gerente):
 
 
 def test_fechar_grava_quem_fechou(caixas, gerente, caixa_aberto):
-    caixa = caixas.fechar(caixa_aberto.id, Decimal("100.00"))
+    caixa = caixas.fechar(caixa_aberto.id, Decimal("100.00"), dinheiro("0.00"))
     assert caixa.fechado_por_id == gerente.id
 
 
@@ -572,16 +575,16 @@ def test_fechar_grava_quem_fechou(caixas, gerente, caixa_aberto):
 
 
 def test_fechar_numera_o_primeiro_fechamento_do_dia(caixas, gerente, caixa_aberto):
-    caixa = caixas.fechar(caixa_aberto.id, Decimal("100.00"))
+    caixa = caixas.fechar(caixa_aberto.id, Decimal("100.00"), dinheiro("0.00"))
     assert caixa.numero_sequencial_dia == 1
 
 
 def test_fechar_numera_sequencialmente_dentro_do_mesmo_dia(uow, auth, caixas, gerente):
     primeiro = caixas.abrir(Decimal("100.00"))
-    caixas.fechar(primeiro.id, Decimal("100.00"))
+    caixas.fechar(primeiro.id, Decimal("100.00"), dinheiro("0.00"))
     segundo = caixas.abrir(Decimal("50.00"))
 
-    fechado = caixas.fechar(segundo.id, Decimal("50.00"))
+    fechado = caixas.fechar(segundo.id, Decimal("50.00"), dinheiro("0.00"))
 
     assert fechado.numero_sequencial_dia == 2
 
@@ -589,8 +592,8 @@ def test_fechar_numera_sequencialmente_dentro_do_mesmo_dia(uow, auth, caixas, ge
 def test_fechar_nao_recalcula_a_sequencia_de_fechamentos_ja_gravados(
     uow, auth, caixas, gerente
 ):
-    primeiro = caixas.fechar(caixas.abrir(Decimal("100.00")).id, Decimal("100.00"))
-    caixas.fechar(caixas.abrir(Decimal("50.00")).id, Decimal("50.00"))
+    primeiro = caixas.fechar(caixas.abrir(Decimal("100.00")).id, Decimal("100.00"), dinheiro("0.00"))
+    caixas.fechar(caixas.abrir(Decimal("50.00")).id, Decimal("50.00"), dinheiro("0.00"))
 
     # O 1º fechamento do dia continua sendo o 1º mesmo depois de um segundo
     # caixa ser aberto e fechado — a numeração é imutável assim que gravada.
@@ -678,7 +681,7 @@ def test_listar_historico_filtra_por_operador_abertura_ou_fechamento(uow, auth, 
         Caixa(
             status=StatusCaixa.FECHADO,
             valor_abertura=dinheiro("50.00"),
-            valor_contado=dinheiro("50.00"),
+            valor_contado_dinheiro=dinheiro("50.00"),
             aberto_em=datetime(2026, 8, 19, 8, 0),
             fechado_em=datetime(2026, 8, 19, 23, 0),
             aberto_por_id=abriu.id,
@@ -689,7 +692,7 @@ def test_listar_historico_filtra_por_operador_abertura_ou_fechamento(uow, auth, 
         Caixa(
             status=StatusCaixa.FECHADO,
             valor_abertura=dinheiro("50.00"),
-            valor_contado=dinheiro("50.00"),
+            valor_contado_dinheiro=dinheiro("50.00"),
             aberto_em=datetime(2026, 8, 19, 8, 0),
             fechado_em=datetime(2026, 8, 19, 23, 0),
             aberto_por_id=de_outro.id,
@@ -1063,7 +1066,7 @@ def test_fechar_grava_o_snapshot_do_mix_de_vendas(uow, caixas, gerente, caixa_ab
     comanda = _nova_comanda(uow, caixa_aberto, gerente, status=StatusComanda.FECHADA)
     _novo_item(uow, comanda, produto, quantidade=4)
 
-    caixa_fechado = caixas.fechar(caixa_aberto.id, "0.00")
+    caixa_fechado = caixas.fechar(caixa_aberto.id, "0.00", dinheiro("0.00"))
 
     assert caixa_fechado.resumo_produtos_json is not None
     dados = json.loads(caixa_fechado.resumo_produtos_json)
@@ -1074,7 +1077,7 @@ def test_fechar_grava_o_snapshot_do_mix_de_vendas(uow, caixas, gerente, caixa_ab
 
 
 def test_fechar_sem_nenhuma_venda_grava_snapshot_vazio(caixas, gerente, caixa_aberto):
-    caixa_fechado = caixas.fechar(caixa_aberto.id, "0.00")
+    caixa_fechado = caixas.fechar(caixa_aberto.id, "0.00", dinheiro("0.00"))
 
     assert json.loads(caixa_fechado.resumo_produtos_json) == []
 

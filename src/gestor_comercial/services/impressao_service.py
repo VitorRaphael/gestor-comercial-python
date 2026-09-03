@@ -670,19 +670,45 @@ class ImpressaoService:
             )
         )
 
-        if resumo.valor_contado is None:
+        if resumo.valor_contado_dinheiro is None:
             # Caixa ainda aberto: o relatório serve de conferência parcial, e a
             # linha de assinatura é onde o gerente anota o que contou na mão.
-            documento.append(BlocoTexto(cupom.duas_colunas("Valor contado", "_" * 10, largura)))
+            documento.append(
+                BlocoTexto(cupom.duas_colunas("Valor contado (Dinheiro)", "_" * 10, largura))
+            )
+            documento.append(
+                BlocoTexto(cupom.duas_colunas("Valor contado (Maquininha)", "_" * 10, largura))
+            )
         else:
             documento.append(
-                BlocoTexto(cupom.linha_de_valor("Valor contado", resumo.valor_contado, largura))
+                BlocoTexto(
+                    cupom.linha_de_valor(
+                        "Valor contado (Dinheiro)", resumo.valor_contado_dinheiro, largura
+                    )
+                )
             )
             documento.append(
                 BlocoTexto(
                     cupom.linha_de_valor(
-                        "Diferença",
-                        ZERO if resumo.diferenca is None else resumo.diferenca,
+                        "Diferença (Dinheiro)",
+                        ZERO if resumo.diferenca_dinheiro is None else resumo.diferenca_dinheiro,
+                        largura,
+                    ),
+                    negrito=True,
+                )
+            )
+            documento.append(
+                BlocoTexto(
+                    cupom.linha_de_valor(
+                        "Valor contado (Maquininha)", resumo.valor_contado_maquininha, largura
+                    )
+                )
+            )
+            documento.append(
+                BlocoTexto(
+                    cupom.linha_de_valor(
+                        "Diferença (Maquininha)",
+                        ZERO if resumo.diferenca_maquininha is None else resumo.diferenca_maquininha,
                         largura,
                     ),
                     negrito=True,

@@ -852,7 +852,8 @@ def test_fechamento_de_caixa_fechado_mostra_contado_e_diferenca(
     )
     caixa_aberto.status = StatusCaixa.FECHADO
     caixa_aberto.fechado_em = datetime(2026, 8, 21, 23, 0)
-    caixa_aberto.valor_contado = dinheiro("90.00")
+    caixa_aberto.valor_contado_dinheiro = dinheiro("90.00")
+    caixa_aberto.valor_contado_maquininha = dinheiro("0.00")
     uow.caixas.salvar(caixa_aberto)
     nova_impressora(uow, "Balcão", padrao=True)
 
@@ -1126,7 +1127,8 @@ def test_a_largura_da_bobina_e_respeitada_no_fechamento(
     )
     caixa_aberto.status = StatusCaixa.FECHADO
     caixa_aberto.fechado_em = datetime(2026, 8, 21, 23, 0)
-    caixa_aberto.valor_contado = dinheiro("100.00")
+    caixa_aberto.valor_contado_dinheiro = dinheiro("100.00")
+    caixa_aberto.valor_contado_maquininha = dinheiro("0.00")
     caixa_aberto.observacao_fechamento = (
         "faltou trocado no fim da noite, o Vitor completou do bolso e anotou no caderno"
     )
@@ -1215,7 +1217,7 @@ def test_o_fechamento_impresso_bate_com_o_que_o_caixa_service_calcula(
     comandas.fechar_para_conferencia(comanda.id)
     pagamentos.registrar(comanda.id, FormaPagamento.DINHEIRO, dinheiro("40.00"))
     caixas.registrar_movimento(TipoMovimento.SANGRIA, dinheiro("50.00"))
-    fechado = caixas.fechar(caixa_aberto.id, dinheiro("85.00"))
+    fechado = caixas.fechar(caixa_aberto.id, dinheiro("85.00"), dinheiro("0.00"))
 
     impressao.imprimir_fechamento_caixa(fechado.id)
     resumo = caixas.resumo(fechado.id)
@@ -1223,7 +1225,7 @@ def test_o_fechamento_impresso_bate_com_o_que_o_caixa_service_calcula(
 
     # abertura 100 + venda em dinheiro 40 - sangria 50 = 90 esperado.
     assert resumo.saldo_esperado == dinheiro("90.00")
-    assert resumo.diferenca == dinheiro("-5.00")
+    assert resumo.diferenca_dinheiro == dinheiro("-5.00")
     assert "90,00" in texto
     assert "85,00" in texto
     # Falta de dinheiro sai com sinal, senão o cupom parece bater.

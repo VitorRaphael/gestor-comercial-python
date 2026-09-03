@@ -217,14 +217,16 @@ class CaixaView(QWidget):
         if modal.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            valor_contado, observacao = modal.resultado()
+            valor_contado_dinheiro, valor_contado_maquininha, observacao = modal.resultado()
         except InvalidOperation:
             self._label_erro.setText("Valor inválido. Informe um valor em reais, como 50.00.")
             return
 
         self._label_erro.setText("")
         try:
-            self._caixa_service.fechar(self._caixa_id, valor_contado, observacao)
+            self._caixa_service.fechar(
+                self._caixa_id, valor_contado_dinheiro, valor_contado_maquininha, observacao
+            )
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
@@ -331,7 +333,7 @@ class _MovimentoDialog(QDialog):
 
 
 class _FecharCaixaDialog(QDialog):
-    """Modal de fechamento: valor contado na gaveta e observação livre."""
+    """Modal de fechamento: valor contado na gaveta, na maquininha, e observação livre."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -340,8 +342,11 @@ class _FecharCaixaDialog(QDialog):
         layout = QVBoxLayout(self)
         formulario = QFormLayout()
 
-        self._campo_valor_contado = QLineEdit()
-        formulario.addRow("Valor contado", self._campo_valor_contado)
+        self._campo_valor_contado_dinheiro = QLineEdit()
+        formulario.addRow("Valor em Dinheiro", self._campo_valor_contado_dinheiro)
+
+        self._campo_valor_contado_maquininha = QLineEdit()
+        formulario.addRow("Valor de vendas na Maquininha", self._campo_valor_contado_maquininha)
 
         self._campo_observacao = QLineEdit()
         self._campo_observacao.setPlaceholderText("Opcional")
@@ -357,10 +362,15 @@ class _FecharCaixaDialog(QDialog):
         botoes.rejected.connect(self.reject)
         layout.addWidget(botoes)
 
-    def resultado(self) -> tuple[Decimal, str | None]:
-        valor_contado = Decimal(self._campo_valor_contado.text().strip().replace(",", "."))
+    def resultado(self) -> tuple[Decimal, Decimal, str | None]:
+        valor_contado_dinheiro = Decimal(
+            self._campo_valor_contado_dinheiro.text().strip().replace(",", ".")
+        )
+        valor_contado_maquininha = Decimal(
+            self._campo_valor_contado_maquininha.text().strip().replace(",", ".")
+        )
         observacao = self._campo_observacao.text().strip() or None
-        return valor_contado, observacao
+        return valor_contado_dinheiro, valor_contado_maquininha, observacao
 
 
 def _formatar_resumo(resumo: ResumoCaixa) -> str:
@@ -374,10 +384,16 @@ def _formatar_resumo(resumo: ResumoCaixa) -> str:
         f"Despesas: {_formatar_reais(resumo.despesas)}",
         f"Saldo esperado na gaveta: {_formatar_reais(resumo.saldo_esperado)}",
     ]
-    if resumo.valor_contado is not None:
-        linhas.append(f"Valor contado: {_formatar_reais(resumo.valor_contado)}")
-    if resumo.diferenca is not None:
-        linhas.append(f"Diferença: {_formatar_reais(resumo.diferenca)}")
+    if resumo.valor_contado_dinheiro is not None:
+        linhas.append(f"Valor contado (Dinheiro): {_formatar_reais(resumo.valor_contado_dinheiro)}")
+    if resumo.diferenca_dinheiro is not None:
+        linhas.append(f"Diferença (Dinheiro): {_formatar_reais(resumo.diferenca_dinheiro)}")
+    if resumo.valor_contado_maquininha is not None:
+        linhas.append(
+            f"Valor contado (Maquininha): {_formatar_reais(resumo.valor_contado_maquininha)}"
+        )
+    if resumo.diferenca_maquininha is not None:
+        linhas.append(f"Diferença (Maquininha): {_formatar_reais(resumo.diferenca_maquininha)}")
     return "\n".join(linhas)
 
 
