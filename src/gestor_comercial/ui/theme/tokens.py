@@ -28,14 +28,17 @@ TEMA_ESCURO: dict[str, str] = {
     "perigo_hover": "#ef4444",
     "rosa": "#ec4899",
     "aviso": "#eab308",
-    # Status "Mesa Ocupada" (§ paleta oficial): roxo profundo com acento
-    # violeta — não é vermelho/rosa porque ocupada é estado normal (mesa em
-    # atendimento), não um alerta.
-    "mesa_ocupada_bg": "#1E1635",
-    "mesa_ocupada_borda": "#7C3AED",
-    # Mesa livre: grafite neutro (§ paleta oficial) — a borda verde já vem de
-    # `sucesso` no `border-top` do QSS.
-    "mesa_livre_bg": "#1F242D",
+    # Cards de mesa (livre/ocupada/fechando): mesma superfície elevada pras
+    # três, só a barra/borda superior muda de cor por status — não é mais
+    # fundo tingido por estado (era roxo pra ocupada antes do redesign
+    # "Dark Industrial").
+    "mesa_bg": "#1a1a1a",
+    "mesa_ocupada_bg": "#1a1a1a",
+    "mesa_ocupada_borda": "#38bdf8",
+    # "Fechando" = comanda em conferência (pré-conta emitida, itens travados)
+    # numa mesa ocupada — estado intermediário entre ocupada e livre de novo.
+    "mesa_fechando_borda": "#f59e0b",
+    "mesa_livre_bg": "#1a1a1a",
     # Logo isométrico na mesma tonalidade vívida do acento (botão ENTER/pílula
     # ESCURO), só com camadas mais escuras por baixo pra dar profundidade.
     "logo_clara": "#ffd873",
@@ -61,11 +64,11 @@ TEMA_CLARO: dict[str, str] = {
     "perigo_hover": "#ef4444",
     "rosa": "#db2777",
     "aviso": "#b45309",
-    # Status "Mesa Ocupada" no claro: mesmo par roxo/violeta do escuro — é
-    # cor de estado, não de marca, então não varia com o tema.
-    "mesa_ocupada_bg": "#1E1635",
-    "mesa_ocupada_borda": "#7C3AED",
-    "mesa_livre_bg": "#f4f6fb",
+    "mesa_bg": "#FFFFFF",
+    "mesa_ocupada_bg": "#FFFFFF",
+    "mesa_ocupada_borda": "#0284c7",
+    "mesa_fechando_borda": "#b45309",
+    "mesa_livre_bg": "#FFFFFF",
     # Logo isométrico "concreto claro": face frontal quase branca, profundidade em cinza-azulado.
     "logo_clara": "#f5f7fb",
     "logo_media": "#c3cadb",

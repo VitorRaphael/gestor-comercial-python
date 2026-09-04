@@ -90,10 +90,20 @@ def construir_qss_app(t: dict[str, str]) -> str:
       border: 1px solid {t['borda']};
       border-radius: 12px;
     }}
+    #sidebarGrupoRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      padding: 0 12px;
+      background: transparent;
+    }}
+    #sidebarSelo, #sidebarMarca {{ background: transparent; }}
 
     QPushButton[variante="nav"] {{
       background: transparent;
       border: none;
+      border-left: 3px solid transparent;
       color: {t['texto_fraco']};
       text-align: left;
       padding: 11px 12px;
@@ -277,27 +287,106 @@ def construir_qss_app(t: dict[str, str]) -> str:
 
     /* ---------- Grid de mesas ---------- */
 
-    QPushButton[variante="mesa"] {{
+    QFrame[variante="mesa"] {{
       background: {t['mesa_livre_bg']};
       border: 1px solid {t['borda']};
       border-top: 3px solid {t['sucesso']};
       border-radius: 14px;
-      font-size: 20px;
-      font-weight: 700;
-      padding: 16px;
     }}
-    QPushButton[variante="mesa"]:hover {{ background: {t['superficie_2']}; }}
-    /* Roxo, não vermelho: "ocupada" é estado normal (mesa em atendimento), não
-       um alerta — o vermelho fica reservado pra ações destrutivas (perigo).
-       Misturar os dois fazia toda mesa ocupada parecer "atrasada" o tempo todo. */
-    QPushButton[variante="mesa"][ocupada="true"] {{
+    QFrame[variante="mesa"]:hover {{ background: {t['superficie_2']}; }}
+    QLabel#mesaCartaoNumero {{ color: {t['texto']}; font-size: 20px; font-weight: 800; background: transparent; }}
+    QLabel#mesaCartaoTag {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    QFrame[variante="mesa"][ocupada="true"] QLabel#mesaCartaoTag {{ color: {t['mesa_ocupada_borda']}; }}
+    QFrame[variante="mesa"][fechando="true"] QLabel#mesaCartaoTag {{ color: {t['mesa_fechando_borda']}; }}
+    QLabel#mesaCartaoValor {{ color: {t['texto']}; font-size: 13px; font-weight: 800; background: transparent; }}
+    QLabel#mesaCartaoNome {{ color: {t['texto_fraco']}; font-size: 11px; background: transparent; }}
+    /* Ciano, não roxo/vermelho: "ocupada" é estado normal (mesa em
+       atendimento), não um alerta — vermelho fica reservado pra ações
+       destrutivas (perigo). */
+    QFrame[variante="mesa"][ocupada="true"] {{
       background: {t['mesa_ocupada_bg']};
+      border: 1px solid {t['mesa_ocupada_borda']};
       border-top: 3px solid {t['mesa_ocupada_borda']};
     }}
-    QPushButton[variante="mesa"][alerta="true"] {{
+    /* "Fechando" = comanda em conferência (pré-conta emitida) numa mesa
+       ocupada -- sobrepõe a cor de "ocupada" acima. */
+    QFrame[variante="mesa"][fechando="true"] {{
+      background: {t['mesa_bg']};
+      border: 1px solid {t['mesa_fechando_borda']};
+      border-top: 3px solid {t['mesa_fechando_borda']};
+    }}
+    QFrame[variante="mesa"][alerta="true"] {{
       border: 1px solid {t['aviso']};
       border-top: 3px solid {t['aviso']};
     }}
+
+    /* ---------- Tela de Mesas: cabeçalho, filtros, container do grid ---------- */
+
+    QLabel#mesasTitulo {{ color: {t['texto']}; font-size: 26px; font-weight: 800; background: transparent; }}
+    QLabel#mesasSubtitulo {{ color: {t['texto_fraco']}; font-size: 13px; background: transparent; }}
+
+    QPushButton[variante="filtro-pill"] {{
+      background: {t['superficie_2']};
+      color: {t['texto_fraco']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+      padding: 7px 16px;
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    QPushButton[variante="filtro-pill"]:hover {{ color: {t['texto']}; }}
+    QPushButton[variante="filtro-pill"][ativo="true"] {{
+      background: {t['superficie_2']};
+      color: {t['acento']};
+      border: 1px solid {t['acento']};
+    }}
+
+    QFrame#mesasContainer {{
+      background: {t['bg_terminal']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+
+    /* ---------- Painel direito (resumo do salão + comandas ativas) ---------- */
+
+    QFrame#painelResumoSalao, QFrame#painelComandasAtivas {{
+      background: {t['mesa_bg']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+    QLabel#painelTituloSecao {{
+      color: {t['texto_fraquissimo']};
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+    QLabel#painelValorGrande {{ color: {t['texto']}; font-size: 32px; font-weight: 800; background: transparent; }}
+    QLabel#painelRotuloMini {{ color: {t['texto_fraco']}; font-size: 11px; font-weight: 600; background: transparent; }}
+    QFrame#painelBarraTrilho {{ background: {t['borda']}; border-radius: 3px; }}
+    QFrame#painelBarraPreenchida {{ background: {t['acento']}; border-radius: 3px; }}
+
+    QFrame#painelMiniStat {{
+      background: {t['superficie_2']};
+      border-radius: 10px;
+    }}
+    QLabel#painelMiniStatValor {{ color: {t['texto']}; font-size: 17px; font-weight: 800; background: transparent; }}
+    QLabel#painelMiniStatRotulo {{ color: {t['texto_fraco']}; font-size: 10px; font-weight: 600; background: transparent; }}
+
+    QLabel#comandaListaMesa {{ color: {t['texto']}; font-size: 13px; font-weight: 700; background: transparent; }}
+    QLabel#comandaListaAtendente {{ color: {t['texto_fraco']}; font-size: 11px; background: transparent; }}
+    QLabel#comandaListaValor {{ color: {t['texto']}; font-size: 13px; font-weight: 800; background: transparent; }}
+    QLabel#comandaListaPontoOcupada {{ color: {t['mesa_ocupada_borda']}; font-size: 10px; background: transparent; }}
+    QLabel#comandaListaPontoFechando {{ color: {t['mesa_fechando_borda']}; font-size: 10px; background: transparent; }}
+    QLabel#painelMiniStatDotLivre {{ color: {t['sucesso']}; font-size: 9px; background: transparent; }}
+    QLabel#painelMiniStatDotOcupada {{ color: {t['mesa_ocupada_borda']}; font-size: 9px; background: transparent; }}
+    QLabel#painelMiniStatDotFechando {{ color: {t['mesa_fechando_borda']}; font-size: 9px; background: transparent; }}
 
     /* ---------- Painéis / cartões ---------- */
 
@@ -438,6 +527,105 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QLabel[variante="badge"][status="cancelada"], QLabel[variante="badge"][status="perigo"] {{
       background: {t['perigo']};
     }}
+
+    /* ---------- Tela de Caixa: dashboard financeiro do turno ---------- */
+
+    QLabel#caixaEyebrow {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      background: transparent;
+    }}
+    QLabel#caixaTitulo {{ color: {t['texto']}; font-size: 22px; font-weight: 800; background: transparent; }}
+    QLabel#caixaSubtitulo {{ color: {t['texto_fraco']}; font-size: 12px; background: transparent; }}
+
+    QFrame#caixaCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+    QLabel#caixaCardRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+    QLabel#caixaValorGrande {{ color: {t['texto']}; font-size: 30px; font-weight: 800; background: transparent; }}
+
+    QFrame#caixaMiniStat {{
+      background: {t['superficie_2']};
+      border-radius: 10px;
+    }}
+    QLabel#caixaMiniStatRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    QLabel#caixaMiniStatValor {{ color: {t['texto']}; font-size: 16px; font-weight: 800; background: transparent; }}
+
+    QLabel#caixaFormaNome {{ color: {t['texto']}; font-size: 12px; font-weight: 600; background: transparent; }}
+    QLabel#caixaFormaValor {{ color: {t['texto']}; font-size: 12px; font-weight: 700; background: transparent; }}
+    QProgressBar#caixaBarraPagamento {{
+      background: {t['borda']};
+      border: none;
+      border-radius: 2px;
+      max-height: 4px;
+      min-height: 4px;
+    }}
+    QProgressBar#caixaBarraPagamento::chunk {{ background: {t['acento']}; border-radius: 2px; }}
+
+    QLabel#caixaAjusteRotulo {{ color: {t['texto']}; font-size: 12px; background: transparent; }}
+    QLabel#caixaAjusteValor {{ color: {t['texto']}; font-size: 12px; font-weight: 700; background: transparent; }}
+    QLabel#caixaAjusteValorNegativo {{ color: {t['perigo_hover']}; font-size: 12px; font-weight: 700; background: transparent; }}
+
+    QFrame#caixaMovimentosCard {{
+      background: {t['bg_terminal']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+    QLabel#caixaMovimentosTitulo {{ color: {t['texto']}; font-size: 15px; font-weight: 700; background: transparent; }}
+    QLabel#caixaMovimentosSubtitulo {{ color: {t['texto_fraco']}; font-size: 11px; background: transparent; }}
+
+    QLabel[variante="badgeMovimento"] {{
+      border: 1px solid;
+      border-radius: 999px;
+      padding: 2px 10px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      background: transparent;
+    }}
+    QLabel[variante="badgeMovimento"][tipo="reforco"] {{ color: {t['sucesso']}; border-color: {t['sucesso']}; }}
+    QLabel[variante="badgeMovimento"][tipo="sangria"] {{ color: {t['perigo_hover']}; border-color: {t['perigo_hover']}; }}
+    QLabel[variante="badgeMovimento"][tipo="despesa"] {{ color: {t['mesa_ocupada_borda']}; border-color: {t['mesa_ocupada_borda']}; }}
+
+    QFrame#caixaMiniCard {{
+      background: {t['mesa_bg']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+    }}
+    QLabel#caixaMiniCardTitulo {{ color: {t['texto']}; font-size: 12px; font-weight: 700; background: transparent; }}
+    QLabel#caixaMiniCardSub {{ color: {t['texto_fraquissimo']}; font-size: 10px; letter-spacing: 0.4px; background: transparent; }}
+    QLabel#caixaMiniCardValor {{ color: {t['perigo_hover']}; font-size: 13px; font-weight: 800; background: transparent; }}
+    QLabel#caixaMiniCardValorPositivo {{ color: {t['sucesso']}; font-size: 11px; font-weight: 700; background: transparent; }}
+    QLabel#caixaMiniCardValorNegativo {{ color: {t['perigo_hover']}; font-size: 11px; font-weight: 700; background: transparent; }}
+    QLabel#caixaMiniCardValorNeutro {{ color: {t['texto_fraco']}; font-size: 11px; font-weight: 700; background: transparent; }}
+
+    QPushButton[variante="pilula-vazia"] {{
+      background: transparent;
+      color: {t['texto']};
+      border: 1px solid {t['borda']};
+      border-radius: 18px;
+      padding: 7px 18px;
+      font-size: 12px;
+      font-weight: 600;
+    }}
+    QPushButton[variante="pilula-vazia"]:hover {{ background: {t['superficie_2']}; }}
+    QPushButton[variante="pilula-vazia"]:disabled {{ color: {t['texto_fraquissimo']}; }}
 
     /* ---------- Modais ---------- */
 

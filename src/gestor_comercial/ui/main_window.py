@@ -55,6 +55,7 @@ from gestor_comercial.ui.views.relatorios_view import RelatoriosView
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.loja_pin_dialog import LojaPinDialog
+from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
 
 # Destinos administrativos que só existem atrás do hub "Loja" (ver
 # _abrir_loja): saíram da sidebar direta para não poluir a navegação do dia a
@@ -168,7 +169,7 @@ class MainWindow(QMainWindow):
         return shell
 
     def _montar_sidebar(self) -> QWidget:
-        sidebar = QFrame()
+        sidebar = PainelPontilhado()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(212)
         layout = QVBoxLayout(sidebar)
@@ -181,7 +182,7 @@ class MainWindow(QMainWindow):
         marca = QLabel("Ponto de Venda")
         marca.setObjectName("sidebarMarca")
         layout.addWidget(marca)
-        layout.addSpacing(20)
+        layout.addSpacing(24)
 
         # Cada destino recarrega a própria página antes de mostrá-la, para
         # nunca exibir dado velho de quando o app ainda estava no login.
@@ -203,6 +204,9 @@ class MainWindow(QMainWindow):
             "Relatórios": lambda: (self._relatorios_view, self._relatorios_view.atualizar),
         }
         self._botoes_nav: dict[str, QPushButton] = {}
+
+        layout.addWidget(self._montar_rotulo_grupo("OPERAÇÃO"))
+        layout.addSpacing(4)
         for rotulo in ("Mesas", "Caixa"):
             botao = QPushButton(rotulo)
             botao.setProperty("variante", "nav")
@@ -210,27 +214,28 @@ class MainWindow(QMainWindow):
             layout.addWidget(botao)
             self._botoes_nav[rotulo] = botao
 
-        layout.addStretch()
-        layout.addWidget(self._montar_pilula_tema())
-        layout.addSpacing(8)
-
         # "Loja" substitui os 4 acessos diretos (Cardápio, Impressoras,
         # Funcionários, Relatórios): um único item na sidebar, atrás de PIN
         # de supervisor (ver LojaPinDialog/_abrir_loja), pra não exigir
         # logout/login do operador de caixa cada vez que alguém precisa
         # mexer no cardápio ou conferir faturamento no meio do expediente.
-        # Fica no rodapé, junto de "Sair" — separado dos destinos do dia a
-        # dia (Mesas/Caixa) por ser administrativo, não operacional.
-        divisor = QFrame()
-        divisor.setObjectName("sidebarDivisor")
-        layout.addWidget(divisor)
-        layout.addSpacing(8)
-
+        layout.addSpacing(16)
+        layout.addWidget(self._montar_rotulo_grupo("LOJA"))
+        layout.addSpacing(4)
         botao_loja = QPushButton("Loja")
         botao_loja.setProperty("variante", "nav")
         botao_loja.clicked.connect(self._abrir_loja)
         layout.addWidget(botao_loja)
         self._botoes_nav["Loja"] = botao_loja
+
+        layout.addStretch()
+        layout.addWidget(self._montar_pilula_tema())
+        layout.addSpacing(8)
+
+        divisor = QFrame()
+        divisor.setObjectName("sidebarDivisor")
+        layout.addWidget(divisor)
+        layout.addSpacing(8)
 
         botao_sair = QPushButton("Sair")
         botao_sair.setProperty("variante", "nav")
@@ -238,6 +243,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(botao_sair)
 
         return sidebar
+
+    def _montar_rotulo_grupo(self, texto: str) -> QLabel:
+        rotulo = QLabel(texto)
+        rotulo.setObjectName("sidebarGrupoRotulo")
+        return rotulo
 
     def _montar_pilula_tema(self) -> QWidget:
         """Mesmo alternador claro/escuro da tela de login (ver

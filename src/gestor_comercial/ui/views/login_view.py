@@ -15,7 +15,6 @@ from PySide6.QtGui import (
     QLinearGradient,
     QPainter,
     QPainterPath,
-    QPaintEvent,
     QPen,
     QRadialGradient,
 )
@@ -39,6 +38,7 @@ from gestor_comercial.services.exceptions import NaoAutorizadoError
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.theme.tokens import TEMA_CLARO as _TEMA_CLARO
 from gestor_comercial.ui.theme.tokens import TEMA_ESCURO as _TEMA_ESCURO
+from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
 
 # Os dicts de paleta vivem em `ui/theme/tokens.py` (compartilhados com o
 # resto do shell via `ThemeController`). Esta tela ainda mantém seu próprio
@@ -55,35 +55,6 @@ def _interpolar_cor(a: QColor, b: QColor, fator: float) -> QColor:
         round(a.green() + (b.green() - a.green()) * fator),
         round(a.blue() + (b.blue() - a.blue()) * fator),
     )
-
-
-class _PainelMarca(QFrame):
-    """`QFrame` do painel esquerdo (identidade da marca) com uma textura de
-    grid de pontos brancos sutis desenhada por cima do fundo/gradiente do QSS
-    -- não dá pra fazer isso só em QSS porque não há `background-repeat` para
-    `background-image` no QSS do Qt."""
-
-    _ESPACAMENTO_PX = 28
-    _RAIO_PONTO_PX = 1.0
-    _OPACIDADE_PONTO = 18  # 0-255 (~7%), sutil o bastante pra não distrair.
-
-    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(255, 255, 255, self._OPACIDADE_PONTO)))
-
-        espaco = self._ESPACAMENTO_PX
-        raio = self._RAIO_PONTO_PX
-        y = espaco / 2
-        while y < self.height():
-            x = espaco / 2
-            while x < self.width():
-                painter.drawEllipse(QPointF(x, y), raio, raio)
-                x += espaco
-            y += espaco
-        painter.end()
 
 
 class _LogoIsometrico(QWidget):
@@ -402,7 +373,7 @@ class LoginView(QWidget):
         return barra
 
     def _montar_painel_marca(self) -> QWidget:
-        painel = _PainelMarca()
+        painel = PainelPontilhado()
         painel.setObjectName("loginPainelMarca")
         layout = QVBoxLayout(painel)
         layout.setContentsMargins(56, 56, 56, 40)
