@@ -1,6 +1,6 @@
-"""Caixa do dia: status, abertura/fechamento e movimentos da gaveta — porte
-visual da tela de caixa do front-end web (`GESTOR COMERCIAL/.../desktop/js/app.js`,
-funções `abrirCaixa`/`fecharCaixa`/`registrarMovimento`).
+"""Caixa do dia: status, abertura/fechamento e movimentos da gaveta — dashboard
+financeiro operacional do turno, no estilo "Dark Industrial / Concreto" do
+resto do shell (`ui/theme/qss_app.py`).
 
 Sangria/reforço/despesa e o próprio abrir/fechar exigem gerente logado —
 quem barra isso é `CaixaService` (via `AuthService.exigir_gerente`), então
@@ -11,15 +11,19 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLayout,
     QLineEdit,
+    QProgressBar,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -27,7 +31,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from gestor_comercial.domain.enums import StatusCaixa, TipoMovimento
+from gestor_comercial.domain.caixa import Caixa
+from gestor_comercial.domain.enums import FormaPagamento, TipoMovimento
 from gestor_comercial.domain.movimento_caixa import MovimentoCaixa
 from gestor_comercial.services.caixa_service import CaixaService, ResumoCaixa
 from gestor_comercial.services.exceptions import (
@@ -48,7 +53,26 @@ _ROTULOS_TIPO_MOVIMENTO = {
     TipoMovimento.DESPESA: "Despesa",
 }
 
+# Tipo do badge/variante QSS por tipo de movimento (ver qss_app.py, seletor
+# `QLabel[variante="badgeMovimento"][tipo=...]`).
+_TIPO_BADGE = {
+    TipoMovimento.SANGRIA: "sangria",
+    TipoMovimento.REFORCO: "reforco",
+    TipoMovimento.DESPESA: "despesa",
+}
+
+# Formas de recebimento mostradas no card "Recebimentos", nesta ordem.
+_FORMAS_RECEBIMENTO = [
+    (FormaPagamento.DINHEIRO, "Dinheiro"),
+    (FormaPagamento.DEBITO, "Débito"),
+    (FormaPagamento.CREDITO, "Crédito"),
+    (FormaPagamento.PIX, "Pix"),
+]
+
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
+
+_COR_TEXTO = QColor("#F1F3F5")
+_COR_PERIGO = QColor("#ef4444")
 
 
 class CaixaView(QWidget):
@@ -72,33 +96,15 @@ class CaixaView(QWidget):
         self._montar_layout()
         self.atualizar()
 
+    # ------------------------------------------------------------------
+    # Montagem do layout
+    # ------------------------------------------------------------------
+
     def _montar_layout(self) -> None:
         layout_externo = QVBoxLayout(self)
+        layout_externo.setSpacing(16)
 
-        cabecalho = QHBoxLayout()
-        self._label_titulo = QLabel("Caixa")
-        self._label_titulo.setStyleSheet("font-weight: 600; font-size: 18px;")
-        cabecalho.addWidget(self._label_titulo)
-        cabecalho.addStretch()
-
-        self._botao_abrir = QPushButton("Abrir caixa")
-        self._botao_abrir.setProperty("variante", "primario")
-        self._botao_abrir.clicked.connect(self._abrir_caixa)
-        cabecalho.addWidget(self._botao_abrir)
-
-        self._botao_imprimir = QPushButton("Imprimir fechamento")
-        self._botao_imprimir.setProperty("variante", "secundario")
-        self._botao_imprimir.setToolTip(
-            "Relatório de conferência da gaveta. Funciona com o caixa ainda aberto."
-        )
-        self._botao_imprimir.clicked.connect(self._imprimir_fechamento)
-        cabecalho.addWidget(self._botao_imprimir)
-
-        self._botao_fechar = QPushButton("Fechar caixa")
-        self._botao_fechar.setProperty("variante", "perigo")
-        self._botao_fechar.clicked.connect(self._fechar_caixa)
-        cabecalho.addWidget(self._botao_fechar)
-        layout_externo.addLayout(cabecalho)
+        layout_externo.addLayout(self._montar_cabecalho())
 
         self._label_erro = QLabel("")
         self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
@@ -107,20 +113,175 @@ class CaixaView(QWidget):
         self._aviso_impressao = AvisoDeImpressao()
         layout_externo.addWidget(self._aviso_impressao)
 
-        self._label_resumo = QLabel("")
-        layout_externo.addWidget(self._label_resumo)
+        corpo = QHBoxLayout()
+        corpo.setSpacing(16)
+        corpo.addLayout(self._montar_coluna_esquerda(), 0)
+        corpo.addLayout(self._montar_coluna_direita(), 1)
+        layout_externo.addLayout(corpo, 1)
 
-        barra_movimentos = QHBoxLayout()
-        barra_movimentos.addWidget(QLabel("Movimentos"))
-        barra_movimentos.addStretch()
+    def _montar_cabecalho(self) -> QHBoxLayout:
+        cabecalho = QHBoxLayout()
+
+        bloco_titulo = QVBoxLayout()
+        bloco_titulo.setSpacing(2)
+        self._label_eyebrow = QLabel("GERENTE")
+        self._label_eyebrow.setObjectName("caixaEyebrow")
+        bloco_titulo.addWidget(self._label_eyebrow)
+
+        self._label_titulo = QLabel("Caixa")
+        self._label_titulo.setObjectName("caixaTitulo")
+        bloco_titulo.addWidget(self._label_titulo)
+
+        self._label_subtitulo = QLabel("")
+        self._label_subtitulo.setObjectName("caixaSubtitulo")
+        bloco_titulo.addWidget(self._label_subtitulo)
+
+        cabecalho.addLayout(bloco_titulo)
+        cabecalho.addStretch()
+
+        self._botao_abrir = QPushButton("Abrir caixa")
+        self._botao_abrir.setProperty("variante", "primario")
+        self._botao_abrir.clicked.connect(self._abrir_caixa)
+        cabecalho.addWidget(self._botao_abrir, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._botao_imprimir = QPushButton("Imprimir fechamento")
+        self._botao_imprimir.setProperty("variante", "pilula-vazia")
+        self._botao_imprimir.setToolTip(
+            "Relatório de conferência da gaveta. Funciona com o caixa ainda aberto."
+        )
+        self._botao_imprimir.clicked.connect(self._imprimir_fechamento)
+        cabecalho.addWidget(self._botao_imprimir, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._botao_fechar = QPushButton("Fechar caixa")
+        self._botao_fechar.setProperty("variante", "pilula-perigo")
+        self._botao_fechar.clicked.connect(self._fechar_caixa)
+        cabecalho.addWidget(self._botao_fechar, alignment=Qt.AlignmentFlag.AlignVCenter)
+        return cabecalho
+
+    def _montar_coluna_esquerda(self) -> QVBoxLayout:
+        coluna = QVBoxLayout()
+        coluna.setSpacing(16)
+
+        coluna.addWidget(self._montar_card_saldo())
+        coluna.addWidget(self._montar_card_recebimentos())
+        coluna.addWidget(self._montar_card_ajustes())
+        coluna.addStretch()
+        return coluna
+
+    def _montar_card_saldo(self) -> QFrame:
+        card, layout = _criar_card()
+        card.setMinimumWidth(340)
+        card.setMaximumWidth(400)
+
+        layout.addWidget(_rotulo_card("SALDO ESPERADO NA GAVETA"))
+
+        self._label_saldo = QLabel("R$ 0,00")
+        self._label_saldo.setObjectName("caixaValorGrande")
+        layout.addWidget(self._label_saldo)
+
+        grid_mini = QHBoxLayout()
+        grid_mini.setSpacing(10)
+        self._mini_recebido, self._label_recebido = _criar_mini_stat("RECEBIDO")
+        self._mini_comandas, self._label_comandas = _criar_mini_stat("COMANDAS")
+        grid_mini.addWidget(self._mini_recebido)
+        grid_mini.addWidget(self._mini_comandas)
+        layout.addLayout(grid_mini)
+        return card
+
+    def _montar_card_recebimentos(self) -> QFrame:
+        card, layout = _criar_card()
+        layout.addWidget(_rotulo_card("RECEBIMENTOS"))
+
+        self._barras_forma: dict[FormaPagamento, tuple[QLabel, QProgressBar]] = {}
+        for forma, rotulo in _FORMAS_RECEBIMENTO:
+            linha = QHBoxLayout()
+            nome = QLabel(rotulo)
+            nome.setObjectName("caixaFormaNome")
+            valor = QLabel("R$ 0,00")
+            valor.setObjectName("caixaFormaValor")
+            linha.addWidget(nome)
+            linha.addStretch()
+            linha.addWidget(valor)
+            layout.addLayout(linha)
+
+            barra = QProgressBar()
+            barra.setObjectName("caixaBarraPagamento")
+            barra.setRange(0, 100)
+            barra.setValue(0)
+            barra.setTextVisible(False)
+            layout.addWidget(barra)
+
+            self._barras_forma[forma] = (valor, barra)
+        return card
+
+    def _montar_card_ajustes(self) -> QFrame:
+        card, layout = _criar_card()
+        layout.addWidget(_rotulo_card("AJUSTES DO TURNO"))
+
+        self._labels_ajuste: dict[str, QLabel] = {}
+        for chave, rotulo in (
+            ("abertura", "Abertura"),
+            ("reforcos", "Reforços"),
+            ("sangrias", "Sangrias"),
+            ("despesas", "Despesas"),
+            ("consumo_interno", "Consumo interno"),
+        ):
+            linha = QHBoxLayout()
+            nome = QLabel(rotulo)
+            nome.setObjectName("caixaAjusteRotulo")
+            valor = QLabel("R$ 0,00")
+            valor.setObjectName("caixaAjusteValor")
+            linha.addWidget(nome)
+            linha.addStretch()
+            linha.addWidget(valor)
+            layout.addLayout(linha)
+            self._labels_ajuste[chave] = valor
+        return card
+
+    def _montar_coluna_direita(self) -> QVBoxLayout:
+        coluna = QVBoxLayout()
+        coluna.setSpacing(16)
+        coluna.addWidget(self._montar_card_movimentos(), 1)
+
+        rodape = QHBoxLayout()
+        rodape.setSpacing(16)
+        rodape.addWidget(self._montar_card_cancelamentos(), 1)
+        rodape.addWidget(self._montar_card_fechamentos(), 1)
+        coluna.addLayout(rodape)
+        return coluna
+
+    def _montar_card_movimentos(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("caixaMovimentosCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        topo = QHBoxLayout()
+        bloco_titulo = QVBoxLayout()
+        bloco_titulo.setSpacing(2)
+        titulo = QLabel("Movimentos")
+        titulo.setObjectName("caixaMovimentosTitulo")
+        subtitulo = QLabel("Sangrias, reforços e despesas do turno atual.")
+        subtitulo.setObjectName("caixaMovimentosSubtitulo")
+        bloco_titulo.addWidget(titulo)
+        bloco_titulo.addWidget(subtitulo)
+        topo.addLayout(bloco_titulo)
+        topo.addStretch()
+
         self._botoes_movimento_por_tipo: dict[TipoMovimento, QPushButton] = {}
+        _VARIANTE_BOTAO_MOVIMENTO = {
+            TipoMovimento.SANGRIA: "enviar-pedido",
+            TipoMovimento.REFORCO: "pilula-vazia",
+            TipoMovimento.DESPESA: "pilula-vazia",
+        }
         for tipo in (TipoMovimento.SANGRIA, TipoMovimento.REFORCO, TipoMovimento.DESPESA):
             botao = QPushButton(f"+ {_ROTULOS_TIPO_MOVIMENTO[tipo]}")
-            botao.setProperty("variante", "secundario")
+            botao.setProperty("variante", _VARIANTE_BOTAO_MOVIMENTO[tipo])
             botao.clicked.connect(lambda _checked=False, t=tipo: self._abrir_modal_movimento(t))
             self._botoes_movimento_por_tipo[tipo] = botao
-            barra_movimentos.addWidget(botao)
-        layout_externo.addLayout(barra_movimentos)
+            topo.addWidget(botao)
+        layout.addLayout(topo)
 
         self._tabela = QTableWidget(0, len(_COLUNAS_MOVIMENTOS))
         self._tabela.setHorizontalHeaderLabels(_COLUNAS_MOVIMENTOS)
@@ -128,10 +289,30 @@ class CaixaView(QWidget):
         self._tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._tabela.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self._tabela.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        layout_externo.addWidget(self._tabela)
+        layout.addWidget(self._tabela)
+        return card
 
+    def _montar_card_cancelamentos(self) -> QFrame:
+        card, layout = _criar_card()
         self._secao_cancelamentos = SecaoCancelamentos()
-        layout_externo.addWidget(self._secao_cancelamentos)
+        layout.addWidget(self._secao_cancelamentos)
+        return card
+
+    def _montar_card_fechamentos(self) -> QFrame:
+        card, layout = _criar_card()
+        titulo = QLabel("Últimos fechamentos")
+        titulo.setStyleSheet("font-weight: 600; font-size: 15px;")
+        layout.addWidget(titulo)
+
+        self._layout_fechamentos = QVBoxLayout()
+        self._layout_fechamentos.setSpacing(8)
+        layout.addLayout(self._layout_fechamentos)
+        layout.addStretch()
+        return card
+
+    # ------------------------------------------------------------------
+    # Atualização de dados
+    # ------------------------------------------------------------------
 
     def atualizar(self) -> None:
         self._label_erro.setText("")
@@ -141,21 +322,27 @@ class CaixaView(QWidget):
         except RegraDeNegocioError:
             self._caixa_id = None
             self._label_titulo.setText("Caixa — fechado")
-            self._label_resumo.setText("Nenhum caixa aberto. Abra o caixa para começar o dia.")
+            self._label_subtitulo.setText("Nenhum caixa aberto. Abra o caixa para começar o dia.")
             self._tabela.setRowCount(0)
             self._definir_acoes_disponiveis(caixa_aberto=False)
+            self._atualizar_fechamentos()
             return
 
         self._caixa_id = caixa.id
         self._ultimo_caixa_id = caixa.id
         self._label_titulo.setText(f"Caixa {caixa.id} — aberto")
+        self._label_subtitulo.setText(
+            f"Aberto às {caixa.aberto_em:%H:%M}"
+            + (f" por {caixa.aberto_por.nome}" if caixa.aberto_por else "")
+        )
         self._definir_acoes_disponiveis(caixa_aberto=True)
         self._atualizar_resumo()
         self._atualizar_movimentos()
         self._atualizar_cancelamentos()
+        self._atualizar_fechamentos()
 
     def _definir_acoes_disponiveis(self, *, caixa_aberto: bool) -> None:
-        self._botao_abrir.setEnabled(not caixa_aberto)
+        self._botao_abrir.setVisible(not caixa_aberto)
         self._botao_fechar.setEnabled(caixa_aberto)
         # Reimprimir o relatório do caixa recém-fechado continua valendo, então
         # este botão segue o último caixa conhecido, não o que está aberto.
@@ -167,7 +354,46 @@ class CaixaView(QWidget):
         if self._caixa_id is None:
             return
         resumo = self._caixa_service.resumo(self._caixa_id)
-        self._label_resumo.setText(_formatar_resumo(resumo))
+        self._preencher_card_saldo(resumo)
+        self._preencher_card_recebimentos(resumo)
+        self._preencher_card_ajustes(resumo)
+
+    def _preencher_card_saldo(self, resumo: ResumoCaixa) -> None:
+        self._label_saldo.setText(_formatar_reais(resumo.saldo_esperado))
+        total_recebido = resumo.total_dinheiro + resumo.total_maquininha
+        self._label_recebido.setText(_formatar_reais(total_recebido))
+        self._label_comandas.setText(str(resumo.quantidade_comandas))
+
+    def _preencher_card_recebimentos(self, resumo: ResumoCaixa) -> None:
+        totais_forma = self._caixa_service.totais_por_forma(self._caixa_id)
+        valores: dict[FormaPagamento, Decimal] = {
+            FormaPagamento.DINHEIRO: resumo.total_dinheiro,
+            FormaPagamento.DEBITO: totais_forma.get(FormaPagamento.DEBITO, Decimal("0")),
+            FormaPagamento.CREDITO: totais_forma.get(FormaPagamento.CREDITO, Decimal("0")),
+            FormaPagamento.PIX: totais_forma.get(FormaPagamento.PIX, Decimal("0")),
+        }
+        maior = max(valores.values(), default=Decimal("0"))
+        for forma, _rotulo in _FORMAS_RECEBIMENTO:
+            valor = valores[forma]
+            label_valor, barra = self._barras_forma[forma]
+            label_valor.setText(_formatar_reais(valor))
+            percentual = int((valor / maior) * 100) if maior > 0 else 0
+            barra.setValue(percentual)
+
+    def _preencher_card_ajustes(self, resumo: ResumoCaixa) -> None:
+        self._definir_valor_ajuste("abertura", resumo.valor_abertura, negativo=False)
+        self._definir_valor_ajuste("reforcos", resumo.reforcos, negativo=False)
+        self._definir_valor_ajuste("sangrias", resumo.sangrias, negativo=True)
+        self._definir_valor_ajuste("despesas", resumo.despesas, negativo=True)
+        self._definir_valor_ajuste("consumo_interno", resumo.total_consumo_interno, negativo=True)
+
+    def _definir_valor_ajuste(self, chave: str, valor: Decimal, *, negativo: bool) -> None:
+        label = self._labels_ajuste[chave]
+        label.setObjectName("caixaAjusteValorNegativo" if negativo else "caixaAjusteValor")
+        prefixo = "-" if negativo and valor != 0 else ""
+        label.setText(f"{prefixo}{_formatar_reais(valor)}")
+        label.style().unpolish(label)
+        label.style().polish(label)
 
     def _atualizar_movimentos(self) -> None:
         if self._caixa_id is None:
@@ -184,13 +410,94 @@ class CaixaView(QWidget):
             self._caixa_service.resumo_cancelamentos(self._caixa_id)
         )
 
+    def _atualizar_fechamentos(self) -> None:
+        _limpar_layout(self._layout_fechamentos)
+        try:
+            historico = self._caixa_service.listar_historico()
+        except _ERROS_SERVICE:
+            historico = []
+
+        if not historico:
+            vazio = QLabel("Nenhum fechamento registrado ainda.")
+            vazio.setProperty("variante", "fraco")
+            self._layout_fechamentos.addWidget(vazio)
+            return
+
+        for caixa in historico[:3]:
+            self._layout_fechamentos.addWidget(self._criar_item_fechamento(caixa))
+
+    def _criar_item_fechamento(self, caixa: Caixa) -> QFrame:
+        item = QFrame()
+        item.setObjectName("caixaMiniCard")
+        layout = QHBoxLayout(item)
+        layout.setContentsMargins(12, 10, 12, 10)
+
+        bloco_esquerda = QVBoxLayout()
+        bloco_esquerda.setSpacing(2)
+        identificacao = QLabel(f"T{caixa.numero_sequencial_dia} · #{caixa.id}")
+        identificacao.setObjectName("caixaMiniCardTitulo")
+        operador = caixa.fechado_por.nome if caixa.fechado_por else "—"
+        data_hora = caixa.fechado_em.strftime("%d/%m") if caixa.fechado_em else "—"
+        metadados = QLabel(f"{data_hora} · {operador.upper()}")
+        metadados.setObjectName("caixaMiniCardSub")
+        bloco_esquerda.addWidget(identificacao)
+        bloco_esquerda.addWidget(metadados)
+        layout.addLayout(bloco_esquerda)
+        layout.addStretch()
+
+        bloco_direita = QVBoxLayout()
+        bloco_direita.setSpacing(2)
+        resumo = self._caixa_service.resumo(caixa.id)
+        total_faturado = resumo.total_dinheiro + resumo.total_maquininha + resumo.total_consumo_interno
+        valor = QLabel(_formatar_reais(total_faturado))
+        valor.setObjectName("caixaMiniCardTitulo")
+        valor.setAlignment(Qt.AlignmentFlag.AlignRight)
+        bloco_direita.addWidget(valor)
+
+        diferenca = self._diferenca_total(resumo)
+        status = QLabel(self._texto_status_diferenca(diferenca))
+        status.setObjectName(
+            "caixaMiniCardValorNeutro" if diferenca is None
+            else "caixaMiniCardValorPositivo" if diferenca >= 0
+            else "caixaMiniCardValorNegativo"
+        )
+        status.setAlignment(Qt.AlignmentFlag.AlignRight)
+        bloco_direita.addWidget(status)
+        layout.addLayout(bloco_direita)
+        return item
+
+    @staticmethod
+    def _diferenca_total(resumo: ResumoCaixa) -> Decimal | None:
+        if resumo.diferenca_dinheiro is None and resumo.diferenca_maquininha is None:
+            return None
+        return (resumo.diferenca_dinheiro or Decimal("0")) + (resumo.diferenca_maquininha or Decimal("0"))
+
+    @staticmethod
+    def _texto_status_diferenca(diferenca: Decimal | None) -> str:
+        if diferenca is None:
+            return "—"
+        if diferenca == 0:
+            return "sem diferença"
+        return _formatar_reais(diferenca)
+
     def _preencher_linha(self, linha: int, movimento: MovimentoCaixa) -> None:
         quando = movimento.registrado_em.strftime("%d/%m %H:%M")
-        tipo = _ROTULOS_TIPO_MOVIMENTO.get(movimento.tipo, movimento.tipo.value)
+        tipo_texto = _ROTULOS_TIPO_MOVIMENTO.get(movimento.tipo, movimento.tipo.value)
+
         self._tabela.setItem(linha, 0, QTableWidgetItem(quando))
-        self._tabela.setItem(linha, 1, QTableWidgetItem(tipo))
+        self._tabela.setCellWidget(linha, 1, _criar_badge_movimento(movimento.tipo, tipo_texto))
         self._tabela.setItem(linha, 2, QTableWidgetItem(movimento.descricao or ""))
-        self._tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(movimento.valor)))
+
+        sai_da_gaveta = movimento.tipo in (TipoMovimento.SANGRIA, TipoMovimento.DESPESA)
+        prefixo = "- " if sai_da_gaveta else ""
+        item_valor = QTableWidgetItem(f"{prefixo}{_formatar_reais(movimento.valor)}")
+        item_valor.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        item_valor.setForeground(_COR_PERIGO if sai_da_gaveta else _COR_TEXTO)
+        self._tabela.setItem(linha, 3, item_valor)
+
+    # ------------------------------------------------------------------
+    # Ações
+    # ------------------------------------------------------------------
 
     def _abrir_caixa(self) -> None:
         modal = _ValorDialog("Abrir caixa", "Valor de abertura", self)
@@ -373,28 +680,57 @@ class _FecharCaixaDialog(QDialog):
         return valor_contado_dinheiro, valor_contado_maquininha, observacao
 
 
-def _formatar_resumo(resumo: ResumoCaixa) -> str:
-    linhas = [
-        f"Abertura: {_formatar_reais(resumo.valor_abertura)}",
-        f"Dinheiro: {_formatar_reais(resumo.total_dinheiro)}",
-        f"Maquininha: {_formatar_reais(resumo.total_maquininha)}",
-        f"Consumo interno: {_formatar_reais(resumo.total_consumo_interno)}",
-        f"Reforços: {_formatar_reais(resumo.reforcos)}",
-        f"Sangrias: {_formatar_reais(resumo.sangrias)}",
-        f"Despesas: {_formatar_reais(resumo.despesas)}",
-        f"Saldo esperado na gaveta: {_formatar_reais(resumo.saldo_esperado)}",
-    ]
-    if resumo.valor_contado_dinheiro is not None:
-        linhas.append(f"Valor contado (Dinheiro): {_formatar_reais(resumo.valor_contado_dinheiro)}")
-    if resumo.diferenca_dinheiro is not None:
-        linhas.append(f"Diferença (Dinheiro): {_formatar_reais(resumo.diferenca_dinheiro)}")
-    if resumo.valor_contado_maquininha is not None:
-        linhas.append(
-            f"Valor contado (Maquininha): {_formatar_reais(resumo.valor_contado_maquininha)}"
-        )
-    if resumo.diferenca_maquininha is not None:
-        linhas.append(f"Diferença (Maquininha): {_formatar_reais(resumo.diferenca_maquininha)}")
-    return "\n".join(linhas)
+def _criar_card() -> tuple[QFrame, QVBoxLayout]:
+    card = QFrame()
+    card.setObjectName("caixaCard")
+    layout = QVBoxLayout(card)
+    layout.setContentsMargins(20, 18, 20, 18)
+    layout.setSpacing(10)
+    return card, layout
+
+
+def _rotulo_card(texto: str) -> QLabel:
+    rotulo = QLabel(texto)
+    rotulo.setObjectName("caixaCardRotulo")
+    return rotulo
+
+
+def _criar_mini_stat(rotulo_texto: str) -> tuple[QFrame, QLabel]:
+    mini = QFrame()
+    mini.setObjectName("caixaMiniStat")
+    layout = QVBoxLayout(mini)
+    layout.setContentsMargins(12, 10, 12, 10)
+    layout.setSpacing(2)
+
+    rotulo = QLabel(rotulo_texto)
+    rotulo.setObjectName("caixaMiniStatRotulo")
+    layout.addWidget(rotulo)
+
+    valor = QLabel("R$ 0,00")
+    valor.setObjectName("caixaMiniStatValor")
+    layout.addWidget(valor)
+    return mini, valor
+
+
+def _criar_badge_movimento(tipo: TipoMovimento, texto: str) -> QWidget:
+    container = QWidget()
+    layout = QHBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+
+    badge = QLabel(texto.upper())
+    badge.setProperty("variante", "badgeMovimento")
+    badge.setProperty("tipo", _TIPO_BADGE.get(tipo, ""))
+    layout.addWidget(badge)
+    layout.addStretch()
+    return container
+
+
+def _limpar_layout(layout: QLayout) -> None:
+    while layout.count():
+        item = layout.takeAt(0)
+        widget = item.widget()
+        if widget is not None:
+            widget.deleteLater()
 
 
 def _formatar_reais(valor: Decimal) -> str:

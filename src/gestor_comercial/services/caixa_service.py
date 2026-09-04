@@ -57,6 +57,7 @@ class ResumoCaixa:
     diferenca_dinheiro: Decimal | None
     valor_contado_maquininha: Decimal | None
     diferenca_maquininha: Decimal | None
+    quantidade_comandas: int
 
 
 @dataclass(frozen=True)
@@ -535,6 +536,15 @@ class CaixaService:
                 None
                 if valor_contado_maquininha is None
                 else dinheiro(valor_contado_maquininha - total_maquininha)
+            ),
+            # Comandas efetivamente fechadas (pagas) no turno — mesma métrica
+            # que o dashboard financeiro mostra como "COMANDAS" ao lado do
+            # saldo esperado. Comandas ainda abertas/em conferência não contam
+            # porque não representam venda concluída.
+            quantidade_comandas=sum(
+                1
+                for comanda in self.uow.comandas.listar_por_caixa(caixa_id)
+                if comanda.status is StatusComanda.FECHADA
             ),
         )
 

@@ -31,6 +31,11 @@ class SecaoCancelamentos(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # Sem objectName, este QWidget herda a regra global `QWidget { background:
+        # bg_marca }` do app inteiro e pinta um retângulo preto atrás do título e
+        # da mensagem quando embutido num card mais claro (ex.: CaixaView) — o
+        # objectName dá um seletor pra zerar esse fundo via QSS (ver qss_app.py).
+        self.setObjectName("secaoCancelamentos")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
