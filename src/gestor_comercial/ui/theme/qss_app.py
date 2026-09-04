@@ -321,12 +321,6 @@ def construir_qss_app(t: dict[str, str]) -> str:
       border: 1px solid {t['mesa_fechando_borda']};
       border-top: 3px solid {t['mesa_fechando_borda']};
     }}
-    /* Só reforça a borda superior — não pode sobrescrever `border` inteiro
-       (1px solid), senão apaga a cor de status (ocupada=azul, fechando=
-       âmbar) nas laterais e devolve uma mesa ocupada com o entorno errado. */
-    QFrame[variante="mesa"][alerta="true"] {{
-      border-top: 3px solid {t['aviso']};
-    }}
 
     /* ---------- Tela de Mesas: cabeçalho, filtros, container do grid ---------- */
 

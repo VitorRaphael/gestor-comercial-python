@@ -12,7 +12,6 @@ mesmos dados de `ComandaService.listar_mesas`, sem endpoint novo.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from decimal import Decimal
 
 from PySide6.QtCore import Qt, Signal
@@ -61,7 +60,6 @@ class _ResumoMesa:
     status: str
     valor: Decimal
     atendente: str | None
-    minutos_espera: int | None
 
 
 class _CartaoMesa(QFrame):
@@ -77,7 +75,6 @@ class _CartaoMesa(QFrame):
         self.setProperty("variante", "mesa")
         self.setProperty("ocupada", "true" if resumo.status != "livre" else "false")
         self.setProperty("fechando", "true" if resumo.status == "fechando" else "false")
-        self.setProperty("alerta", "true" if (resumo.minutos_espera or 0) >= 30 else "false")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumSize(96, 96)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -365,7 +362,7 @@ class MesasView(QWidget):
 
     def _montar_resumo(self, mesa: Mesa) -> _ResumoMesa:
         if mesa.status is not StatusMesa.OCUPADA:
-            return _ResumoMesa(mesa=mesa, status="livre", valor=Decimal("0"), atendente=None, minutos_espera=None)
+            return _ResumoMesa(mesa=mesa, status="livre", valor=Decimal("0"), atendente=None)
 
         comanda_aberta = next(
             (c for c in mesa.comandas if c.status in (StatusComanda.ABERTA, StatusComanda.EM_CONFERENCIA)),
@@ -374,21 +371,13 @@ class MesasView(QWidget):
         if comanda_aberta is None:
             # Mesa marcada ocupada sem comanda em aberto não deveria acontecer
             # em operação normal, mas não é motivo pra grade quebrar.
-            return _ResumoMesa(mesa=mesa, status="ocupada", valor=Decimal("0"), atendente=None, minutos_espera=None)
+            return _ResumoMesa(mesa=mesa, status="ocupada", valor=Decimal("0"), atendente=None)
 
         status = "fechando" if comanda_aberta.status is StatusComanda.EM_CONFERENCIA else "ocupada"
         valor = self._comanda_service.calcular_total_a_pagar(comanda_aberta.id)
         atendente = comanda_aberta.atendente.nome if comanda_aberta.atendente else comanda_aberta.usuario.nome
 
-        minutos_espera = None
-        # O relógio só corre a partir do primeiro item que a cozinha de fato
-        # viu — enquanto o operador ainda está lançando os itens (mesa
-        # grande, comanda em rascunho), isso não é atraso nenhum.
-        primeiro_envio = ComandaService.hora_primeiro_envio(comanda_aberta.itens)
-        if primeiro_envio is not None:
-            minutos_espera = int((datetime.now() - primeiro_envio).total_seconds() // 60)
-
-        return _ResumoMesa(mesa=mesa, status=status, valor=valor, atendente=atendente, minutos_espera=minutos_espera)
+        return _ResumoMesa(mesa=mesa, status=status, valor=valor, atendente=atendente)
 
     def _atualizar_legenda(self) -> None:
         ocupadas = sum(1 for r in self._resumos if r.status != "livre")
