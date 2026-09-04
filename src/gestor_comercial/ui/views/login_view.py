@@ -15,6 +15,7 @@ from PySide6.QtGui import (
     QLinearGradient,
     QPainter,
     QPainterPath,
+    QPaintEvent,
     QPen,
     QRadialGradient,
 )
@@ -54,6 +55,35 @@ def _interpolar_cor(a: QColor, b: QColor, fator: float) -> QColor:
         round(a.green() + (b.green() - a.green()) * fator),
         round(a.blue() + (b.blue() - a.blue()) * fator),
     )
+
+
+class _PainelMarca(QFrame):
+    """`QFrame` do painel esquerdo (identidade da marca) com uma textura de
+    grid de pontos brancos sutis desenhada por cima do fundo/gradiente do QSS
+    -- não dá pra fazer isso só em QSS porque não há `background-repeat` para
+    `background-image` no QSS do Qt."""
+
+    _ESPACAMENTO_PX = 28
+    _RAIO_PONTO_PX = 1.0
+    _OPACIDADE_PONTO = 18  # 0-255 (~7%), sutil o bastante pra não distrair.
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(255, 255, 255, self._OPACIDADE_PONTO)))
+
+        espaco = self._ESPACAMENTO_PX
+        raio = self._RAIO_PONTO_PX
+        y = espaco / 2
+        while y < self.height():
+            x = espaco / 2
+            while x < self.width():
+                painter.drawEllipse(QPointF(x, y), raio, raio)
+                x += espaco
+            y += espaco
+        painter.end()
 
 
 class _LogoIsometrico(QWidget):
@@ -157,13 +187,19 @@ def _construir_qss(t: dict[str, str]) -> str:
     fundo próprio. */
     QWidget#loginRoot QLabel {{ background: transparent; }}
 
+    /* Mesmo motivo do reset acima: sem isso a barra que envolve a pílula de
+    tema (um `QWidget` puro, sem cartão próprio) herda o fundo genérico de
+    `QWidget` do `base.qss` e aparece como um retângulo preto sólido por
+    cima do fundo fosco do painel do terminal. */
+    QWidget#loginBarraTema {{ background: transparent; }}
+
     /* Canto superior-esquerdo com leve mancha azulada + linha vertical
     separando os dois painéis (fiel à referência: lado direito um tom mais
     claro que o esquerdo). */
     QFrame#loginPainelMarca {{
         background: qradialgradient(cx:0.05, cy:0.05, radius:1.7, fx:0.05, fy:0.05,
             stop:0 {t['canto_azul']}, stop:0.4 {t['bg_marca']}, stop:1 {t['bg_marca']});
-        border-right: 1px solid {t['borda']};
+        border-right: 1px solid {t['divisor_vertical']};
     }}
     QLabel#loginMarcaSelo {{ color: {t['texto_fraquissimo']}; font-size: 11px; letter-spacing: 2px; }}
     QLabel#loginTitulo {{ color: {t['texto']}; font-size: 30px; font-weight: 700; }}
@@ -311,23 +347,22 @@ class LoginView(QWidget):
     # ------------------------------------------------------------------
 
     def _montar_layout(self) -> None:
-        layout_raiz = QVBoxLayout(self)
+        # Só o `corpo` (as duas colunas) ocupa a raiz -- assim a borda direita
+        # do painel da marca (linha vertical divisória) nasce em y=0 e desce
+        # contínua até a base, sem um retângulo/barra de largura total por
+        # cima interrompendo a divisão no topo. A pílula de tema entra
+        # dentro do próprio painel do terminal (ver `_montar_painel_terminal`).
+        layout_raiz = QHBoxLayout(self)
         layout_raiz.setContentsMargins(0, 0, 0, 0)
         layout_raiz.setSpacing(0)
-
-        layout_raiz.addWidget(self._montar_barra_tema())
-
-        corpo = QHBoxLayout()
-        corpo.setContentsMargins(0, 0, 0, 0)
-        corpo.setSpacing(0)
-        corpo.addWidget(self._montar_painel_marca(), 6)
-        corpo.addWidget(self._montar_painel_terminal(), 5)
-        layout_raiz.addLayout(corpo, 1)
+        layout_raiz.addWidget(self._montar_painel_marca(), 6)
+        layout_raiz.addWidget(self._montar_painel_terminal(), 5)
 
     def _montar_barra_tema(self) -> QWidget:
         barra = QWidget()
+        barra.setObjectName("loginBarraTema")
         layout = QHBoxLayout(barra)
-        layout.setContentsMargins(24, 20, 24, 0)
+        layout.setContentsMargins(0, 20, 56, 0)
         layout.addStretch()
 
         pilula = QFrame()
@@ -367,7 +402,7 @@ class LoginView(QWidget):
         return barra
 
     def _montar_painel_marca(self) -> QWidget:
-        painel = QFrame()
+        painel = _PainelMarca()
         painel.setObjectName("loginPainelMarca")
         layout = QVBoxLayout(painel)
         layout.setContentsMargins(56, 56, 56, 40)
@@ -416,6 +451,8 @@ class LoginView(QWidget):
         painel.setObjectName("loginPainelTerminal")
         layout_externo = QVBoxLayout(painel)
         layout_externo.setContentsMargins(0, 0, 56, 0)
+        layout_externo.setSpacing(0)
+        layout_externo.addWidget(self._montar_barra_tema())
         layout_externo.addStretch()
 
         self._cartao = QFrame()

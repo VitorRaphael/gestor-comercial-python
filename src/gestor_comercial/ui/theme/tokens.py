@@ -11,8 +11,9 @@ templates de `qss_app.py` / `login_view.py` a cada troca de tema.
 """
 
 TEMA_ESCURO: dict[str, str] = {
-    "bg_marca": "#0F0E0D",
-    "bg_terminal": "#0F0E0D",
+    "bg_marca": "#000000",
+    "bg_terminal": "#101010",
+    "divisor_vertical": "#202020",
     "canto_azul": "#2f5bd6",
     "superficie": "#161514",
     "superficie_2": "#1C1B19",
@@ -45,6 +46,7 @@ TEMA_ESCURO: dict[str, str] = {
 TEMA_CLARO: dict[str, str] = {
     "bg_marca": "#F4F2EB",
     "bg_terminal": "#F4F2EB",
+    "divisor_vertical": "#d8deec",
     "canto_azul": "#0055FF",
     "superficie": "#FFFFFF",
     "superficie_2": "#f4f6fb",
