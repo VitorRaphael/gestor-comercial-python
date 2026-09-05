@@ -1,7 +1,8 @@
-"""Dashboard Consolidado Mensal: cards de KPI + tabelas do mês selecionado.
+"""Dashboard Consolidado Mensal: KPIs, composição por forma de pagamento (com
+barra de proporção) e mix de vendas do mês (ranking com barra de destaque).
 
-Só QLabel e QTableWidget de propósito — a máquina do food truck é um Celeron
-com 4GB, sem margem para biblioteca de gráfico. Carrega sob demanda: o
+Só QLabel/QProgressBar/QFrame de propósito — a máquina do food truck é um
+Celeron com 4GB, sem margem para biblioteca de gráfico. Carrega sob demanda: o
 construtor não consulta nada, só `atualizar()` (chamada pela navegação, ao
 entrar na aba) busca `CaixaService.resumo_mensal`.
 """
@@ -11,15 +12,14 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
-    QTableWidget,
-    QTableWidgetItem,
+    QProgressBar,
     QVBoxLayout,
     QWidget,
 )
@@ -31,12 +31,13 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.ui.widgets.kpi_card import CardKpi
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
 _ROTULO_FORMA = {
-    "CREDITO": "Cartão de crédito",
-    "DEBITO": "Cartão de débito",
+    "CREDITO": "Crédito",
+    "DEBITO": "Débito",
     "DINHEIRO": "Dinheiro",
     "PIX": "PIX",
     "CONSUMO_INTERNO": "Consumo interno",
@@ -47,8 +48,6 @@ _MESES = [
     "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ]
 
-_COLUNAS_RANKING = ["Produto", "Qtd vendida", "Faturamento"]
-
 
 class DashboardMensalView(QWidget):
     """Painel gerencial acumulado do mês civil, com seletor de meses anteriores."""
@@ -58,66 +57,107 @@ class DashboardMensalView(QWidget):
         self._caixas = caixa_service
         self._montar_layout()
 
+    # ------------------------------------------------------------------
+    # Montagem do layout
+    # ------------------------------------------------------------------
+
     def _montar_layout(self) -> None:
         layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        layout_externo.setSpacing(16)
 
-        cabecalho = QHBoxLayout()
-        titulo = QLabel("Dashboard Mensal")
-        titulo.setStyleSheet("font-weight: 600; font-size: 18px;")
-        cabecalho.addWidget(titulo)
-        cabecalho.addStretch()
-
-        cabecalho.addWidget(QLabel("Mês"))
-        self._seletor_mes = QComboBox()
-        self._popular_seletor_mes()
-        self._seletor_mes.currentIndexChanged.connect(self._carregar)
-        cabecalho.addWidget(self._seletor_mes)
-        layout_externo.addLayout(cabecalho)
+        layout_externo.addLayout(self._montar_filtro_mes())
 
         self._label_erro = QLabel("")
         self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
         layout_externo.addWidget(self._label_erro)
 
-        self._grade_cards = QGridLayout()
-        self._grade_cards.setSpacing(12)
-        layout_externo.addLayout(self._grade_cards)
-        self._cards: dict[str, _CardKpi] = {}
+        grade_cards = QGridLayout()
+        grade_cards.setSpacing(14)
+        layout_externo.addLayout(grade_cards)
+        self._cards: dict[str, CardKpi] = {}
         for coluna, chave_titulo in enumerate(
             ["faturamento", "turnos", "ticket_medio", "cancelamentos"]
         ):
-            card = _CardKpi(_TITULOS_CARD[chave_titulo])
+            card = CardKpi(_TITULOS_CARD[chave_titulo])
             self._cards[chave_titulo] = card
-            self._grade_cards.addWidget(card, 0, coluna)
+            grade_cards.addWidget(card, 0, coluna)
 
-        layout_tabelas = QHBoxLayout()
+        painel_graficos = QHBoxLayout()
+        painel_graficos.setSpacing(16)
+        painel_graficos.addWidget(self._montar_painel_formas_pagamento(), 35)
+        painel_graficos.addWidget(self._montar_painel_ranking(), 65)
+        layout_externo.addLayout(painel_graficos, 1)
 
-        coluna_formas = QVBoxLayout()
-        rotulo_formas = QLabel("Composição por forma de pagamento")
-        rotulo_formas.setStyleSheet("font-weight: 600; font-size: 13px;")
-        coluna_formas.addWidget(rotulo_formas)
-        self._tabela_formas = QTableWidget(0, 3)
-        self._tabela_formas.setHorizontalHeaderLabels(["Forma", "Total", "%"])
-        self._tabela_formas.verticalHeader().setVisible(False)
-        self._tabela_formas.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._tabela_formas.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        self._tabela_formas.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        coluna_formas.addWidget(self._tabela_formas)
-        layout_tabelas.addLayout(coluna_formas, 1)
+    def _montar_filtro_mes(self) -> QHBoxLayout:
+        linha = QHBoxLayout()
+        linha.addStretch()
 
-        coluna_ranking = QVBoxLayout()
-        rotulo_ranking = QLabel("Mix de vendas do mês")
-        rotulo_ranking.setStyleSheet("font-weight: 600; font-size: 13px;")
-        coluna_ranking.addWidget(rotulo_ranking)
-        self._tabela_ranking = QTableWidget(0, len(_COLUNAS_RANKING))
-        self._tabela_ranking.setHorizontalHeaderLabels(_COLUNAS_RANKING)
-        self._tabela_ranking.verticalHeader().setVisible(False)
-        self._tabela_ranking.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._tabela_ranking.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        self._tabela_ranking.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        coluna_ranking.addWidget(self._tabela_ranking)
-        layout_tabelas.addLayout(coluna_ranking, 2)
+        frame_mes = QFrame()
+        frame_mes.setObjectName("relatoriosFiltroMes")
+        layout_mes = QHBoxLayout(frame_mes)
+        layout_mes.setContentsMargins(12, 4, 8, 4)
+        layout_mes.setSpacing(4)
+        icone = QLabel("📅")
+        icone.setObjectName("relatoriosFiltroMesIcone")
+        layout_mes.addWidget(icone)
+        self._seletor_mes = QComboBox()
+        self._seletor_mes.setObjectName("relatoriosComboMes")
+        self._popular_seletor_mes()
+        self._seletor_mes.currentIndexChanged.connect(self._carregar)
+        layout_mes.addWidget(self._seletor_mes)
+        linha.addWidget(frame_mes)
+        return linha
 
-        layout_externo.addLayout(layout_tabelas)
+    def _montar_painel_formas_pagamento(self) -> QFrame:
+        painel = QFrame()
+        painel.setObjectName("relatoriosPainel")
+        layout = QVBoxLayout(painel)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(14)
+
+        titulo = QLabel("COMPOSIÇÃO POR FORMA DE PAGAMENTO")
+        titulo.setObjectName("relatoriosPainelTitulo")
+        layout.addWidget(titulo)
+
+        self._layout_formas = QVBoxLayout()
+        self._layout_formas.setSpacing(12)
+        layout.addLayout(self._layout_formas)
+        layout.addStretch()
+
+        rodape = QHBoxLayout()
+        rotulo_total = QLabel("TOTAL")
+        rotulo_total.setObjectName("relatoriosRodapeRotulo")
+        rodape.addWidget(rotulo_total)
+        rodape.addStretch()
+        self._label_total_formas = QLabel("R$ 0,00")
+        self._label_total_formas.setObjectName("relatoriosRodapeValor")
+        rodape.addWidget(self._label_total_formas)
+        layout.addLayout(rodape)
+        return painel
+
+    def _montar_painel_ranking(self) -> QFrame:
+        painel = QFrame()
+        painel.setObjectName("relatoriosPainel")
+        layout = QVBoxLayout(painel)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(14)
+
+        cabecalho = QHBoxLayout()
+        titulo = QLabel("MIX DE VENDAS DO MÊS")
+        titulo.setObjectName("relatoriosPainelTitulo")
+        cabecalho.addWidget(titulo)
+        cabecalho.addStretch()
+        self._label_indicador_ranking = QLabel("")
+        self._label_indicador_ranking.setObjectName("relatoriosPainelIndicador")
+        cabecalho.addWidget(self._label_indicador_ranking)
+        layout.addLayout(cabecalho)
+
+        self._layout_ranking = QVBoxLayout()
+        self._layout_ranking.setSpacing(10)
+        layout.addLayout(self._layout_ranking)
+        layout.addStretch()
+        return painel
 
     def _popular_seletor_mes(self) -> None:
         # Mês vigente sempre entra primeiro, mesmo sem nenhum fechamento ainda —
@@ -135,11 +175,21 @@ class DashboardMensalView(QWidget):
             self._seletor_mes.addItem(f"{_MESES[mes - 1]}/{ano}", (ano, mes))
         self._seletor_mes.blockSignals(False)
 
+    # ------------------------------------------------------------------
+    # Carregamento / preenchimento
+    # ------------------------------------------------------------------
+
     def atualizar(self) -> None:
         """Chamada só quando a aba é aberta — nunca no construtor (carregamento
         estritamente sob demanda). Sempre busca de novo: é assim que o painel
         reflete um fechamento de caixa feito desde a última visita à aba."""
         self._carregar()
+
+    def periodo_atual(self) -> str:
+        return self._seletor_mes.currentText()
+
+    def conectar_mudanca_periodo(self, callback) -> None:
+        self._seletor_mes.currentIndexChanged.connect(callback)
 
     def _carregar(self) -> None:
         self._label_erro.setText("")
@@ -156,25 +206,127 @@ class DashboardMensalView(QWidget):
 
     def _preencher(self, resumo: ResumoMensal) -> None:
         self._cards["faturamento"].definir_valor(_formatar_reais(resumo.faturamento_bruto))
+        self._cards["faturamento"].definir_sub_rotulo("Mês corrente")
         self._cards["turnos"].definir_valor(str(resumo.turnos_fechados))
         self._cards["ticket_medio"].definir_valor(_formatar_reais(resumo.ticket_medio))
-        self._cards["cancelamentos"].definir_valor(
-            f"{resumo.cancelamentos_quantidade} un · {_formatar_reais(resumo.cancelamentos_valor)}"
-        )
+        self._cards["ticket_medio"].definir_sub_rotulo(f"{_contar_comandas(resumo)} comandas")
+        self._cards["cancelamentos"].definir_valor(f"{resumo.cancelamentos_quantidade} un")
+        self._cards["cancelamentos"].definir_sub_rotulo(_formatar_reais(resumo.cancelamentos_valor))
 
-        self._tabela_formas.setRowCount(len(resumo.formas_pagamento))
-        for linha, item in enumerate(resumo.formas_pagamento):
-            self._tabela_formas.setItem(
-                linha, 0, QTableWidgetItem(_ROTULO_FORMA.get(item.forma.value, item.forma.value))
+        self._preencher_formas_pagamento(resumo)
+        self._preencher_ranking(resumo)
+
+    def _preencher_formas_pagamento(self, resumo: ResumoMensal) -> None:
+        _limpar_layout(self._layout_formas)
+        for item in resumo.formas_pagamento:
+            self._layout_formas.addLayout(
+                _criar_linha_forma(
+                    _ROTULO_FORMA.get(item.forma.value, item.forma.value),
+                    item.valor,
+                    item.percentual,
+                )
             )
-            self._tabela_formas.setItem(linha, 1, QTableWidgetItem(_formatar_reais(item.valor)))
-            self._tabela_formas.setItem(linha, 2, QTableWidgetItem(f"{item.percentual:.1f}%"))
+        self._label_total_formas.setText(_formatar_reais(resumo.faturamento_bruto))
 
-        self._tabela_ranking.setRowCount(len(resumo.ranking_produtos))
-        for linha, item in enumerate(resumo.ranking_produtos):
-            self._tabela_ranking.setItem(linha, 0, QTableWidgetItem(item.produto_nome))
-            self._tabela_ranking.setItem(linha, 1, QTableWidgetItem(f"{item.quantidade} un"))
-            self._tabela_ranking.setItem(linha, 2, QTableWidgetItem(_formatar_reais(item.valor_total)))
+    def _preencher_ranking(self, resumo: ResumoMensal) -> None:
+        _limpar_layout(self._layout_ranking)
+        maior_valor = max((item.valor_total for item in resumo.ranking_produtos), default=Decimal(0))
+        if resumo.ranking_produtos:
+            lider = resumo.ranking_produtos[0]
+            self._label_indicador_ranking.setText(f"↗ {_formatar_reais(lider.valor_total)}")
+        else:
+            self._label_indicador_ranking.setText("")
+
+        for indice, item in enumerate(resumo.ranking_produtos, start=1):
+            proporcao = int((item.valor_total / maior_valor) * 100) if maior_valor else 0
+            self._layout_ranking.addLayout(
+                _criar_linha_ranking(indice, item.produto_nome, item.quantidade, item.valor_total, proporcao)
+            )
+
+
+def _contar_comandas(resumo: ResumoMensal) -> int:
+    # `ResumoMensal` não expõe contagem de comandas separadamente; aproxima
+    # pelo total de faturamento / ticket médio (mesma conta usada pra chegar
+    # no ticket médio na origem), evitando nova consulta ao banco.
+    if resumo.ticket_medio == 0:
+        return 0
+    return int(resumo.faturamento_bruto / resumo.ticket_medio)
+
+
+def _criar_linha_forma(nome: str, valor: Decimal, percentual: Decimal) -> QVBoxLayout:
+    bloco = QVBoxLayout()
+    bloco.setSpacing(4)
+
+    topo = QHBoxLayout()
+    label_nome = QLabel(nome)
+    label_nome.setObjectName("relatoriosFormaNome")
+    topo.addWidget(label_nome)
+    topo.addStretch()
+    label_valor = QLabel(_formatar_reais(valor))
+    label_valor.setObjectName("relatoriosFormaValor")
+    topo.addWidget(label_valor)
+    bloco.addLayout(topo)
+
+    barra = QProgressBar()
+    barra.setObjectName("relatoriosBarraForma")
+    barra.setRange(0, 100)
+    barra.setValue(min(100, max(0, int(percentual))))
+    barra.setTextVisible(False)
+    bloco.addWidget(barra)
+
+    label_percentual = QLabel(f"{percentual:.1f}%")
+    label_percentual.setObjectName("relatoriosFormaPercentual")
+    bloco.addWidget(label_percentual)
+    return bloco
+
+
+def _criar_linha_ranking(
+    indice: int, produto_nome: str, quantidade: int, valor_total: Decimal, proporcao: int
+) -> QVBoxLayout:
+    bloco = QVBoxLayout()
+    bloco.setSpacing(4)
+
+    topo = QHBoxLayout()
+    topo.setSpacing(10)
+    label_indice = QLabel(f"{indice:02d}")
+    label_indice.setObjectName("relatoriosRankIndice")
+    label_indice.setFixedWidth(24)
+    topo.addWidget(label_indice)
+
+    label_nome = QLabel(produto_nome)
+    label_nome.setObjectName("relatoriosRankNome")
+    topo.addWidget(label_nome, 1)
+
+    label_qtd = QLabel(f"{quantidade} un")
+    label_qtd.setObjectName("relatoriosRankQtd")
+    topo.addWidget(label_qtd)
+
+    label_valor = QLabel(_formatar_reais(valor_total))
+    label_valor.setObjectName("relatoriosRankValor")
+    label_valor.setFixedWidth(90)
+    label_valor.setAlignment(label_valor.alignment() | _ALINHAR_DIREITA)
+    topo.addWidget(label_valor)
+    bloco.addLayout(topo)
+
+    barra = QProgressBar()
+    barra.setObjectName("relatoriosBarraRanking")
+    barra.setRange(0, 100)
+    barra.setValue(min(100, max(0, proporcao)))
+    barra.setTextVisible(False)
+    bloco.addWidget(barra)
+    return bloco
+
+
+def _limpar_layout(layout: QVBoxLayout) -> None:
+    while layout.count():
+        item = layout.takeAt(0)
+        sub_layout = item.layout()
+        widget = item.widget()
+        if widget is not None:
+            widget.deleteLater()
+        elif sub_layout is not None:
+            _limpar_layout(sub_layout)
+            sub_layout.deleteLater()
 
 
 _TITULOS_CARD = {
@@ -184,24 +336,7 @@ _TITULOS_CARD = {
     "cancelamentos": "Cancelamentos",
 }
 
-
-class _CardKpi(QFrame):
-    """Card informativo leve: um rótulo e um valor grande, sem gráfico nenhum."""
-
-    def __init__(self, titulo: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setProperty("variante", "cartao")
-        self.setStyleSheet("QFrame { padding: 8px; }")
-        layout = QVBoxLayout(self)
-        rotulo = QLabel(titulo)
-        rotulo.setProperty("variante", "fraco")
-        layout.addWidget(rotulo)
-        self._label_valor = QLabel("—")
-        self._label_valor.setStyleSheet("font-weight: 700; font-size: 20px;")
-        layout.addWidget(self._label_valor)
-
-    def definir_valor(self, texto: str) -> None:
-        self._label_valor.setText(texto)
+_ALINHAR_DIREITA = Qt.AlignmentFlag.AlignRight
 
 
 def _formatar_reais(valor: Decimal) -> str:

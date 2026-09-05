@@ -28,6 +28,10 @@ TEMA_ESCURO: dict[str, str] = {
     "perigo_hover": "#ef4444",
     "rosa": "#ec4899",
     "aviso": "#eab308",
+    # Ciano de métricas de produto (Dashboard Mensal: barra de ranking do mix
+    # de vendas) — deliberadamente diferente do ciano de "ação neutra"
+    # (#0891b2) usado em botões, pra não confundir dado com controle.
+    "ciano_metrica": "#22D3EE",
     # Cards de mesa (livre/ocupada/fechando): mesma superfície elevada pras
     # três, só a barra/borda superior muda de cor por status — não é mais
     # fundo tingido por estado (era roxo pra ocupada antes do redesign
@@ -64,6 +68,7 @@ TEMA_CLARO: dict[str, str] = {
     "perigo_hover": "#ef4444",
     "rosa": "#db2777",
     "aviso": "#b45309",
+    "ciano_metrica": "#0e7490",
     "mesa_bg": "#FFFFFF",
     "mesa_ocupada_bg": "#FFFFFF",
     "mesa_ocupada_borda": "#0284c7",
@@ -100,8 +105,10 @@ AZUL = "#3b82f6"
 
 SUCESSO = TEMA_ESCURO["sucesso"]
 PERIGO = TEMA_ESCURO["perigo"]
+PERIGO_HOVER = TEMA_ESCURO["perigo_hover"]
 AVISO = TEMA_ESCURO["aviso"]
 INFO = AZUL
+CIANO_METRICA = TEMA_ESCURO["ciano_metrica"]
 
 RAIO_SM = 8
 RAIO = 14

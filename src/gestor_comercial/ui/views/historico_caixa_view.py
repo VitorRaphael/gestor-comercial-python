@@ -9,7 +9,10 @@ como fechamento do dia em que foi aberto — por isso a consulta usa
 de hoje" na hora de fechar o caixa).
 
 Só lê o que `CaixaService`/`AuthService` já expõem — nenhuma regra de negócio
-mora aqui, igual às outras views (§ arquitetura, camadas).
+mora aqui, igual às outras views (§ arquitetura, camadas). As ações "Ver
+cancelamentos"/"Reimprimir fechamento" são acionadas pela barra de ações
+compartilhada em `RelatoriosView` (ver `ver_cancelamentos`/`reimprimir`
+abaixo); esta view só sabe operar sobre o fechamento selecionado na tabela.
 """
 
 from __future__ import annotations
@@ -18,10 +21,13 @@ from datetime import date
 from decimal import Decimal
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -34,7 +40,7 @@ from PySide6.QtWidgets import (
 
 from gestor_comercial.domain.caixa import Caixa
 from gestor_comercial.services.auth_service import AuthService
-from gestor_comercial.services.caixa_service import CaixaService, ResumoCancelamentos
+from gestor_comercial.services.caixa_service import CaixaService, ResumoCaixa, ResumoCancelamentos
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
     NaoAutorizadoError,
@@ -42,21 +48,16 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 from gestor_comercial.services.impressao_service import ImpressaoService
+from gestor_comercial.ui.theme.tokens import PERIGO_HOVER, SUCESSO
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.comprovante_dialog import (
     ComprovanteFechamentoDialog,
     montar_texto_comprovante,
 )
+from gestor_comercial.ui.widgets.kpi_card import CardKpi
 from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
 
-_COLUNAS = [
-    "Data (Dia/Mês)",
-    "Turno/Seq",
-    "Operador",
-    "Faturamento Total (R$)",
-    "Diferença/Quebra (R$)",
-    "Ações",
-]
+_COLUNAS = ["DATA", "TURNO / SEQ", "OPERADOR", "FATURAMENTO", "DIFERENÇA", "AÇÕES"]
 _COLUNA_ACOES = 5
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
@@ -66,13 +67,13 @@ _MESES = [
     "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ]
 
-# Sentinela do item "Todos" do combo de operador — combina com o `userData`
-# de um QComboBox que também guarda `int` de verdade para cada funcionário.
+# Sentinela do item "Todos" do filtro de operador — combina com o `userData`
+# de cada pílula, que também guarda `int` de verdade para cada funcionário.
 _TODOS_OS_OPERADORES = None
 
 
 class HistoricoCaixaView(QWidget):
-    """Fechamentos do mês selecionado: comprovante digital e reimpressão."""
+    """Fechamentos do mês selecionado: KPIs, tabela de turnos e comprovante."""
 
     def __init__(
         self,
@@ -86,29 +87,18 @@ class HistoricoCaixaView(QWidget):
         self._auth = auth_service
         self._impressao = impressao_service
         self._fechamentos: list[Caixa] = []
+        self._resumos: dict[int, ResumoCaixa] = {}
+        self._operador_selecionado: int | None = _TODOS_OS_OPERADORES
+        self._nome_operador_selecionado = "Todos"
 
         self._montar_layout()
 
     def _montar_layout(self) -> None:
         layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+        layout_externo.setSpacing(16)
 
-        cabecalho = QHBoxLayout()
-        titulo = QLabel("Histórico Diário")
-        titulo.setStyleSheet("font-weight: 600; font-size: 18px;")
-        cabecalho.addWidget(titulo)
-        cabecalho.addStretch()
-
-        cabecalho.addWidget(QLabel("Mês"))
-        self._seletor_mes = QComboBox()
-        self._popular_seletor_mes()
-        self._seletor_mes.currentIndexChanged.connect(self._carregar)
-        cabecalho.addWidget(self._seletor_mes)
-
-        cabecalho.addWidget(QLabel("Operador"))
-        self._combo_operador = QComboBox()
-        self._combo_operador.currentIndexChanged.connect(self._carregar)
-        cabecalho.addWidget(self._combo_operador)
-        layout_externo.addLayout(cabecalho)
+        layout_externo.addLayout(self._montar_filtros())
 
         self._label_erro = QLabel("")
         self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
@@ -116,6 +106,20 @@ class HistoricoCaixaView(QWidget):
 
         self._aviso_impressao = AvisoDeImpressao()
         layout_externo.addWidget(self._aviso_impressao)
+
+        grade_cards = QGridLayout()
+        grade_cards.setSpacing(14)
+        layout_externo.addLayout(grade_cards)
+        self._card_faturamento = CardKpi("Faturamento no período")
+        self._card_ticket = CardKpi("Ticket médio por turno")
+        self._card_diferenca = CardKpi("Diferença acumulada")
+        self._card_diferenca.definir_sub_rotulo("Conferir caixa")
+        self._card_operador = CardKpi("Operador")
+        self._card_operador.definir_sub_rotulo("Filtro ativo")
+        for coluna, card in enumerate(
+            (self._card_faturamento, self._card_ticket, self._card_diferenca, self._card_operador)
+        ):
+            grade_cards.addWidget(card, 0, coluna)
 
         self._tabela = QTableWidget(0, len(_COLUNAS))
         self._tabela.setHorizontalHeaderLabels(_COLUNAS)
@@ -125,20 +129,50 @@ class HistoricoCaixaView(QWidget):
         self._tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self._tabela.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self._tabela.cellDoubleClicked.connect(self._ao_dar_duplo_clique)
-        layout_externo.addWidget(self._tabela)
+        layout_externo.addWidget(self._tabela, 1)
 
-        rodape = QHBoxLayout()
-        rodape.addStretch()
-        self._botao_cancelamentos = QPushButton("Ver cancelamentos")
-        self._botao_cancelamentos.setProperty("variante", "secundario")
-        self._botao_cancelamentos.clicked.connect(self._ver_cancelamentos)
-        rodape.addWidget(self._botao_cancelamentos)
+        self._rodape_tabela = self._montar_rodape_tabela()
+        layout_externo.addWidget(self._rodape_tabela)
 
-        self._botao_reimprimir = QPushButton("Reimprimir fechamento")
-        self._botao_reimprimir.setProperty("variante", "primario")
-        self._botao_reimprimir.clicked.connect(self._reimprimir)
-        rodape.addWidget(self._botao_reimprimir)
-        layout_externo.addLayout(rodape)
+    def _montar_filtros(self) -> QHBoxLayout:
+        linha = QHBoxLayout()
+        linha.setSpacing(8)
+
+        self._layout_pills_operador = QHBoxLayout()
+        self._layout_pills_operador.setSpacing(8)
+        linha.addLayout(self._layout_pills_operador)
+        linha.addStretch()
+
+        frame_mes = QFrame()
+        frame_mes.setObjectName("relatoriosFiltroMes")
+        layout_mes = QHBoxLayout(frame_mes)
+        layout_mes.setContentsMargins(12, 4, 8, 4)
+        layout_mes.setSpacing(4)
+        icone = QLabel("📅")
+        icone.setObjectName("relatoriosFiltroMesIcone")
+        layout_mes.addWidget(icone)
+        self._seletor_mes = QComboBox()
+        self._seletor_mes.setObjectName("relatoriosComboMes")
+        self._popular_seletor_mes()
+        self._seletor_mes.currentIndexChanged.connect(self._carregar)
+        layout_mes.addWidget(self._seletor_mes)
+        linha.addWidget(frame_mes)
+        return linha
+
+    def _montar_rodape_tabela(self) -> QFrame:
+        rodape = QFrame()
+        rodape.setObjectName("relatoriosPainel")
+        layout = QHBoxLayout(rodape)
+        layout.setContentsMargins(20, 14, 20, 14)
+
+        self._label_turnos_fechados = QLabel("0 TURNOS FECHADOS")
+        self._label_turnos_fechados.setObjectName("relatoriosRodapeRotulo")
+        layout.addWidget(self._label_turnos_fechados)
+        layout.addStretch()
+        self._label_total_periodo = QLabel("R$ 0,00")
+        self._label_total_periodo.setObjectName("relatoriosRodapeValor")
+        layout.addWidget(self._label_total_periodo)
+        return rodape
 
     def _popular_seletor_mes(self) -> None:
         # Mesmo padrão do Histórico Mensal: mês vigente primeiro, mais 11 pra
@@ -156,24 +190,47 @@ class HistoricoCaixaView(QWidget):
             self._seletor_mes.addItem(f"{_MESES[mes - 1]}/{ano}", (ano, mes))
         self._seletor_mes.blockSignals(False)
 
+    # ------------------------------------------------------------------
+    # Carregamento / preenchimento
+    # ------------------------------------------------------------------
+
     def atualizar(self) -> None:
         self._label_erro.setText("")
         self._aviso_impressao.limpar()
-        self._popular_combo_operador()
+        self._popular_pills_operador()
         self._carregar()
 
-    def _popular_combo_operador(self) -> None:
+    def periodo_atual(self) -> str:
+        return self._seletor_mes.currentText()
+
+    def conectar_mudanca_periodo(self, callback) -> None:
+        self._seletor_mes.currentIndexChanged.connect(callback)
+
+    def _popular_pills_operador(self) -> None:
         # Reconstrói do zero: um funcionário desativado entre duas visitas à
         # tela ainda tem que aparecer, porque o histórico é dele mesmo assim.
-        selecionado = self._combo_operador.currentData()
-        self._combo_operador.blockSignals(True)
-        self._combo_operador.clear()
-        self._combo_operador.addItem("Todos", _TODOS_OS_OPERADORES)
-        for funcionario in self._auth.listar_todos():
-            self._combo_operador.addItem(funcionario.nome, funcionario.id)
-        indice = self._combo_operador.findData(selecionado)
-        self._combo_operador.setCurrentIndex(indice if indice >= 0 else 0)
-        self._combo_operador.blockSignals(False)
+        selecionado = self._operador_selecionado
+        _limpar_layout_horizontal(self._layout_pills_operador)
+
+        opcoes: list[tuple[str, int | None]] = [("Todos", _TODOS_OS_OPERADORES)]
+        opcoes.extend((funcionario.nome, funcionario.id) for funcionario in self._auth.listar_todos())
+        if selecionado not in (valor for _, valor in opcoes):
+            selecionado = _TODOS_OS_OPERADORES
+
+        for nome, valor in opcoes:
+            pill = QPushButton(nome)
+            pill.setProperty("variante", "filtro-pill")
+            pill.setProperty("ativo", valor == selecionado)
+            pill.clicked.connect(lambda _=False, v=valor: self._selecionar_operador(v))
+            self._layout_pills_operador.addWidget(pill)
+            if valor == selecionado:
+                self._nome_operador_selecionado = nome
+        self._operador_selecionado = selecionado
+
+    def _selecionar_operador(self, operador_id: int | None) -> None:
+        self._operador_selecionado = operador_id
+        self._popular_pills_operador()
+        self._carregar()
 
     def _carregar(self) -> None:
         self._label_erro.setText("")
@@ -187,7 +244,7 @@ class HistoricoCaixaView(QWidget):
             self._label_erro.setText(str(erro))
             return
 
-        funcionario_id = self._combo_operador.currentData()
+        funcionario_id = self._operador_selecionado
         if funcionario_id is not None:
             fechamentos = [
                 caixa
@@ -195,7 +252,29 @@ class HistoricoCaixaView(QWidget):
                 if funcionario_id in (caixa.aberto_por_id, caixa.fechado_por_id)
             ]
         self._fechamentos = fechamentos
+        self._resumos = {caixa.id: self._caixas.resumo(caixa.id) for caixa in fechamentos}
         self._preencher_tabela()
+        self._preencher_kpis()
+
+    def _preencher_kpis(self) -> None:
+        faturamentos = [_faturamento_total(resumo) for resumo in self._resumos.values()]
+        diferencas = [d for d in (_diferenca_total(resumo) for resumo in self._resumos.values()) if d is not None]
+
+        faturamento_periodo = sum(faturamentos, Decimal(0))
+        ticket_medio = faturamento_periodo / len(faturamentos) if faturamentos else Decimal(0)
+        diferenca_acumulada = sum(diferencas, Decimal(0))
+
+        self._card_faturamento.definir_valor(_formatar_reais(faturamento_periodo))
+        self._card_faturamento.definir_sub_rotulo(f"{len(self._fechamentos)} turnos")
+        self._card_ticket.definir_valor(_formatar_reais(ticket_medio))
+
+        tom_diferenca = "neutro" if diferenca_acumulada == 0 else ("positivo" if diferenca_acumulada > 0 else "negativo")
+        self._card_diferenca.definir_valor(_formatar_reais_com_sinal(diferenca_acumulada), tom=tom_diferenca)
+
+        self._card_operador.definir_valor(self._nome_operador_selecionado)
+
+        self._label_turnos_fechados.setText(f"{len(self._fechamentos)} TURNOS FECHADOS")
+        self._label_total_periodo.setText(_formatar_reais(faturamento_periodo))
 
     def _preencher_tabela(self) -> None:
         self._tabela.setRowCount(len(self._fechamentos))
@@ -205,31 +284,35 @@ class HistoricoCaixaView(QWidget):
 
     def _preencher_linha(self, linha: int, caixa: Caixa) -> None:
         operador = caixa.fechado_por.nome if caixa.fechado_por is not None else "—"
-        resumo = self._caixas.resumo(caixa.id)
-        faturamento = resumo.total_dinheiro + resumo.total_maquininha + resumo.total_consumo_interno
-        # Coluna única da tabela: soma dinheiro + maquininha, mesma regra da
-        # linha "Total" de `conferencia_pagamentos`.
-        diferenca_total = (
-            None
-            if resumo.diferenca_dinheiro is None
-            else resumo.diferenca_dinheiro + resumo.diferenca_maquininha
-        )
-        diferenca = "—" if diferenca_total is None else _formatar_reais(diferenca_total)
-        turno = "—" if caixa.numero_sequencial_dia is None else f"{caixa.numero_sequencial_dia}º"
+        resumo = self._resumos[caixa.id]
+        faturamento = _faturamento_total(resumo)
+        diferenca_total = _diferenca_total(resumo)
+        diferenca = "—" if diferenca_total is None else _formatar_reais_com_sinal(diferenca_total)
+        turno = "—" if caixa.numero_sequencial_dia is None else f"T{caixa.numero_sequencial_dia}"
+        sequencial = f"{turno} · #{caixa.id}"
 
         self._tabela.setItem(linha, 0, QTableWidgetItem(caixa.aberto_em.strftime("%d/%m")))
-        self._tabela.setItem(linha, 1, QTableWidgetItem(turno))
+        self._tabela.setItem(linha, 1, QTableWidgetItem(sequencial))
         self._tabela.setItem(linha, 2, QTableWidgetItem(operador))
         self._tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(faturamento)))
+
         item_diferenca = QTableWidgetItem(diferenca)
         if diferenca_total is not None and diferenca_total != 0:
-            item_diferenca.setForeground(Qt.GlobalColor.red)
+            cor = SUCESSO if diferenca_total > 0 else PERIGO_HOVER
+            item_diferenca.setForeground(QColor(cor))
         self._tabela.setItem(linha, 4, item_diferenca)
 
-        botao_ver = QPushButton("Ver Comprovante")
-        botao_ver.setProperty("variante", "secundario")
+        botao_ver = QPushButton("🖨 2ª via")
+        botao_ver.setProperty("variante", "pilula-impressora")
         botao_ver.clicked.connect(lambda _=False, caixa_id=caixa.id: self._abrir_comprovante(caixa_id))
         self._tabela.setCellWidget(linha, _COLUNA_ACOES, botao_ver)
+
+    # ------------------------------------------------------------------
+    # Ações (acionadas pela barra de ações compartilhada de RelatoriosView)
+    # ------------------------------------------------------------------
+
+    def tem_selecao(self) -> bool:
+        return self._caixa_selecionado() is not None
 
     def _caixa_selecionado(self) -> Caixa | None:
         linha = self._tabela.currentRow()
@@ -253,7 +336,7 @@ class HistoricoCaixaView(QWidget):
         modal = ComprovanteFechamentoDialog(caixa, texto, self)
         modal.exec()
 
-    def _reimprimir(self) -> None:
+    def reimprimir(self) -> None:
         self._label_erro.setText("")
         caixa = self._caixa_selecionado()
         if caixa is None:
@@ -269,7 +352,7 @@ class HistoricoCaixaView(QWidget):
             return
         self._aviso_impressao.mostrar_um(resultado, contexto="Fechamento de caixa")
 
-    def _ver_cancelamentos(self) -> None:
+    def ver_cancelamentos(self) -> None:
         self._label_erro.setText("")
         caixa = self._caixa_selecionado()
         if caixa is None:
@@ -308,5 +391,31 @@ class _CancelamentosDialog(QDialog):
         layout.addWidget(botoes)
 
 
+def _faturamento_total(resumo: ResumoCaixa) -> Decimal:
+    # Mesma regra da linha "Total" de `conferencia_pagamentos`.
+    return resumo.total_dinheiro + resumo.total_maquininha + resumo.total_consumo_interno
+
+
+def _diferenca_total(resumo: ResumoCaixa) -> Decimal | None:
+    if resumo.diferenca_dinheiro is None:
+        return None
+    return resumo.diferenca_dinheiro + resumo.diferenca_maquininha
+
+
+def _limpar_layout_horizontal(layout: QHBoxLayout) -> None:
+    while layout.count():
+        item = layout.takeAt(0)
+        widget = item.widget()
+        if widget is not None:
+            widget.deleteLater()
+
+
 def _formatar_reais(valor: Decimal) -> str:
     return f"R$ {valor:.2f}".replace(".", ",")
+
+
+def _formatar_reais_com_sinal(valor: Decimal) -> str:
+    if valor == 0:
+        return "—"
+    sinal = "-" if valor < 0 else ""
+    return f"{sinal}R$ {abs(valor):.2f}".replace(".", ",")

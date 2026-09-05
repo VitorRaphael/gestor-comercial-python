@@ -825,4 +825,153 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QLabel#categoriaNomeLabel {{ color: {t['texto']}; font-size: 12px; font-weight: 600; background: transparent; }}
 
     QLabel#impressorasPendentesLink {{ color: {t['mesa_ocupada_borda']}; font-size: 11px; font-weight: 700; background: transparent; }}
+
+    /* ---------- Relatórios: Histórico Diário + Dashboard Mensal ---------- */
+
+    QLabel#relatoriosBreadcrumb {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      background: transparent;
+    }}
+    QLabel#relatoriosTitulo {{ color: {t['texto']}; font-size: 24px; font-weight: 800; background: transparent; }}
+    QLabel#relatoriosSubtitulo {{ color: {t['texto_fraco']}; font-size: 12px; background: transparent; }}
+
+    /* Segmentado Histórico Diário / Dashboard Mensal */
+    QFrame#relatoriosSegmentado {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 14px;
+    }}
+    QPushButton[variante="segmento"] {{
+      background: transparent;
+      color: {t['texto_fraco']};
+      border: none;
+      border-radius: 11px;
+      padding: 8px 16px;
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    QPushButton[variante="segmento"]:hover {{ color: {t['texto']}; }}
+    QPushButton[variante="segmento"][ativo="true"] {{
+      background: {t['acento']};
+      color: {t['acento_texto']};
+    }}
+
+    /* Pílula do filtro de mês (ícone + combo sem chrome, dentro de um frame com borda) */
+    QFrame#relatoriosFiltroMes {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+    QLabel#relatoriosFiltroMesIcone {{ font-size: 12px; background: transparent; }}
+    QComboBox#relatoriosComboMes {{
+      background: transparent;
+      border: none;
+      padding: 0 4px;
+      color: {t['texto']};
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    QComboBox#relatoriosComboMes::drop-down {{ border: none; width: 16px; }}
+    QComboBox#relatoriosComboMes QAbstractItemView {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      color: {t['texto']};
+      selection-background-color: {t['acento']};
+      selection-color: {t['acento_texto']};
+    }}
+
+    /* Cards de KPI (grid superior das duas visões) */
+    QFrame#relatoriosKpiCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+    QLabel#relatoriosKpiRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+    QLabel#relatoriosKpiValor {{ color: {t['texto']}; font-size: 26px; font-weight: 800; background: transparent; }}
+    QLabel#relatoriosKpiValorPositivo {{ color: {t['sucesso']}; font-size: 26px; font-weight: 800; background: transparent; }}
+    QLabel#relatoriosKpiValorNegativo {{ color: {t['perigo_hover']}; font-size: 26px; font-weight: 800; background: transparent; }}
+    QLabel#relatoriosKpiSub {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+
+    /* Painel de tabela / gráficos */
+    QFrame#relatoriosPainel {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+    QLabel#relatoriosPainelTitulo {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      background: transparent;
+    }}
+    QLabel#relatoriosPainelIndicador {{ color: {t['sucesso']}; font-size: 12px; font-weight: 700; background: transparent; }}
+
+    QLabel#relatoriosRodapeRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    QLabel#relatoriosRodapeValor {{ color: {t['texto']}; font-size: 16px; font-weight: 800; background: transparent; }}
+
+    QPushButton[variante="pilula-impressora"] {{
+      background: {t['superficie_2']};
+      color: {t['texto']};
+      border: 1px solid {t['borda']};
+      border-radius: 13px;
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 700;
+    }}
+    QPushButton[variante="pilula-impressora"]:hover {{ background: {t['borda']}; }}
+
+    /* Composição por forma de pagamento */
+    QLabel#relatoriosFormaNome {{ color: {t['texto']}; font-size: 12px; font-weight: 600; background: transparent; }}
+    QLabel#relatoriosFormaValor {{ color: {t['texto']}; font-size: 12px; font-weight: 700; background: transparent; }}
+    QLabel#relatoriosFormaPercentual {{ color: {t['texto_fraquissimo']}; font-size: 10px; font-weight: 600; background: transparent; }}
+    QProgressBar#relatoriosBarraForma {{
+      background: {t['borda']};
+      border: none;
+      border-radius: 2px;
+      max-height: 4px;
+      min-height: 4px;
+    }}
+    QProgressBar#relatoriosBarraForma::chunk {{ background: {t['acento']}; border-radius: 2px; }}
+
+    /* Mix de vendas do mês (ranking) */
+    QLabel#relatoriosRankIndice {{
+      color: {t['texto_fraquissimo']};
+      font-size: 11px;
+      font-weight: 700;
+      font-family: "Consolas", monospace;
+      background: transparent;
+    }}
+    QLabel#relatoriosRankNome {{ color: {t['texto']}; font-size: 13px; font-weight: 600; background: transparent; }}
+    QLabel#relatoriosRankQtd {{ color: {t['texto_fraco']}; font-size: 11px; background: transparent; }}
+    QLabel#relatoriosRankValor {{ color: {t['texto']}; font-size: 13px; font-weight: 700; background: transparent; }}
+    QProgressBar#relatoriosBarraRanking {{
+      background: {t['borda']};
+      border: none;
+      border-radius: 2px;
+      max-height: 4px;
+      min-height: 4px;
+    }}
+    QProgressBar#relatoriosBarraRanking::chunk {{ background: {t['ciano_metrica']}; border-radius: 2px; }}
     """
