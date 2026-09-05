@@ -51,9 +51,13 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.impressao_service import ImpressaoService
+from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
+from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
+
+_TAMANHO_MINIATURA_ITEM = 32
 
 _COLUNAS = ["Descrição", "Preço", "Qtd", "Total", ""]
 # Largura suficiente para "Cancelar" em negrito 12px + padding do botão
@@ -110,7 +114,9 @@ class ComandaView(QWidget):
         cabecalho.addWidget(self._botao_voltar)
 
         self._label_titulo = QLabel("")
-        self._label_titulo.setStyleSheet("font-weight: 800; font-size: 32px; color: #FFFFFF;")
+        self._label_titulo.setStyleSheet(
+            f"font-weight: 800; font-size: 32px; color: {ThemeController.instancia().tokens_atuais['texto']};"
+        )
         cabecalho.addWidget(self._label_titulo)
 
         # Indicador de tempo na cozinha: continua calculado em `atualizar()`
@@ -159,7 +165,10 @@ class ComandaView(QWidget):
 
         linha_atendente = QHBoxLayout()
         label_atendeu = QLabel("Atendeu:")
-        label_atendeu.setStyleSheet("color: #A8A29E; font-size: 13px; font-weight: 500;")
+        label_atendeu.setStyleSheet(
+            f"color: {ThemeController.instancia().tokens_atuais['combo_atendente_borda']}; "
+            "font-size: 13px; font-weight: 500;"
+        )
         linha_atendente.addWidget(label_atendeu)
         self._combo_atendente = QComboBox()
         self._combo_atendente.setObjectName("combo-atendente")
@@ -170,7 +179,9 @@ class ComandaView(QWidget):
         layout_externo.addLayout(linha_atendente)
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
+        self._label_erro.setStyleSheet(
+            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
+        )
         layout_externo.addWidget(self._label_erro)
 
         self._aviso_impressao = AvisoDeImpressao()
@@ -400,26 +411,36 @@ class ComandaView(QWidget):
 
     def _formatar_tempo_aberta(self, primeiro_envio: datetime) -> str:
         minutos = int((datetime.now() - primeiro_envio).total_seconds() // 60)
+        t = ThemeController.instancia().tokens_atuais
         if minutos >= 60:
-            cor, tempo = "#f43f5e", f"{minutos // 60}h{minutos % 60:02d}"
+            cor, tempo = t["perigo"], f"{minutos // 60}h{minutos % 60:02d}"
         elif minutos >= 30:
-            cor, tempo = "#eab308", f"{minutos} min"
+            cor, tempo = t["aviso"], f"{minutos} min"
         else:
-            cor, tempo = "#94a3b8", f"{minutos} min"
+            cor, tempo = t["texto_fraquissimo"], f"{minutos} min"
         self._label_horario.setStyleSheet(f"font-size: 13px; margin-left: 8px; color: {cor};")
         return f"Na cozinha desde {primeiro_envio.strftime('%H:%M')} · há {tempo}"
 
     # Nome do produto em destaque (branco puro); preço/qtd/total em cinza
     # claro mais discreto, alinhados à direita — mesma hierarquia do mockup.
-    _COR_VALOR = QColor("#E7E5E4")
+    @staticmethod
+    def _cor_valor() -> QColor:
+        return QColor(ThemeController.instancia().tokens_atuais["texto_fraco"])
 
     def _preencher_celulas_basicas(
-        self, tabela: QTableWidget, linha: int, descricao: str, preco_unit: Decimal, quantidade: int
+        self,
+        tabela: QTableWidget,
+        linha: int,
+        descricao: str,
+        preco_unit: Decimal,
+        quantidade: int,
+        *,
+        imagem_path: str | None = None,
+        nome_produto: str = "",
     ) -> None:
         total_item = preco_unit * quantidade
 
-        item_descricao = QTableWidgetItem(descricao)
-        tabela.setItem(linha, 0, item_descricao)
+        tabela.setCellWidget(linha, 0, self._criar_celula_produto(imagem_path, nome_produto, descricao))
 
         for coluna, texto in (
             (1, _formatar_reais(preco_unit)),
@@ -428,11 +449,35 @@ class ComandaView(QWidget):
         ):
             item_valor = QTableWidgetItem(texto)
             item_valor.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            item_valor.setForeground(self._COR_VALOR)
+            item_valor.setForeground(self._cor_valor())
             font = item_valor.font()
             font.setWeight(QFont.Weight.Medium)
             item_valor.setFont(font)
             tabela.setItem(linha, coluna, item_valor)
+
+    @staticmethod
+    def _criar_celula_produto(imagem_path: str | None, nome_produto: str, descricao: str) -> QWidget:
+        """Miniatura 32x32 + nome/observação, sem empurrar as demais colunas.
+
+        `setCellWidget` (em vez de `QTableWidgetItem`) porque a coluna 0
+        precisa compor imagem + texto lado a lado — as outras (qtd/valor)
+        continuam texto puro via `QTableWidgetItem`.
+        """
+        celula = QWidget()
+        layout_celula = QHBoxLayout(celula)
+        layout_celula.setContentsMargins(0, 0, 0, 0)
+        layout_celula.setSpacing(8)
+
+        rotulo_imagem = QLabel()
+        rotulo_imagem.setFixedSize(_TAMANHO_MINIATURA_ITEM, _TAMANHO_MINIATURA_ITEM)
+        rotulo_imagem.setPixmap(obter_pixmap(imagem_path, _TAMANHO_MINIATURA_ITEM, nome_produto))
+        layout_celula.addWidget(rotulo_imagem)
+
+        rotulo_texto = QLabel(descricao)
+        rotulo_texto.setStyleSheet("color: " + ThemeController.instancia().tokens_atuais["tabela_comanda_texto"])
+        layout_celula.addWidget(rotulo_texto, stretch=1)
+
+        return celula
 
     @staticmethod
     def _aplicar_variante(botao: QPushButton, variante: str) -> None:
@@ -456,7 +501,13 @@ class ComandaView(QWidget):
         if item.observacao:
             descricao += f" ({item.observacao})"
         self._preencher_celulas_basicas(
-            self._tabela_pendentes, linha, descricao, item.preco_unit_congelado, item.quantidade
+            self._tabela_pendentes,
+            linha,
+            descricao,
+            item.preco_unit_congelado,
+            item.quantidade,
+            imagem_path=item.produto.imagem_path,
+            nome_produto=item.produto.nome,
         )
 
         acoes_item = QWidget()
@@ -489,7 +540,13 @@ class ComandaView(QWidget):
             descricao += f" ({primeiro.observacao})"
         quantidade_total = sum(item.quantidade for item in grupo)
         self._preencher_celulas_basicas(
-            self._tabela_lancados, linha, descricao, primeiro.preco_unit_congelado, quantidade_total
+            self._tabela_lancados,
+            linha,
+            descricao,
+            primeiro.preco_unit_congelado,
+            quantidade_total,
+            imagem_path=primeiro.produto.imagem_path,
+            nome_produto=primeiro.produto.nome,
         )
 
         acoes_item = QWidget()
@@ -515,7 +572,8 @@ class ComandaView(QWidget):
         self._aplicar_variante(botao_cancelar, "perigo-tabela")
 
     def _mostrar_mensagem(self, texto: str, *, sucesso: bool) -> None:
-        cor = "#22c55e" if sucesso else "#f43f5e"
+        t = ThemeController.instancia().tokens_atuais
+        cor = t["sucesso"] if sucesso else t["perigo"]
         self._label_erro.setStyleSheet(f"color: {cor}; font-size: 12px;")
         self._label_erro.setText(texto)
 
@@ -798,7 +856,7 @@ class _AdicionarItemDialog(QDialog):
         layout.addWidget(self._busca)
 
         dica = QLabel("Duplo clique ou Enter no item lança direto. Ou selecione e use Adicionar.")
-        dica.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        dica.setStyleSheet(f"color: {ThemeController.instancia().tokens_atuais['texto_fraquissimo']}; font-size: 11px;")
         layout.addWidget(dica)
 
         formulario = QFormLayout()
@@ -816,7 +874,9 @@ class _AdicionarItemDialog(QDialog):
         layout.addLayout(formulario)
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
+        self._label_erro.setStyleSheet(
+            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
+        )
         layout.addWidget(self._label_erro)
 
         botoes = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -870,7 +930,7 @@ class _FecharConferenciaDialog(QDialog):
             "Use 'Reabrir' (com PIN de gerente) para desfazer."
         )
         aviso.setWordWrap(True)
-        aviso.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        aviso.setStyleSheet(f"color: {ThemeController.instancia().tokens_atuais['texto_fraquissimo']}; font-size: 11px;")
         layout.addWidget(aviso)
 
         self._marcar_taxa_servico = QCheckBox(f"Cobrar taxa de serviço ({_TAXA_SERVICO_PADRAO:g}%)")

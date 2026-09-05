@@ -36,6 +36,7 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.ui.theme.controller import ThemeController
 
 _COLUNAS_GRADE = 8
 _ESPACAMENTO = 14
@@ -176,7 +177,10 @@ class MesasView(QWidget):
         coluna.addLayout(self._montar_filtros())
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px; background: transparent;")
+        self._label_erro.setStyleSheet(
+            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; "
+            "font-size: 12px; background: transparent;"
+        )
         coluna.addWidget(self._label_erro)
 
         coluna.addWidget(self._montar_container_grade(), 1)

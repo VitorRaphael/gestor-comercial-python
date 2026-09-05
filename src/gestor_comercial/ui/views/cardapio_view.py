@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -56,7 +57,10 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.services.imagem_service import processar_imagem_produto, remover_thumbnail
+from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
+from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
 
 _COLUNAS_PRODUTOS = ["Produto", "Tipo", "Preço", "Custo", "Margem", "Status"]
 _COLUNAS_COMPONENTES = ["Componente", "Quantidade"]
@@ -66,7 +70,10 @@ _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoE
 _ID_CATEGORIA = Qt.ItemDataRole.UserRole
 
 _COR_MARGEM_TRILHO = "rgba(255, 255, 255, 0.08)"
-_COR_MARGEM_PREENCHIDA = "#22c55e"
+
+
+def _cor_margem_preenchida() -> str:
+    return ThemeController.instancia().tokens_atuais["sucesso"]
 
 
 def _por_nome(itens: list) -> list:
@@ -98,7 +105,9 @@ class CardapioView(QWidget):
         layout.addLayout(self._criar_grade_kpis())
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
+        self._label_erro.setStyleSheet(
+            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
+        )
         layout.addWidget(self._label_erro)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -286,7 +295,7 @@ class _BarraMargem(QWidget):
         self._trilho = QFrame(self)
         self._trilho.setStyleSheet(f"background: {_COR_MARGEM_TRILHO}; border-radius: 3px;")
         self._preenchida = QFrame(self)
-        self._preenchida.setStyleSheet(f"background: {_COR_MARGEM_PREENCHIDA}; border-radius: 3px;")
+        self._preenchida.setStyleSheet(f"background: {_cor_margem_preenchida()}; border-radius: 3px;")
         self._percentual = 0.0
 
     def definir_percentual(self, percentual: float) -> None:
@@ -659,14 +668,17 @@ class _ProdutosPainel(QFrame):
         modal = _ProdutoDialog("Novo produto", categorias, self, categoria_id_inicial=categoria_inicial_id)
         self._mostrar_erro("")
         while modal.exec() == QDialog.DialogCode.Accepted:
-            nome, preco, custo, categoria_id, descricao = modal.resultado()
+            nome, preco, custo, categoria_id, descricao, imagem_path = modal.resultado()
             if self._produto_duplicado(nome) and not self._confirmar_duplicidade(nome):
                 continue
             try:
-                self._service.criar_produto(nome, preco, categoria_id, custo, descricao)
+                self._service.criar_produto(
+                    nome, preco, categoria_id, custo, descricao, imagem_path=imagem_path
+                )
             except _ERROS_SERVICE as erro:
                 modal.mostrar_erro_servico(str(erro))
                 continue
+            modal.confirmar_remocao_de_imagem_trocada()
             self.atualizar()
             self.alterado.emit()
             return
@@ -685,17 +697,22 @@ class _ProdutosPainel(QFrame):
             custo_inicial=produto.custo,
             categoria_id_inicial=produto.categoria_id,
             descricao_inicial=produto.descricao,
+            imagem_path_inicial=produto.imagem_path,
+            nome_produto_inicial=produto.nome,
         )
         self._mostrar_erro("")
         while modal.exec() == QDialog.DialogCode.Accepted:
-            nome, preco, custo, categoria_id, descricao = modal.resultado()
+            nome, preco, custo, categoria_id, descricao, imagem_path = modal.resultado()
             if self._produto_duplicado(nome, ignorar_id=produto.id) and not self._confirmar_duplicidade(nome):
                 continue
             try:
-                self._service.atualizar_produto(produto.id, nome, preco, custo, categoria_id, descricao)
+                self._service.atualizar_produto(
+                    produto.id, nome, preco, custo, categoria_id, descricao, imagem_path=imagem_path
+                )
             except _ERROS_SERVICE as erro:
                 modal.mostrar_erro_servico(str(erro))
                 continue
+            modal.confirmar_remocao_de_imagem_trocada()
             self.atualizar()
             self.alterado.emit()
             return
@@ -806,7 +823,9 @@ class _ComboComponentesDialog(QDialog):
         layout = QVBoxLayout(self)
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
+        self._label_erro.setStyleSheet(
+            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
+        )
         layout.addWidget(self._label_erro)
 
         self._tabela = QTableWidget(0, len(_COLUNAS_COMPONENTES))
@@ -925,11 +944,44 @@ class _ProdutoDialog(QDialog):
         custo_inicial: Decimal | None = None,
         categoria_id_inicial: int | None = None,
         descricao_inicial: str | None = None,
+        imagem_path_inicial: str | None = None,
+        nome_produto_inicial: str = "",
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(titulo)
 
+        # Estado interno da foto: só é gravado no banco quando o modal fecha
+        # com OK. `_imagem_path_processada` é o nome do arquivo JÁ comprimido
+        # (ver imagem_service) — nunca o caminho do arquivo original escolhido
+        # no QFileDialog. `_imagem_path_para_remover` guarda uma foto antiga
+        # que ficou órfã (trocada ou removida) pra ser apagada do disco só
+        # depois que o service confirmar a gravação, evitando apagar um
+        # arquivo em uso caso o usuário cancele o diálogo.
+        self._imagem_path_processada: str | None = imagem_path_inicial
+        self._imagem_path_para_remover: str | None = None
+        self._nome_produto_atual = nome_produto_inicial or titulo
+
         layout = QVBoxLayout(self)
+
+        linha_imagem = QHBoxLayout()
+        self._preview_imagem = QLabel()
+        self._preview_imagem.setFixedSize(80, 80)
+        self._preview_imagem.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        linha_imagem.addWidget(self._preview_imagem)
+
+        botoes_imagem = QVBoxLayout()
+        self._botao_escolher_imagem = QPushButton("Escolher imagem")
+        self._botao_escolher_imagem.clicked.connect(self._escolher_imagem)
+        botoes_imagem.addWidget(self._botao_escolher_imagem)
+        self._botao_remover_imagem = QPushButton("Remover imagem")
+        self._botao_remover_imagem.clicked.connect(self._remover_imagem)
+        botoes_imagem.addWidget(self._botao_remover_imagem)
+        linha_imagem.addLayout(botoes_imagem)
+        linha_imagem.addStretch()
+        layout.addLayout(linha_imagem)
+
+        self._atualizar_preview_imagem()
+
         formulario = QFormLayout()
 
         self._campo_nome = QLineEdit(nome_inicial)
@@ -1016,14 +1068,61 @@ class _ProdutoDialog(QDialog):
         self._erro_geral.setVisible(True)
         self._campo_nome.setFocus()
 
-    def resultado(self) -> tuple[str, Decimal, Decimal, int, str | None]:
+    def _escolher_imagem(self) -> None:
+        caminho, _ = QFileDialog.getOpenFileName(
+            self,
+            "Escolher imagem do produto",
+            "",
+            "Imagens (*.png *.jpg *.jpeg *.webp *.bmp)",
+        )
+        if not caminho:
+            return
+        try:
+            novo_nome = processar_imagem_produto(caminho)
+        except ValueError as erro:
+            QMessageBox.warning(self, "Imagem inválida", str(erro))
+            return
+
+        # A foto antiga (se houver) fica marcada pra remoção do disco só
+        # quando o modal for aceito — se o usuário cancelar o diálogo depois
+        # de trocar a foto, a antiga continua valendo e nada é apagado aqui.
+        if self._imagem_path_processada:
+            self._imagem_path_para_remover = self._imagem_path_processada
+        self._imagem_path_processada = novo_nome
+        self._atualizar_preview_imagem()
+
+    def _remover_imagem(self) -> None:
+        if self._imagem_path_processada:
+            self._imagem_path_para_remover = self._imagem_path_processada
+        self._imagem_path_processada = None
+        self._atualizar_preview_imagem()
+
+    def _atualizar_preview_imagem(self) -> None:
+        nome_para_letra = self._campo_nome.text().strip() if hasattr(self, "_campo_nome") else ""
+        pixmap = obter_pixmap(
+            self._imagem_path_processada, 80, nome_para_letra or self._nome_produto_atual
+        )
+        self._preview_imagem.setPixmap(pixmap)
+
+    def resultado(self) -> tuple[str, Decimal, Decimal, int, str | None, str | None]:
         nome = self._campo_nome.text().strip()
         preco = Decimal(self._campo_preco.text().strip().replace(",", "."))
         texto_custo = self._campo_custo.text().strip()
         custo = Decimal(texto_custo.replace(",", ".")) if texto_custo else Decimal("0")
         categoria_id = self._seletor_categoria.currentData()
         descricao = self._campo_descricao.text().strip() or None
-        return nome, preco, custo, categoria_id, descricao
+        return nome, preco, custo, categoria_id, descricao, self._imagem_path_processada
+
+    def confirmar_remocao_de_imagem_trocada(self) -> None:
+        """Apaga do disco a foto antiga que foi trocada/removida neste modal.
+
+        Só deve ser chamado DEPOIS que o service confirmou a gravação do
+        produto com o novo `imagem_path` — nunca antes, senão um cancelamento
+        do usuário perderia a foto antiga sem motivo.
+        """
+        if self._imagem_path_para_remover:
+            remover_thumbnail(self._imagem_path_para_remover)
+            self._imagem_path_para_remover = None
 
 
 class _ComponenteDialog(QDialog):
@@ -1097,9 +1196,10 @@ def _criar_badge_categoria(categoria: Categoria, quantidade_produtos: int) -> QW
     if quantidade_produtos == 0:
         label = QLabel("VAZIO")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        t = ThemeController.instancia().tokens_atuais
         label.setStyleSheet(
-            "background-color: #3f3d3a;"
-            "color: #a8a29e;"
+            f"background-color: {t['badge_vazio_bg']};"
+            f"color: {t['badge_vazio_texto']};"
             "font-weight: 700;"
             "font-size: 11px;"
             "border-radius: 4px;"
@@ -1131,10 +1231,11 @@ def _criar_badge_status(ativo: bool) -> QWidget:
     """Etiqueta de status: verde para ATIVO, cinza/vermelho para DESATIVADO."""
     label = QLabel("ATIVO" if ativo else "DESATIVADO")
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    t = ThemeController.instancia().tokens_atuais
     if ativo:
-        cor_fundo, cor_texto = "#16a34a", "#f0fdf4"
+        cor_fundo, cor_texto = t["badge_ativo_bg"], t["badge_ativo_texto"]
     else:
-        cor_fundo, cor_texto = "#57534e", "#fafaf9"
+        cor_fundo, cor_texto = t["badge_desativado_bg"], t["badge_desativado_texto"]
     label.setStyleSheet(
         f"background-color: {cor_fundo};"
         f"color: {cor_texto};"
@@ -1153,9 +1254,10 @@ def _criar_badge_tipo(is_combo: bool) -> QWidget:
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     label.setStyleSheet("background: transparent;")
     if is_combo:
+        t = ThemeController.instancia().tokens_atuais
         label.setStyleSheet(
-            "background-color: #f59e0b;"
-            "color: #1c1917;"
+            f"background-color: {t['badge_combo_bg']};"
+            f"color: {t['badge_combo_texto']};"
             "font-weight: 700;"
             "font-size: 11px;"
             "border-radius: 4px;"
@@ -1196,14 +1298,15 @@ def _formatar_campo(valor: Decimal | None) -> str:
 
 def _criar_rotulo_erro() -> QLabel:
     rotulo = QLabel()
-    rotulo.setStyleSheet("color: #c0392b; font-size: 11px;")
+    rotulo.setStyleSheet(f"color: {ThemeController.instancia().tokens_atuais['campo_erro_texto']}; font-size: 11px;")
     rotulo.setWordWrap(True)
     rotulo.setVisible(False)
     return rotulo
 
 
 def _marcar_erro(campo: QLineEdit, rotulo: QLabel, mensagem: str) -> None:
-    campo.setStyleSheet("border: 1px solid #c0392b; background-color: #fdecea;")
+    t = ThemeController.instancia().tokens_atuais
+    campo.setStyleSheet(f"border: 1px solid {t['campo_erro_texto']}; background-color: {t['campo_erro_bg']};")
     rotulo.setText(mensagem)
     rotulo.setVisible(True)
 

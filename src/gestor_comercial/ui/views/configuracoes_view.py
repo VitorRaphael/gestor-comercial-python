@@ -68,7 +68,9 @@ class ConfiguracoesView(QWidget):
         layout.addSpacing(28)
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
+        self._label_erro.setStyleSheet(
+            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
+        )
         layout.addWidget(self._label_erro)
 
         layout.addWidget(self._montar_card_tema())

@@ -58,7 +58,6 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.impressao_service import ImpressaoService
-from gestor_comercial.ui.theme.tokens import PERIGO_HOVER, SUCESSO
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.comprovante_dialog import (
     ComprovanteFechamentoDialog,
@@ -66,6 +65,7 @@ from gestor_comercial.ui.widgets.comprovante_dialog import (
 )
 from gestor_comercial.ui.widgets.kpi_card import CardKpi
 from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
+from gestor_comercial.ui.theme.controller import ThemeController
 
 _COLUNAS = ["DATA", "TURNO / SEQ", "OPERADOR", "FATURAMENTO", "DIFERENÇA", "AÇÕES"]
 _COLUNA_ACOES = 5
@@ -103,6 +103,11 @@ class HistoricoCaixaView(QWidget):
         self._resumos: dict[int, ResumoCaixa] = {}
         self._operador_selecionado: int | None = _TODOS_OS_OPERADORES
         self._nome_operador_selecionado = "Todos"
+        # Nenhuma pílula vem destacada ao abrir a tela — só depois que o
+        # usuário de fato clica em uma delas (igual ao seletor de operador do
+        # Login, que também não chega com nada pré-marcado). O filtro em si já
+        # funciona como "Todos" desde o início; só o destaque visual espera o clique.
+        self._algum_operador_clicado = False
 
         self._montar_layout()
 
@@ -114,7 +119,9 @@ class HistoricoCaixaView(QWidget):
         layout_externo.addLayout(self._montar_filtros())
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
+        self._label_erro.setStyleSheet(
+            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
+        )
         layout_externo.addWidget(self._label_erro)
 
         self._aviso_impressao = AvisoDeImpressao()
@@ -308,7 +315,7 @@ class HistoricoCaixaView(QWidget):
         for nome, valor in opcoes:
             pill = QPushButton(nome)
             pill.setProperty("variante", "filtro-pill")
-            pill.setProperty("ativo", valor == selecionado)
+            pill.setProperty("ativo", self._algum_operador_clicado and valor == selecionado)
             pill.clicked.connect(lambda _=False, v=valor: self._selecionar_operador(v))
             self._layout_pills_operador.addWidget(pill)
             if valor == selecionado:
@@ -317,6 +324,7 @@ class HistoricoCaixaView(QWidget):
 
     def _selecionar_operador(self, operador_id: int | None) -> None:
         self._operador_selecionado = operador_id
+        self._algum_operador_clicado = True
         self._popular_pills_operador()
         self._carregar()
 
@@ -407,7 +415,8 @@ class HistoricoCaixaView(QWidget):
 
         item_diferenca = QTableWidgetItem(diferenca)
         if diferenca_total is not None and diferenca_total != 0:
-            cor = SUCESSO if diferenca_total > 0 else PERIGO_HOVER
+            t = ThemeController.instancia().tokens_atuais
+            cor = t["sucesso"] if diferenca_total > 0 else t["perigo_hover"]
             item_diferenca.setForeground(QColor(cor))
         self._tabela.setItem(linha, 4, item_diferenca)
 

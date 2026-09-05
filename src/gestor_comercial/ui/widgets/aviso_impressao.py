@@ -19,10 +19,19 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from gestor_comercial.services.impressao_service import GRUPO_SEM_IMPRESSORA, ResultadoImpressao
+from gestor_comercial.ui.theme.controller import ThemeController
 
-_COR_SUCESSO = "#22c55e"
-_COR_AVISO = "#f59e0b"
-_COR_FRACO = "#9195ac"
+
+def _cor_sucesso() -> str:
+    return ThemeController.instancia().tokens_atuais["sucesso"]
+
+
+def _cor_aviso() -> str:
+    return ThemeController.instancia().tokens_atuais["aviso"]
+
+
+def _cor_fraco() -> str:
+    return ThemeController.instancia().tokens_atuais["texto_fraco"]
 
 T = TypeVar("T")
 
@@ -65,18 +74,18 @@ class AvisoDeImpressao(QLabel):
         self.limpar()
 
     def limpar(self) -> None:
-        self._pintar(_COR_FRACO)
+        self._pintar(_cor_fraco())
         self.setText("")
 
     def mostrar(self, resultados: Sequence[ResultadoImpressao], *, vazio: str = "") -> None:
         """Mostra um cupom por linha; `vazio` é o texto de 'não havia o que imprimir'."""
         if not resultados:
-            self._pintar(_COR_FRACO)
+            self._pintar(_cor_fraco())
             self.setText(vazio)
             return
 
         houve_falha = any(not resultado.sucesso for resultado in resultados)
-        self._pintar(_COR_AVISO if houve_falha else _COR_SUCESSO)
+        self._pintar(_cor_aviso() if houve_falha else _cor_sucesso())
         self.setText("\n".join(_mensagem(resultado) for resultado in resultados))
 
     def mostrar_um(self, resultado: ResultadoImpressao, *, contexto: str = "") -> None:
@@ -87,7 +96,7 @@ class AvisoDeImpressao(QLabel):
         linha "Balcão: cupom enviado" não conta qual papel acabou de sair.
         """
         mensagem = _mensagem(resultado)
-        self._pintar(_COR_SUCESSO if resultado.sucesso else _COR_AVISO)
+        self._pintar(_cor_sucesso() if resultado.sucesso else _cor_aviso())
         self.setText(f"{contexto} — {mensagem}" if contexto else mensagem)
 
     def mostrar_falha(self, mensagem: str) -> None:
@@ -97,7 +106,7 @@ class AvisoDeImpressao(QLabel):
         então nem uma exceção de negócio pode virar caixa de erro na cara do
         operador — vira esta linha âmbar e a vida continua.
         """
-        self._pintar(_COR_AVISO)
+        self._pintar(_cor_aviso())
         self.setText(mensagem)
 
     def _pintar(self, cor: str) -> None:

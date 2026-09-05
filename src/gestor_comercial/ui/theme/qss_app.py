@@ -165,8 +165,8 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QPushButton[variante="perigo"]:pressed {{ background: {t['perigo']}; }}
 
     /* Ciano: ação de "desativar" no Cardápio -- nem neutra, nem destrutiva. */
-    QPushButton[variante="ciano"] {{ background: #0891b2; color: #ecfeff; border: none; }}
-    QPushButton[variante="ciano"]:hover {{ background: #06b6d4; }}
+    QPushButton[variante="ciano"] {{ background: {t['ciano_acao']}; color: {t['ciano_acao_texto']}; border: none; }}
+    QPushButton[variante="ciano"]:hover {{ background: {t['ciano_acao_hover']}; }}
     QPushButton[variante="ciano"]:disabled {{ background: {t['borda']}; color: {t['texto_fraquissimo']}; }}
 
     /* Tracejado: "+ Nova categoria" no rodapé da coluna de categorias. */
@@ -184,7 +184,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
        e, abaixo de um certo limiar, o Qt para de desenhar o texto (vira uma
        barra vermelha vazia). Padding e fonte menores cabem na linha padrão. */
     QPushButton[variante="perigo-tabela"] {{
-      background: #DC2626; color: #FFFFFF; border: none;
+      background: {t['perigo_tabela_bg']}; color: #FFFFFF; border: none;
       height: 22px; padding: 0 12px; font-size: 11px; font-weight: 700; border-radius: 11px;
     }}
     QPushButton[variante="perigo-tabela"]:hover {{ background: {t['perigo_hover']}; }}
@@ -196,52 +196,52 @@ def construir_qss_app(t: dict[str, str]) -> str:
        neutros ao lado (+ Item, 2ª via) pra ficar óbvio que é a saída, não
        mais uma ação da comanda. Borda âmbar + peso maior que o padrão. */
     QPushButton[variante="pilula-voltar"] {{
-      background: #1F1D1B;
-      color: #DF9F3D;
-      border: 1.5px solid #DF9F3D;
+      background: {t['pill_comanda_bg']};
+      color: {t['pill_comanda_texto']};
+      border: 1.5px solid {t['pill_comanda_texto']};
       border-radius: 18px;
       padding: 7px 18px;
       font-size: 13px;
       font-weight: 800;
     }}
-    QPushButton[variante="pilula-voltar"]:hover {{ background: #2A2723; }}
-    QPushButton[variante="pilula-voltar"]:disabled {{ color: #6B655D; border-color: #3A362E; }}
+    QPushButton[variante="pilula-voltar"]:hover {{ background: {t['pill_comanda_bg_2']}; }}
+    QPushButton[variante="pilula-voltar"]:disabled {{ color: {t['pilula_disabled_texto']}; border-color: {t['pilula_voltar_disabled_borda']}; }}
 
     QPushButton[variante="pilula-secundario"] {{
-      background: #1F1D1B;
-      color: #FFFFFF;
+      background: {t['pill_comanda_bg']};
+      color: {t['pilula_secundario_texto']};
       border: none;
       border-radius: 18px;
       padding: 7px 18px;
       font-size: 12px;
       font-weight: 600;
     }}
-    QPushButton[variante="pilula-secundario"]:hover {{ background: #2A2723; }}
-    QPushButton[variante="pilula-secundario"]:disabled {{ color: #6B655D; }}
+    QPushButton[variante="pilula-secundario"]:hover {{ background: {t['pill_comanda_bg_2']}; }}
+    QPushButton[variante="pilula-secundario"]:disabled {{ color: {t['pilula_disabled_texto']}; }}
 
     QPushButton[variante="pilula-destaque"] {{
-      background: #DF9F3D;
-      color: #12100C;
+      background: {t['barra_total_bg']};
+      color: {t['pilula_destaque_texto']};
       border: none;
       border-radius: 18px;
       padding: 7px 20px;
       font-size: 13px;
       font-weight: 800;
     }}
-    QPushButton[variante="pilula-destaque"]:hover {{ background: #eab54f; }}
-    QPushButton[variante="pilula-destaque"]:disabled {{ background: #2A2723; color: #6B655D; }}
+    QPushButton[variante="pilula-destaque"]:hover {{ background: {t['pilula_destaque_hover']}; }}
+    QPushButton[variante="pilula-destaque"]:disabled {{ background: {t['pilula_disabled_bg']}; color: {t['pilula_disabled_texto']}; }}
 
     QPushButton[variante="pilula-perigo"] {{
-      background: #EA4335;
-      color: #FFFFFF;
+      background: {t['pilula_perigo_bg']};
+      color: {t['pilula_perigo_texto']};
       border: none;
       border-radius: 18px;
       padding: 7px 20px;
       font-size: 13px;
       font-weight: 700;
     }}
-    QPushButton[variante="pilula-perigo"]:hover {{ background: #f0564a; }}
-    QPushButton[variante="pilula-perigo"]:disabled {{ background: #2A2723; color: #6B655D; }}
+    QPushButton[variante="pilula-perigo"]:hover {{ background: {t['pilula_perigo_hover']}; }}
+    QPushButton[variante="pilula-perigo"]:disabled {{ background: {t['pilula_disabled_bg']}; color: {t['pilula_disabled_texto']}; }}
 
     /* Combo "Atendeu": some com a aparência de caixa de formulário e vira
        texto simples, como no mockup — continua clicável/funcional, só sem o
@@ -250,42 +250,42 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background: transparent;
       border: none;
       padding: 0 4px;
-      color: #A8A29E;
+      color: {t['combo_atendente_borda']};
       font-size: 13px;
       font-weight: 500;
     }}
     QComboBox#combo-atendente::drop-down {{ border: none; width: 14px; }}
     QComboBox#combo-atendente QAbstractItemView {{
-      background: #1C1B19;
-      border: 1px solid #242220;
-      color: #FFFFFF;
+      background: {t['combo_atendente_bg']};
+      border: 1px solid {t['borda_card']};
+      color: {t['texto']};
     }}
 
     /* Botão "Enviar Pedido à Produção", no header do card de pendentes */
     QPushButton[variante="enviar-pedido"] {{
-      background: #5EEAD4;
-      color: #082F2C;
+      background: {t['enviar_pedido_bg']};
+      color: {t['enviar_pedido_texto']};
       border: none;
       border-radius: 18px;
       padding: 8px 22px;
       font-size: 13px;
       font-weight: 800;
     }}
-    QPushButton[variante="enviar-pedido"]:hover {{ background: #7ff2df; }}
-    QPushButton[variante="enviar-pedido"]:disabled {{ background: #2A2723; color: #6B655D; }}
+    QPushButton[variante="enviar-pedido"]:hover {{ background: {t['enviar_pedido_hover']}; }}
+    QPushButton[variante="enviar-pedido"]:disabled {{ background: {t['pilula_disabled_bg']}; color: {t['pilula_disabled_texto']}; }}
 
     /* Botão "Remover" compacto na tabela de itens pendentes */
     QPushButton[variante="remover-tabela"] {{
-      background: #241416;
-      color: #F87171;
-      border: 1px solid #4C1D24;
+      background: {t['remover_tabela_bg']};
+      color: {t['remover_tabela_texto']};
+      border: 1px solid {t['remover_tabela_borda']};
       border-radius: 11px;
       font-size: 11px;
       font-weight: 700;
       height: 22px;
       padding: 0 10px;
     }}
-    QPushButton[variante="remover-tabela"]:hover {{ background: #341c20; }}
+    QPushButton[variante="remover-tabela"]:hover {{ background: {t['remover_tabela_hover']}; }}
 
     QPushButton[variante="neutro"] {{
       background: {t['superficie_2']};
@@ -439,25 +439,25 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
     QTableWidget#tabela-comanda::item {{
       padding: 2px 12px;
-      border-bottom: 1px solid #242220;
-      color: #FFFFFF;
+      border-bottom: 1px solid {t['tabela_comanda_borda']};
+      color: {t['tabela_comanda_texto']};
       font-weight: 600;
       font-size: 14px;
     }}
     QTableWidget#tabela-comanda::item:selected {{
-      background: #1E1D1B;
-      color: #FFFFFF;
+      background: {t['tabela_comanda_selecionado_bg']};
+      color: {t['tabela_comanda_texto']};
       outline: none;
     }}
     QTableWidget#tabela-comanda::item:hover {{
-      background: #1E1D1B;
+      background: {t['tabela_comanda_selecionado_bg']};
     }}
     QTableWidget#tabela-comanda QHeaderView::section {{
       background: transparent;
-      color: #78716C;
+      color: {t['secao_texto_fraco']};
       padding: 6px 12px;
       border: none;
-      border-bottom: 1px solid #242220;
+      border-bottom: 1px solid {t['tabela_comanda_borda']};
       text-transform: uppercase;
       font-size: 11px;
       font-weight: 700;
@@ -467,26 +467,26 @@ def construir_qss_app(t: dict[str, str]) -> str:
     /* ---------- Cards de seção da Comanda ---------- */
 
     #secao-pendentes {{
-      background: #161514;
-      border: 1px solid #183D39;
+      background: {t['secao_pendentes_bg']};
+      border: 1px solid {t['secao_pendentes_borda']};
       border-radius: 16px;
       padding: 8px;
     }}
     #titulo-secao-pendentes {{
-      color: #2DD4BF;
+      color: {t['secao_pendentes_titulo']};
       font-weight: 700;
       font-size: 11px;
       letter-spacing: 1.5px;
       text-transform: uppercase;
     }}
     #secao-lancados {{
-      background: #161514;
-      border: 1px solid #242220;
+      background: {t['secao_lancados_bg']};
+      border: 1px solid {t['borda_card']};
       border-radius: 16px;
       padding: 8px;
     }}
     #titulo-secao-lancados {{
-      color: #78716C;
+      color: {t['secao_texto_fraco']};
       font-weight: 700;
       font-size: 11px;
       letter-spacing: 1.5px;
@@ -496,13 +496,13 @@ def construir_qss_app(t: dict[str, str]) -> str:
     /* ---------- Barra de total (Comanda) ---------- */
 
     #barra-total {{
-      background: #DF9F3D;
+      background: {t['barra_total_bg']};
       border-radius: 10px;
       border: none;
       min-height: 34px;
     }}
     #barra-total-rotulo {{
-      color: #573A08;
+      color: {t['barra_total_texto']};
       font-size: 10px;
       font-weight: 800;
       letter-spacing: 1.5px;
@@ -511,7 +511,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background: transparent;
     }}
     #barra-total-valor {{
-      color: #0E0B05;
+      color: {t['barra_total_texto_forte']};
       font-size: 18px;
       font-weight: 900;
       background: transparent;
@@ -780,15 +780,15 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
 
     QPushButton[variante="pilula-ciano"] {{
-      background: #38bdf8;
-      color: #04222E;
+      background: {t['pilula_ciano']};
+      color: {t['pilula_ciano_texto']};
       border: none;
       border-radius: 14px;
       padding: 8px 16px;
       font-size: 12px;
       font-weight: 800;
     }}
-    QPushButton[variante="pilula-ciano"]:hover {{ background: #60cbfa; }}
+    QPushButton[variante="pilula-ciano"]:hover {{ background: {t['pilula_ciano_hover']}; }}
     QPushButton[variante="pilula-ciano"]:disabled {{ background: {t['borda']}; color: {t['texto_fraquissimo']}; }}
 
     QLabel#impressorasSelecaoLabel {{
@@ -985,13 +985,13 @@ def construir_qss_app(t: dict[str, str]) -> str:
       min-height: 18px;
     }}
     QProgressBar#relatoriosBarraRanking {{
-      background: #1C1C1A;
+      background: {t['ranking_barra_bg']};
       border: none;
       border-radius: 3px;
       max-height: 5px;
       min-height: 5px;
     }}
-    QProgressBar#relatoriosBarraRanking::chunk {{ background: #22D3EE; border-radius: 3px; }}
+    QProgressBar#relatoriosBarraRanking::chunk {{ background: {t['ranking_barra_acento']}; border-radius: 3px; }}
     QScrollArea#relatoriosRolagemRanking {{ background: transparent; border: none; }}
     QScrollArea#relatoriosRolagemRanking > QWidget > QWidget {{ background: transparent; }}
     QScrollArea#relatoriosRolagemHistorico {{ background: transparent; border: none; }}
@@ -1004,14 +1004,14 @@ def construir_qss_app(t: dict[str, str]) -> str:
        de propósito: são dois tons de ciano coexistindo em telas diferentes. */
     QPushButton[variante="pilula-ciano"] {{
       background: {t['ciano_metrica']};
-      color: #072228;
+      color: {t['pilula_ciano2_texto']};
       border: none;
       border-radius: 18px;
       padding: 7px 20px;
       font-size: 13px;
       font-weight: 700;
     }}
-    QPushButton[variante="pilula-ciano"]:hover {{ background: #67e8f9; }}
+    QPushButton[variante="pilula-ciano"]:hover {{ background: {t['pilula_ciano2_hover']}; }}
     QPushButton[variante="pilula-ciano"]:disabled {{ background: {t['borda']}; color: {t['texto_fraquissimo']}; }}
 
     QFrame#funcionariosPainel {{

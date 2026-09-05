@@ -41,6 +41,8 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.ui.widgets.kpi_card import CardKpi
+from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
+from gestor_comercial.ui.theme.controller import ThemeController
 
 # Sentinela do item "Todos" do filtro de operador — mesmo padrão do
 # Histórico Diário (`historico_caixa_view._TODOS_OS_OPERADORES`).
@@ -75,6 +77,9 @@ class DashboardMensalView(QWidget):
         self._caixas = caixa_service
         self._funcionarios = funcionario_service
         self._operador_selecionado: int | None = _TODOS_OS_OPERADORES
+        # Mesmo padrão do Histórico Diário: nenhuma pílula vem destacada até o
+        # usuário clicar em uma (igual ao seletor de operador do Login).
+        self._algum_operador_clicado = False
         self._montar_layout()
 
     # ------------------------------------------------------------------
@@ -89,7 +94,9 @@ class DashboardMensalView(QWidget):
         layout_externo.addLayout(self._montar_filtro_mes())
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
+        self._label_erro.setStyleSheet(
+            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
+        )
         layout_externo.addWidget(self._label_erro)
 
         # Corpo rolável: sem isso, os painéis (formas de pagamento, mix de
@@ -315,13 +322,14 @@ class DashboardMensalView(QWidget):
         for nome, valor in opcoes:
             pill = QPushButton(nome)
             pill.setProperty("variante", "filtro-pill")
-            pill.setProperty("ativo", valor == selecionado)
+            pill.setProperty("ativo", self._algum_operador_clicado and valor == selecionado)
             pill.clicked.connect(lambda _=False, v=valor: self._selecionar_operador(v))
             self._layout_pills_operador.addWidget(pill)
         self._operador_selecionado = selecionado
 
     def _selecionar_operador(self, operador_id: int | None) -> None:
         self._operador_selecionado = operador_id
+        self._algum_operador_clicado = True
         self._popular_pills_operador()
         self._carregar()
 
@@ -380,7 +388,14 @@ class DashboardMensalView(QWidget):
         for indice, item in enumerate(resumo.ranking_produtos, start=1):
             proporcao = int((item.valor_total / maior_valor) * 100) if maior_valor else 0
             self._layout_ranking.addLayout(
-                _criar_linha_ranking(indice, item.produto_nome, item.quantidade, item.valor_total, proporcao)
+                _criar_linha_ranking(
+                    indice,
+                    item.produto_nome,
+                    item.quantidade,
+                    item.valor_total,
+                    proporcao,
+                    item.imagem_path,
+                )
             )
         self._layout_ranking.addStretch()
 
@@ -443,8 +458,16 @@ def _criar_linha_forma(nome: str, valor: Decimal, percentual: Decimal) -> QVBoxL
     return bloco
 
 
+_TAMANHO_MINIATURA_RANKING = 28
+
+
 def _criar_linha_ranking(
-    indice: int, produto_nome: str, quantidade: int, valor_total: Decimal, proporcao: int
+    indice: int,
+    produto_nome: str,
+    quantidade: int,
+    valor_total: Decimal,
+    proporcao: int,
+    imagem_path: str | None = None,
 ) -> QVBoxLayout:
     bloco = QVBoxLayout()
     bloco.setSpacing(6)
@@ -456,6 +479,11 @@ def _criar_linha_ranking(
     label_indice.setFixedWidth(24)
     label_indice.setMinimumHeight(18)
     topo.addWidget(label_indice)
+
+    label_miniatura = QLabel()
+    label_miniatura.setFixedSize(_TAMANHO_MINIATURA_RANKING, _TAMANHO_MINIATURA_RANKING)
+    label_miniatura.setPixmap(obter_pixmap(imagem_path, _TAMANHO_MINIATURA_RANKING, produto_nome))
+    topo.addWidget(label_miniatura)
 
     label_nome = QLabel(produto_nome)
     label_nome.setObjectName("relatoriosRankNome")

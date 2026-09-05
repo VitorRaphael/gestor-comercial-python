@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.exceptions import AcessoNegadoError, NaoAutorizadoError
+from gestor_comercial.ui.theme.controller import ThemeController
 
 
 class GerentePinDialog(QDialog):
@@ -41,7 +42,9 @@ class GerentePinDialog(QDialog):
         layout.addLayout(formulario)
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
+        self._label_erro.setStyleSheet(
+            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
+        )
         layout.addWidget(self._label_erro)
 
         botoes = QDialogButtonBox(

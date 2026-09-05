@@ -54,6 +54,7 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
+from gestor_comercial.ui.theme.controller import ThemeController
 
 # Coluna 0 é só o traço indicador (~4px) da linha selecionada -- não é
 # impressora nenhuma, então não entra em `_preencher_linha` como dado.
@@ -125,7 +126,9 @@ class ImpressorasView(QWidget):
         layout.addSpacing(20)
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
+        self._label_erro.setStyleSheet(
+            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
+        )
         layout.addWidget(self._label_erro)
 
         self._aviso = AvisoDeImpressao()

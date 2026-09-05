@@ -52,6 +52,7 @@ from gestor_comercial.services.exceptions import (
 from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.pagamento_service import PagamentoService
 from gestor_comercial.ui.rotulo_identidade import rotulo_identidade
+from gestor_comercial.ui.theme.controller import ThemeController
 
 _CARGOS_SUGERIDOS = [cargo.value for cargo in CargoFuncionario]
 
@@ -108,7 +109,9 @@ class FuncionariosView(QWidget):
         layout_externo.addLayout(self._montar_cabecalho())
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
+        self._label_erro.setStyleSheet(
+            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
+        )
         layout_externo.addWidget(self._label_erro)
 
         layout_externo.addLayout(self._montar_kpis())

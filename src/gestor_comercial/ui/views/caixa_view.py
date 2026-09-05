@@ -42,6 +42,7 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 from gestor_comercial.services.impressao_service import ImpressaoService
+from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
 
@@ -71,8 +72,12 @@ _FORMAS_RECEBIMENTO = [
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
-_COR_TEXTO = QColor("#F1F3F5")
-_COR_PERIGO = QColor("#ef4444")
+def _cor_texto() -> QColor:
+    return QColor(ThemeController.instancia().tokens_atuais["texto"])
+
+
+def _cor_perigo() -> QColor:
+    return QColor(ThemeController.instancia().tokens_atuais["perigo"])
 
 
 class CaixaView(QWidget):
@@ -107,7 +112,9 @@ class CaixaView(QWidget):
         layout_externo.addLayout(self._montar_cabecalho())
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
+        self._label_erro.setStyleSheet(
+            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
+        )
         layout_externo.addWidget(self._label_erro)
 
         self._aviso_impressao = AvisoDeImpressao()
@@ -492,7 +499,7 @@ class CaixaView(QWidget):
         prefixo = "- " if sai_da_gaveta else ""
         item_valor = QTableWidgetItem(f"{prefixo}{_formatar_reais(movimento.valor)}")
         item_valor.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        item_valor.setForeground(_COR_PERIGO if sai_da_gaveta else _COR_TEXTO)
+        item_valor.setForeground(_cor_perigo() if sai_da_gaveta else _cor_texto())
         self._tabela.setItem(linha, 3, item_valor)
 
     # ------------------------------------------------------------------
