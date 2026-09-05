@@ -12,6 +12,7 @@ view isolada, como os testes manuais desta sessão já fizeram.
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -64,6 +65,13 @@ from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
 # da área da Loja (ex.: clique direto em "Mesas"). "Configurações" fica de
 # fora: não expõe dado sensível, não precisa de PIN.
 _ROTULOS_LOJA = {"Loja", "Cardápio", "Estoque", "Impressoras", "Funcionários", "Relatórios"}
+
+# Módulos alcançados só a partir de um card da Central de Loja (todo
+# `_ROTULOS_LOJA` menos o próprio hub, mais "Configurações", que não é
+# PIN-gated): mostram a barra "← Central de Loja" (ver
+# `_montar_barra_voltar_loja`/`_navegar_agora`) porque não têm outro caminho
+# de volta visível dentro da própria tela.
+_MODULOS_HUB = (_ROTULOS_LOJA - {"Loja"}) | {"Configurações"}
 
 _ROTULOS_PERFIL = {
     PerfilUsuario.ADMIN: "Admin",
@@ -130,6 +138,7 @@ class MainWindow(QMainWindow):
         coluna_direita = QVBoxLayout()
         coluna_direita.setContentsMargins(24, 20, 24, 20)
         coluna_direita.addLayout(self._montar_barra_usuario())
+        coluna_direita.addWidget(self._montar_barra_voltar_loja())
 
         self._mesas_view = MesasView(comanda_service)
         self._mesas_view.comanda_aberta.connect(self._abrir_comanda)
@@ -274,6 +283,24 @@ class MainWindow(QMainWindow):
         barra.addWidget(self._aviso_impressao)
         return barra
 
+    def _montar_barra_voltar_loja(self) -> QWidget:
+        """Único caminho de volta visível dentro de um módulo administrativo
+        (Cardápio, Estoque, Funcionários, Impressoras, Relatórios,
+        Configurações): sem isto, sair de um desses exigia lembrar que o
+        próprio botão "Central de Loja" da sidebar também serve pra voltar.
+        Fica oculta fora desses módulos (ver `_navegar_agora`)."""
+        self._barra_voltar_loja = QWidget()
+        layout = QHBoxLayout(self._barra_voltar_loja)
+        layout.setContentsMargins(0, 0, 0, 12)
+        botao = QPushButton("← Central de Loja")
+        botao.setProperty("variante", "voltar-pdv")
+        botao.setCursor(Qt.CursorShape.PointingHandCursor)
+        botao.clicked.connect(lambda: self._abrir_area_loja("Loja"))
+        layout.addWidget(botao)
+        layout.addStretch()
+        self._barra_voltar_loja.setVisible(False)
+        return self._barra_voltar_loja
+
     # ------------------------------------------------------------------
     # Navegação dentro do shell
     # ------------------------------------------------------------------
@@ -333,6 +360,7 @@ class MainWindow(QMainWindow):
         pagina, recarregar = self._destinos_nav[rotulo]()
         recarregar()
         self._mostrar_pagina(pagina)
+        self._barra_voltar_loja.setVisible(rotulo in _MODULOS_HUB)
         # Sair de um dos módulos administrativos sem passar pelo "← Voltar
         # ao PDV" do hub (ex.: clicando direto em "Mesas" na sidebar) também
         # tranca a Loja — o PIN nunca deve valer para a próxima entrada.
