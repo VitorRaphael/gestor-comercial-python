@@ -24,12 +24,12 @@ Uma tentativa anterior deste porte (pasta `PVD Python`, repositório `pvd-food-t
 Portado integralmente do Gestor Comercial, **exceto** os itens cortados abaixo (ver §5 Backlog).
 
 ### 3.1 Autenticação e Sessão
-- **`Usuario` é a única entidade de login** — não confundir com `Funcionario` (§3.11), que não loga. Login por PIN numérico (hash SHA-256 + salt por usuário), sem usuário/senha tradicional.
+- **`Usuario` é a única entidade de login** — não confundir com `Funcionario` (§3.11), que não loga. Desde 2026-09-05 (§3.13), `Usuario` **não tem PIN próprio**: login valida o PIN digitado contra a cascata de 3 níveis de `LojaConfig` (Senha de Login / Operacional / Master), e o dropdown de operador escolhido na tela (`login_como`) é quem decide QUEM está entrando — `Usuario` só guarda nome, `perfil` e `ativo`.
 - Usuário autenticado mantido em memória do processo (não há token HTTP — é um app de processo único).
-- Reautenticação de PIN de Gerente para ações críticas, sem trocar o usuário da sessão principal.
-- Perfis: `ADMIN` / `GERENTE` / `OPERADOR_CAIXA`. Ações administrativas (`exigir_gerente`) exigem `ADMIN` ou `GERENTE`.
-- Não permite dois usuários ativos com o mesmo PIN.
+- Reautenticação por PIN da loja (Nível 2 — Operacional/Caixa, ou Nível 3 — Master/Dono, conforme a ação) para ações críticas, sem trocar o usuário da sessão principal (`AuthService.validar_pin_gerente`/`validar_pin_dono`).
+- Perfis: `ADMIN` / `GERENTE` / `OPERADOR_CAIXA`. Ações administrativas (`exigir_gerente`) exigem `ADMIN` ou `GERENTE` — isso é ortogonal à cascata de PIN: `perfil` decide QUEM pode fazer um cadastro/desativação, o PIN da loja decide se a AÇÃO em si (cancelamento, abertura de caixa, Central de Loja) está liberada.
 - Migração de 2026-08-28 (separação Usuario/Funcionario): todo `ATENDENTE` existente virou `Usuario(OPERADOR_CAIXA)` — continuam logando normalmente. Atendentes/garçons sem login são cadastrados à parte como `Funcionario` (§3.11).
+- Migração de 2026-09-05 (`490c75504570`, ver §3.13): remove `pin_hash`/`salt` de `Usuario` — não existe mais "PIN já em uso por outro usuário ativo" nem PIN individual redefinível por operador; todos compartilham os mesmos 3 segredos da loja.
 
 ### 3.2 Cardápio — Categorias e Produtos
 - CRUD de categoria (nome único); exclusão bloqueada se houver produtos vinculados; desativação soft.
@@ -98,6 +98,48 @@ Portado integralmente do Gestor Comercial, **exceto** os itens cortados abaixo (
 - **Escopo dos cupons**: comanda de produção (cozinha), recibo do cliente (itens, total, pagamentos por forma, troco) e relatório de fechamento de caixa (abertura, total por forma, sangrias/reforços/despesas, saldo esperado — números vindos prontos do `caixa_service`, sem recalcular).
 - **RNF inegociável**: falha de impressora nunca derruba a venda. `ErroDeImpressao` fica presa em `hardware/` + `impressao_service` e vira `ResultadoImpressao(sucesso=False)` com mensagem para o operador; só `RecursoNaoEncontradoError` e `NaoAutorizadoError` sobem.
 - **A impressão roda na thread da UI**, com cursor de espera e timeout curto (3 s), e não em `QThread`: o app usa um único `UnitOfWork`/`Session` por processo, e `Session` do SQLAlchemy não é thread-safe — jogar isso para outra thread trocaria um congelamento de 3 s por corrupção de dados.
+
+### 3.13 Senhas e Acesso — cascata de 3 níveis de PIN
+
+Unificação (2026-09-05) de dois sistemas de PIN que existiam em paralelo: o
+PIN pessoal de `Usuario` (usado no login) e os segredos operacionais de
+`LojaConfig` (Senha Operacional/Gerente, Senha Master/Dono). Hoje há uma
+única cascata, toda em `LojaConfig` (singleton id=1, `LojaConfigService`),
+com hash+salt SHA-256 (nunca texto puro, `AuthService.hash_pin`) e mascarada
+como `••••••••` na tela de Configurações:
+
+| Nível | Segredo | Padrão de fábrica | Escopo |
+|---|---|---|---|
+| 1 | Senha de Login | `26407200` | Desbloquear o terminal na tela de login (qualquer operador do dropdown), visualizar o mapa de mesas, abrir comandas. |
+| 2 | Senha Operacional (Caixa) | `26407200` | Tela "Caixa", gaveta (sangria/reforço/fechamento de turno), autorizar cancelamento/estorno. |
+| 3 | Senha Master (Dono) | `050727` | Central de Loja, relatórios financeiros, precificação, cadastro de equipe, configurações do sistema. |
+| — | CPF do Dono | *(não definido)* | Chave mestra — só serve para redefinir a Senha Master. |
+
+**Cascata (nível acima autentica onde nível abaixo é pedido)**: quem digita
+a Senha Master passa em qualquer checagem de Nível 1 ou 2; quem digita a
+Operacional passa em qualquer checagem de Nível 1. O inverso nunca vale.
+Implementado em `AuthService.validar_pin_nivel(pin, nivel_minimo)`, que testa
+do Nível 3 para baixo até `nivel_minimo` e para no primeiro que confere.
+`validar_pin_gerente` (Nível 2) e `validar_pin_dono` (Nível 3) são atalhos
+dessa função para os dois pontos de reautenticação mais comuns
+(cancelamento/estorno de comanda e Central de Loja/`LojaPinDialog`).
+
+**Troca de cada segredo (sempre exige o de nível acima, ou o "ou" do Nível
+1)**:
+- Nível 1 (Login): exige a Senha Operacional **ou** a Master (`LojaConfigService.alterar_senha_login`).
+- Nível 2 (Operacional): exige a Senha Master (`alterar_senha_operacional`, sem mudança de nome de coluna — só o rótulo de tela mudou de "Senha Operacional (Gerente)" para refletir que é o segredo de Caixa).
+- Nível 3 (Master): exige o CPF do Dono (`alterar_senha_master`).
+- CPF do Dono: exige o CPF atual já cadastrado (`definir_ou_alterar_cpf_dono`).
+
+Login (`AuthService.login_como`) aceita qualquer um dos 3 níveis para o
+operador **escolhido no dropdown** — a identidade vem da seleção, não do
+PIN (dois operadores podem legitimamente compartilhar a mesma senha, ex.:
+Caixa Turno - Manhã/Noite).
+
+Migração `490c75504570` (segue `f4b2c8e1a7d5`): adiciona
+`loja_config.senha_login_hash/salt` (backfill com o PIN padrão) e remove
+`usuarios.pin_hash`/`usuarios.salt` — destrutiva, sem downgrade de dado (só
+recria as colunas nullable).
 
 ## 4. Diagramas de referência
 
@@ -273,3 +315,6 @@ gestor-comercial-python/
 - 2026-09-03 — **Lacuna da Fase 4 fechada: UI de associação categoria↔impressora.** `associar_impressora` já existia em `cardapio_service.py` desde a Fase 4, mas nenhuma tela chamava — nem `cardapio_view.py` (que só tem o comentário "isso é responsabilidade da tela Impressoras"), nem `impressoras_view.py` (que só tinha CRUD de conexão). `CardapioService` ganhou `desassociar_impressora` e `listar_categorias_da_impressora`; `impressoras_view.py` ganhou um painel lateral com checklist de categorias ao selecionar uma impressora na tabela — marcar/desmarcar chama o service na hora, e marcar numa impressora troca o vínculo (1:N por FK), nunca duplica. 6 testes novos em `test_cardapio_service.py` + smoke headless confirmando a troca sem duplicidade. Suíte em **555 testes, 100% verde**.
 - 2026-08-22 — **Fase 5 iniciada: empacotamento.** `packaging/build.spec` criado e validado com um build local real (`GestorComercial.exe`, ~69 MB, onefile). `main.py` ganhou `_raiz_recursos()`: em dev continua resolvendo a raiz do repo por `__file__`, mas rodando empacotado usa `sys._MEIPASS` — sem isso o `.exe` não acharia `alembic.ini`/`migrations/`/`resources/qss/base.qss`, que viajam no bundle via `datas` do spec. No caminho apareceu um bug real: o `.exe` abria e caía direto no diálogo "Erro ao iniciar" com `No module named 'logging.config'`, porque `migrations/env.py` só existe pro PyInstaller como arquivo de dado — o Alembic executa ele em runtime, e os imports de dentro dele não entram na análise estática do spec. Corrigido adicionando `logging.config` (e os módulos que o `python-escpos`/Windows-printing importam sob demanda: `escpos.printer`, `win32print`, `win32ui`) em `hiddenimports`. Build final (`console=False`) testado rodando o `.exe` isolado: sobe, aplica as migrations, roda o seed e cria `~/.gestor_comercial/gestor_comercial.db` sem erro — mas isso ainda é a máquina de dev, não prova nada sobre uma máquina sem Python (roteiro em `docs/checklist-maquina-limpa.md`, ainda não executado).
   Resiliência a queda de energia automatizada em `tests/integration/test_resiliencia_queda_energia.py`: sobe um processo Python real, escreve uma `Mesa`, e o processo de teste mata esse processo à força (`TerminateProcess`, sem cleanup) logo depois do `flush()`/`commit()` — a aproximação mais realista de queda de energia que dá pra automatizar sem desligar a máquina de verdade. Prova duas coisas sobre o SQLite puro (sem lógica nossa por trás — só não desligamos `synchronous`/`journal_mode` padrão nem commitamos cedo demais): escrita sem commit é desfeita sozinha ao reabrir o arquivo (rollback journal), escrita commitada sobrevive. Suíte em **489 testes, 100% verde**. Próximo: rodar `docs/checklist-maquina-limpa.md` numa máquina Windows de verdade sem Python instalado.
+- 2026-09-05 — **Unificação da cascata de 3 níveis de PIN (§3.13).** Dois sistemas de PIN paralelos (PIN pessoal de `Usuario` + segredos operacionais de `LojaConfig`) viraram um só: `LojaConfig` ganhou `senha_login_hash/salt` (Nível 1, padrão "26407200"), `AuthService` ganhou `validar_pin_nivel(pin, nivel_minimo)` (cascata genérica, Nível 3 → 1) e os atalhos `validar_pin_gerente`/`validar_pin_dono` (Nível 2/3); `login_como` passou a validar contra a cascata em vez do PIN de `Usuario`. `Usuario.pin_hash`/`salt` removidos (migration `490c75504570`, destrutiva) — `criar_usuario` não recebe mais PIN, e a feature "Editar senha do Caixa" de `funcionarios_view.py` (que redefinia um PIN pessoal por operador) foi removida por não fazer mais sentido sem PIN individual. `LojaPinDialog` (Central de Loja) parou de usar um hash fixo embutido no arquivo e passou a chamar `AuthService.validar_pin_dono` (Nível 3), igual `GerentePinDialog` já fazia para o Nível 2. Tela de Configurações ganhou a 4ª linha "Senha de Login" em Senhas e Acesso, exigindo Nível 2 ou 3 para trocar. Suíte ajustada (PIN pessoal removido de todos os fixtures/testes) com cobertura nova da cascata em cada nível e de cada troca; 1 falha pré-existente e não relacionada (`test_resumo_mensal_sem_nenhum_fechamento_no_mes`, ligada ao WIP não commitado de `dashboard_mensal_view.py`/`historico_caixa_view.py`) permanece de fora deste trabalho.
+
+- 2026-09-05 — **Unificação da cascata de 3 níveis de PIN (§3.13).** Dois sistemas de PIN paralelos (PIN pessoal de  + segredos operacionais de ) viraram um só:  ganhou  (Nível 1, padrão ),  ganhou  (cascata genérica, Nível 3 -> 1) e os atalhos / (Nível 2/3);  passou a validar contra a cascata em vez do PIN de . / removidos (migration , destrutiva) —  não recebe mais PIN, e a feature "Editar senha do Caixa" de  (que redefinia um PIN pessoal por operador) foi removida por não fazer mais sentido sem PIN individual.  (Central de Loja) parou de usar um hash fixo embutido no arquivo e passou a chamar  (Nível 3), igual  já fazia para o Nível 2. Tela de Configurações ganhou a 4ª linha "Senha de Login" em Senhas e Acesso, exigindo Nível 2 ou 3 para trocar. Suíte ajustada (PIN pessoal removido de todos os fixtures/testes) com **cobertura nova da cascata em cada nível e de cada troca**; 1 falha pré-existente e não relacionada (, ligada ao WIP não commitado de /) permanece de fora deste trabalho.

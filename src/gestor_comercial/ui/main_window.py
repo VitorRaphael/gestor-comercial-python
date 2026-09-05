@@ -327,7 +327,7 @@ class MainWindow(QMainWindow):
             # Reautenticação a cada acesso, não só na primeira vez: um PIN
             # digitado há uma hora não prova quem está com o mouse na mão
             # agora, e a área guarda faturamento/diferença de caixa do mês.
-            modal = LojaPinDialog(self)
+            modal = LojaPinDialog(self._auth, self)
             if modal.exec() != QDialog.DialogCode.Accepted:
                 return
             self._loja_desbloqueada = True

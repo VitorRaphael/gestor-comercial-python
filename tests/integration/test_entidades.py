@@ -25,7 +25,7 @@ from gestor_comercial.domain.usuario import Usuario
 
 
 def test_usuario(session):
-    usuario = Usuario(nome="Gerente", pin_hash="h", salt="s", perfil=PerfilUsuario.GERENTE)
+    usuario = Usuario(nome="Gerente", perfil=PerfilUsuario.GERENTE)
     session.add(usuario)
     session.commit()
 
@@ -93,7 +93,7 @@ def test_produto_e_combo_item(session):
 
 
 def test_caixa_e_movimento_caixa(session):
-    usuario = Usuario(nome="Operador", pin_hash="h", salt="s", perfil=PerfilUsuario.OPERADOR_CAIXA)
+    usuario = Usuario(nome="Operador", perfil=PerfilUsuario.OPERADOR_CAIXA)
     session.add(usuario)
     session.flush()
 
@@ -118,7 +118,7 @@ def test_caixa_e_movimento_caixa(session):
 
 
 def test_comanda_item_e_pagamento(session):
-    usuario = Usuario(nome="Operador", pin_hash="h", salt="s", perfil=PerfilUsuario.OPERADOR_CAIXA)
+    usuario = Usuario(nome="Operador", perfil=PerfilUsuario.OPERADOR_CAIXA)
     atendente = Funcionario(nome="Garçom", cargo="Garçom")
     mesa = Mesa(numero=5)
     caixa = Caixa(valor_abertura=Decimal("100.00"), aberto_em=datetime(2026, 8, 20, 8, 0))
@@ -168,8 +168,8 @@ def test_comanda_item_e_pagamento(session):
 
 def test_pagamento_consumo_interno_e_quitacao_consumo(session):
     atendente = Funcionario(nome="Garçom", cargo="Garçom")
-    operador = Usuario(nome="Operador", pin_hash="h", salt="s", perfil=PerfilUsuario.OPERADOR_CAIXA)
-    gerente = Usuario(nome="Gerente", pin_hash="h", salt="s", perfil=PerfilUsuario.GERENTE)
+    operador = Usuario(nome="Operador", perfil=PerfilUsuario.OPERADOR_CAIXA)
+    gerente = Usuario(nome="Gerente", perfil=PerfilUsuario.GERENTE)
     caixa = Caixa(valor_abertura=Decimal("100.00"), aberto_em=datetime(2026, 8, 20, 8, 0))
     session.add_all([atendente, operador, gerente, caixa])
     session.flush()

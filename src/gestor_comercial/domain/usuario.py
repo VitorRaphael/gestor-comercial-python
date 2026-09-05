@@ -6,15 +6,21 @@ from gestor_comercial.repository.base import Base
 
 
 class Usuario(Base):
-    """Quem loga no sistema com PIN (§3.1). Não confundir com `Funcionario`
-    (atendimento, sem login) — ver docs/arquitetura.md §3.1/§3.11."""
+    """Quem loga no sistema (§3.1). Não confundir com `Funcionario`
+    (atendimento, sem login) — ver docs/arquitetura.md §3.1/§3.11.
+
+    Não tem mais PIN pessoal (removido em favor da cascata de 3 níveis de
+    `LojaConfig`/`LojaConfigService` — Senha de Login, Senha Operacional,
+    Senha Master, ver `AuthService.validar_pin_nivel`): esta entidade só
+    identifica QUEM está logando (nome, `perfil` para `exigir_gerente()`,
+    `ativo`) — a validação do PIN em si acontece contra a loja, não contra
+    o usuário.
+    """
 
     __tablename__ = "usuarios"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     nome: Mapped[str] = mapped_column(String(120), nullable=False)
-    pin_hash: Mapped[str] = mapped_column(String(128), nullable=False)
-    salt: Mapped[str] = mapped_column(String(64), nullable=False)
     perfil: Mapped[PerfilUsuario] = mapped_column(Enum(PerfilUsuario), nullable=False)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

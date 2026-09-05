@@ -203,7 +203,6 @@ class FuncionariosView(QWidget):
         self._painel_detalhe.baixa_solicitada.connect(self._quitar_id)
         self._painel_detalhe.alternar_status_solicitado.connect(self._alternar_status_id)
         self._painel_detalhe.excluir_solicitado.connect(self._excluir_id)
-        self._painel_detalhe.editar_senha_solicitado.connect(self._editar_senha_id)
         return self._painel_detalhe
 
     # ------------------------------------------------------------------
@@ -374,25 +373,6 @@ class FuncionariosView(QWidget):
         self._selecionado_id = None
         self.atualizar()
 
-    def _editar_senha_id(self, funcionario_id: int) -> None:
-        funcionario = self._funcionario_por_id(funcionario_id)
-        if funcionario is None:
-            return
-
-        modal = _SenhaCaixaDialog(funcionario.nome, self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
-            return
-        senha_autorizacao, nova_senha = modal.resultado()
-
-        self._label_erro.setText("")
-        try:
-            self._auth.validar_pin_gerente_ou_dono(senha_autorizacao)
-            self._auth.definir_pin_operador_caixa(funcionario.nome, nova_senha)
-        except _ERROS_SERVICE as erro:
-            self._label_erro.setText(str(erro))
-            return
-        self.atualizar()
-
     def _quitar(self) -> None:
         self._quitar_id(self._selecionado_id)
 
@@ -514,7 +494,6 @@ class _PainelDetalheFuncionario(QFrame):
     baixa_solicitada = Signal(int)
     alternar_status_solicitado = Signal(int)
     excluir_solicitado = Signal(int)
-    editar_senha_solicitado = Signal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -599,11 +578,6 @@ class _PainelDetalheFuncionario(QFrame):
         linha2.addWidget(self._botao_excluir)
         layout.addLayout(linha2)
 
-        self._botao_editar_senha = QPushButton("Editar senha do Caixa")
-        self._botao_editar_senha.setProperty("variante", "pilula-vazia")
-        self._botao_editar_senha.clicked.connect(self._emitir_editar_senha)
-        layout.addWidget(self._botao_editar_senha)
-
         area.setWidget(conteudo)
         layout_externo = QVBoxLayout(self)
         layout_externo.setContentsMargins(0, 0, 0, 0)
@@ -629,7 +603,6 @@ class _PainelDetalheFuncionario(QFrame):
 
         eh_caixa = funcionario.cargo == CargoFuncionario.CAIXA.value
         self._label_senha.setText("••••••" if eh_caixa else "—")
-        self._botao_editar_senha.setVisible(eh_caixa)
 
         self._botao_status.setText("Desativar" if funcionario.ativo else "Ativar")
         self._botao_baixa.setEnabled(saldo > 0)
@@ -646,7 +619,6 @@ class _PainelDetalheFuncionario(QFrame):
         self._label_telefone.setText("—")
         self._label_turno.setText("—")
         self._label_senha.setText("—")
-        self._botao_editar_senha.setVisible(False)
 
     def _emitir_editar(self) -> None:
         if self._funcionario_id is not None:
@@ -664,9 +636,6 @@ class _PainelDetalheFuncionario(QFrame):
         if self._funcionario_id is not None:
             self.excluir_solicitado.emit(self._funcionario_id)
 
-    def _emitir_editar_senha(self) -> None:
-        if self._funcionario_id is not None:
-            self.editar_senha_solicitado.emit(self._funcionario_id)
 
 
 def _linha_meta(layout_pai: QVBoxLayout, rotulo: str) -> QLabel:
@@ -768,62 +737,6 @@ class _QuitarConsumoDialog(QDialog):
         valor = Decimal(self._campo_valor.text().strip().replace(",", "."))
         senha_gerente = self._campo_senha_gerente.text().strip()
         return valor, senha_gerente
-
-
-class _SenhaCaixaDialog(QDialog):
-    """Modal de redefinição de senha de login de um operador de Caixa.
-
-    Exige a Senha do Gerente OU do Dono para autorizar (§ pedido do Vitor,
-    2026-09-12) — quem confere isso é `AuthService.validar_pin_gerente_ou_dono`,
-    chamado pela view mãe antes de `AuthService.definir_pin_operador_caixa`;
-    este modal só coleta os dois valores.
-    """
-
-    def __init__(self, nome_funcionario: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(f"Editar senha do Caixa — {nome_funcionario}")
-
-        layout = QVBoxLayout(self)
-        formulario = QFormLayout()
-
-        self._campo_autorizacao = QLineEdit()
-        self._campo_autorizacao.setEchoMode(QLineEdit.EchoMode.Password)
-        formulario.addRow("Senha do Gerente ou do Dono", self._campo_autorizacao)
-
-        self._campo_nova_senha = QLineEdit()
-        self._campo_nova_senha.setEchoMode(QLineEdit.EchoMode.Password)
-        formulario.addRow("Nova senha do Caixa", self._campo_nova_senha)
-
-        self._campo_confirmar_senha = QLineEdit()
-        self._campo_confirmar_senha.setEchoMode(QLineEdit.EchoMode.Password)
-        formulario.addRow("Confirmar nova senha", self._campo_confirmar_senha)
-
-        layout.addLayout(formulario)
-
-        self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
-        layout.addWidget(self._label_erro)
-
-        botoes = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        botoes.button(QDialogButtonBox.StandardButton.Ok).setText("Salvar")
-        botoes.accepted.connect(self._validar_e_aceitar)
-        botoes.rejected.connect(self.reject)
-        layout.addWidget(botoes)
-
-    def _validar_e_aceitar(self) -> None:
-        nova = self._campo_nova_senha.text().strip()
-        confirmar = self._campo_confirmar_senha.text().strip()
-        if nova != confirmar:
-            self._label_erro.setText("As duas senhas não são iguais.")
-            return
-        self.accept()
-
-    def resultado(self) -> tuple[str, str]:
-        """(senha_autorizacao, nova_senha) — validação de formato do PIN
-        (4-8 dígitos) fica a cargo de `AuthService.definir_pin_operador_caixa`."""
-        return self._campo_autorizacao.text().strip(), self._campo_nova_senha.text().strip()
 
 
 def _iniciais(nome: str) -> str:

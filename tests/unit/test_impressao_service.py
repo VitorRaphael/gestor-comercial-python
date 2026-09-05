@@ -42,9 +42,7 @@ from gestor_comercial.services.impressao_service import (
     ImpressaoService,
 )
 from gestor_comercial.services.pagamento_service import PagamentoService
-from tests.conftest import FabricaDeDriverFalso
-
-PIN_NOME_COMPRIDO = "333333"
+from tests.conftest import PIN_ATENDENTE, FabricaDeDriverFalso
 
 
 @pytest.fixture
@@ -1239,14 +1237,14 @@ def test_nome_comprido_de_funcionario_nao_estoura_a_bobina(
     As linhas "Atendente:" e "Conferido por:" precisam passar pelo formatador
     igual ao nome do produto, senão saem quebradas torto no papel."""
     atendente = auth.criar_usuario(
-        "Ana Carolina Rodrigues do Nascimento", PIN_NOME_COMPRIDO, PerfilUsuario.OPERADOR_CAIXA
+        "Ana Carolina Rodrigues do Nascimento", PerfilUsuario.OPERADOR_CAIXA
     )
     cozinha = nova_impressora(uow, "Cozinha", padrao=True, colunas=32)
     lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger", "20.00", cozinha)
     comanda = nova_comanda(uow, caixa_aberto, atendente, mesa)
     novo_item(uow, comanda, lanche)
     impressao = ImpressaoService(uow, auth, abrir_driver=driver)
-    auth.login(PIN_NOME_COMPRIDO)
+    auth.login_como(atendente.id, PIN_ATENDENTE)
 
     impressao.imprimir_comanda(comanda.id)
     impressao.imprimir_recibo(comanda.id)

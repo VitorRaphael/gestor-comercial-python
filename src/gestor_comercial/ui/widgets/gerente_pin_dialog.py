@@ -1,12 +1,11 @@
 """Elevação rápida por PIN de gerente para a área "Caixa" da sidebar.
 
-Diferente de `LojaPinDialog` (código de supervisor único e fixo, sem passar
-por `AuthService`), este modal reautentica contra o PIN de um `Usuario`
-gerente de verdade cadastrado no sistema — mesmo mecanismo que
-`AuthService.validar_pin_gerente` já usa para autorizar cancelamento de item/
-comanda (ver `CancelamentoDialog`), só que aqui trancando uma tela inteira em
-vez de uma ação pontual.
-"""
+Reautentica contra a Senha Operacional (Caixa, Nível 2) OU a Senha Master
+(Dono, Nível 3) da loja (§3.13, cascata de `AuthService.validar_pin_nivel`)
+— mesmo mecanismo que `AuthService.validar_pin_gerente` já usa para
+autorizar cancelamento de item/comanda (ver `CancelamentoDialog`), só que
+aqui trancando uma tela inteira em vez de uma ação pontual. Não há mais PIN
+pessoal de `Usuario`: qualquer um dos dois segredos da loja libera."""
 
 from __future__ import annotations
 

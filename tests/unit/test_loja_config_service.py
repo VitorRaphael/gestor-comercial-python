@@ -3,6 +3,7 @@ from sqlalchemy import text
 
 from gestor_comercial.services.exceptions import AcessoNegadoError, RegraDeNegocioError
 from gestor_comercial.services.loja_config_service import (
+    SENHA_LOGIN_PADRAO,
     SENHA_MASTER_PADRAO,
     SENHA_OPERACIONAL_PADRAO,
     LojaConfigService,
@@ -17,6 +18,7 @@ def loja_config(uow):
 def test_bootstrap_cria_singleton_com_senhas_padrao(loja_config):
     loja_config.validar_senha_master(SENHA_MASTER_PADRAO)
     loja_config.validar_senha_operacional(SENHA_OPERACIONAL_PADRAO)
+    loja_config.validar_senha_login(SENHA_LOGIN_PADRAO)
 
 
 def test_bootstrap_e_idempotente(uow, loja_config):
@@ -74,6 +76,31 @@ def test_cpf_invalido_e_recusado(loja_config):
 def test_senha_operacional_confere_nao_levanta_erro(loja_config):
     assert loja_config.senha_operacional_confere(SENHA_OPERACIONAL_PADRAO) is True
     assert loja_config.senha_operacional_confere("errada") is False
+
+
+def test_senha_login_errada_nao_confere(loja_config):
+    with pytest.raises(AcessoNegadoError):
+        loja_config.validar_senha_login("000000")
+
+
+def test_senha_login_confere_nao_levanta_erro(loja_config):
+    assert loja_config.senha_login_confere(SENHA_LOGIN_PADRAO) is True
+    assert loja_config.senha_login_confere("errada") is False
+
+
+def test_alterar_senha_login_exige_operacional_ou_master(loja_config):
+    with pytest.raises(AcessoNegadoError):
+        loja_config.alterar_senha_login("senha-errada", "nova-senha-login")
+
+    loja_config.alterar_senha_login(SENHA_OPERACIONAL_PADRAO, "nova-senha-login")
+    loja_config.validar_senha_login("nova-senha-login")
+    with pytest.raises(AcessoNegadoError):
+        loja_config.validar_senha_login(SENHA_LOGIN_PADRAO)
+
+
+def test_alterar_senha_login_aceita_a_master_tambem(loja_config):
+    loja_config.alterar_senha_login(SENHA_MASTER_PADRAO, "outra-nova-senha-login")
+    loja_config.validar_senha_login("outra-nova-senha-login")
 
 
 def test_mascarar_sempre_devolve_pontos():

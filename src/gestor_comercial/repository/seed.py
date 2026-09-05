@@ -1,6 +1,3 @@
-import base64
-import hashlib
-import os
 from decimal import Decimal
 
 from gestor_comercial.domain.categoria import Categoria
@@ -222,15 +219,16 @@ def seed_mesas(session) -> None:
 
 
 def seed_usuarios_turno(session) -> None:
+    # Sem PIN pessoal (§3.13, cascata unificada): o `Usuario` só existe pra
+    # identificar QUEM está logando no dropdown da tela de login — a senha
+    # em si (Nível 1, padrão "26407200") vive em `LojaConfig`, bootstrapada
+    # por `LojaConfigService.obter_ou_criar()`, não aqui.
     if session.query(Usuario).count() > 0:
         return
     for nome in (NOME_CAIXA_MANHA, NOME_CAIXA_NOITE):
-        salt = gerar_salt()
         session.add(
             Usuario(
                 nome=nome,
-                pin_hash=hash_pin(PIN_CAIXA_PADRAO, salt),
-                salt=salt,
                 perfil=PerfilUsuario.GERENTE,
             )
         )

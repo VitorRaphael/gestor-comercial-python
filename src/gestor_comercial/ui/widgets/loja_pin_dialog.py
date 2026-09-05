@@ -1,16 +1,15 @@
 """Elevação rápida por PIN para a área "Loja" da sidebar.
 
-Diferente de `SenhaGerenteDialog` (que reautentica contra o PIN de um
-`Usuario` cadastrado), este PIN é um código de supervisor único e fixo,
-compartilhado por quem tem autoridade para abrir Cardápio, Impressoras,
-Funcionários e Relatórios sem precisar deslogar o operador de caixa que
-está com a sessão aberta. Por isso não passa por `AuthService`: é só um
-hash SHA-256 fixo, comparado em tempo constante.
+Antes tinha um código de supervisor único e fixo (hash SHA-256 embutido no
+próprio arquivo), sem passar por `AuthService` nem por `LojaConfig` — pura
+duplicação do que já existia no módulo "Senhas e Acesso" (§3.13). Unificado:
+agora reautentica contra a Senha Master (Dono, Nível 3 da cascata) através
+de `AuthService.validar_pin_dono`, igual a `GerentePinDialog` faz para o
+Nível 2 — mesmo mecanismo, hash+salt vindos de `LojaConfig`, PIN padrão de
+fábrica "050727" (`LojaConfigService.SENHA_MASTER_PADRAO`).
 """
 
 from __future__ import annotations
-
-import hashlib
 
 from PySide6.QtWidgets import (
     QDialog,
@@ -22,20 +21,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-_PIN_LOJA_HASH = hashlib.sha256(b"050727").hexdigest()
-
-
-def _confere_pin_loja(pin: str) -> bool:
-    import hmac
-
-    return hmac.compare_digest(hashlib.sha256(pin.encode()).hexdigest(), _PIN_LOJA_HASH)
+from gestor_comercial.services.auth_service import AuthService
+from gestor_comercial.services.exceptions import AcessoNegadoError, NaoAutorizadoError
 
 
 class LojaPinDialog(QDialog):
-    """Pede o PIN de supervisor da área Loja e só fecha (accept) quando bate."""
+    """Pede a Senha Master (Dono) da área Loja e só fecha (accept) quando bate."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, auth_service: AuthService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._auth = auth_service
         self.setWindowTitle("Área Loja — PIN de supervisor")
 
         layout = QVBoxLayout(self)
@@ -64,8 +59,10 @@ class LojaPinDialog(QDialog):
 
     def _confirmar(self) -> None:
         pin = self._campo_pin.text().strip()
-        if not _confere_pin_loja(pin):
-            self._label_erro.setText("PIN inválido.")
+        try:
+            self._auth.validar_pin_dono(pin)
+        except (AcessoNegadoError, NaoAutorizadoError) as erro:
+            self._label_erro.setText(str(erro))
             self._campo_pin.clear()
             self._campo_pin.setFocus()
             return

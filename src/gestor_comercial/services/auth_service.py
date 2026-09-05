@@ -7,6 +7,13 @@ deste service (§3.1 da arquitetura).
 
 `Usuario` é só quem loga (ADMIN/GERENTE/OPERADOR_CAIXA) — o CRUD de
 `Funcionario` (atendimento, sem login) vive em `FuncionarioService`.
+
+PIN pessoal por usuário foi REMOVIDO (§3.13, unificação da cascata de 3
+níveis): `Usuario` não guarda mais `pin_hash`/`salt` — quem valida o PIN
+agora é sempre `LojaConfigService`, contra os 3 segredos da loja (Senha de
+Login, Senha Operacional, Senha Master). `Usuario` só identifica QUEM está
+logando (`login_como`, escolhido no dropdown da tela) e o `perfil` usado por
+`exigir_gerente()`. Ver `validar_pin_nivel` para a cascata genérica.
 """
 
 from __future__ import annotations
@@ -85,29 +92,21 @@ class AuthService:
     def usuario_logado(self) -> Usuario | None:
         return self._usuario_logado
 
-    def login(self, pin: str) -> Usuario:
-        usuario = self.autenticar_por_pin(pin)
-        self._usuario_logado = usuario
-        return usuario
-
     def login_como(self, usuario_id: int, pin: str) -> Usuario:
         """Login quando a tela já sabe QUEM está tentando entrar (dropdown de
-        operador escolhido antes do PIN, ver `LoginView`) — autentica o PIN
-        contra esse usuário específico, não contra "qualquer PIN que bata"
-        (`login`/`autenticar_por_pin`).
-
-        Necessário desde que operadores de turno passaram a poder
-        compartilhar a mesma senha (§ Caixa Turno - Manhã/Noite, decisão do
-        Vitor de usar a Senha Operacional como PIN dos dois): com `login()`,
-        dois usuários ativos com PIN idêntico faziam a autenticação "resolver"
-        sempre para o primeiro da lista, nunca para o que a pessoa realmente
-        selecionou — o `aberto_por_id`/`fechado_por_id` gravado no caixa saía
-        errado mesmo com PIN certo.
+        operador escolhido antes do PIN, ver `LoginView`). O PIN não é mais
+        pessoal (§3.13): qualquer um dos 3 níveis da cascata da loja
+        (`validar_pin_nivel`, mínimo Nível 1 — Senha de Login) desbloqueia o
+        terminal para o operador ESCOLHIDO no dropdown — a identidade vem da
+        seleção, não do PIN, então dois operadores (ex.: Caixa Turno -
+        Manhã/Noite) compartilhando a mesma senha continuam sendo
+        distinguíveis corretamente no `aberto_por_id`/`fechado_por_id`
+        gravado no caixa.
         """
         usuario = self.buscar_usuario(usuario_id)
         if not usuario.ativo:
             raise NaoAutorizadoError("Este usuário está inativo.")
-        if not self.confere_pin(pin, usuario.salt, usuario.pin_hash):
+        if not self.validar_pin_nivel(pin, nivel_minimo=1):
             raise NaoAutorizadoError("PIN inválido.")
         self._usuario_logado = usuario
         return usuario
@@ -131,7 +130,7 @@ class AuthService:
     # Usuários de login (porte de FuncionarioService.java)
     # ------------------------------------------------------------------
 
-    def criar_usuario(self, nome: str, pin: str, perfil: PerfilUsuario) -> Usuario:
+    def criar_usuario(self, nome: str, perfil: PerfilUsuario) -> Usuario:
         # Ação administrativa (§3.1) — exige gerente, com uma exceção: o
         # cadastro do primeiro gerente do sistema (feito pelo seed no boot,
         # ou manualmente se o seed não rodou) não tem quem autorizar ainda.
@@ -144,76 +143,15 @@ class AuthService:
             raise RegraDeNegocioError("Informe o nome do usuário.")
         if not isinstance(perfil, PerfilUsuario):
             raise RegraDeNegocioError("Selecione o perfil do usuário: Admin, Gerente ou Operador de Caixa.")
-        self._validar_formato_pin(pin)
 
-        # O PIN é a identidade do usuário na tela de login, então dois ativos
-        # com o mesmo PIN fariam a venda ser lançada no nome de quem o banco
-        # devolvesse primeiro. Inativos podem repetir: o PIN de um usuário que
-        # saiu fica livre pro próximo.
-        if any(
-            self.confere_pin(pin, u.salt, u.pin_hash) for u in self.uow.usuarios.listar_ativos()
-        ):
-            raise RegraDeNegocioError("Este PIN já está em uso por outro usuário ativo.")
-
-        salt = self.gerar_salt()
+        # Sem PIN pessoal (§3.13): a identidade de login vem da seleção no
+        # dropdown (`login_como`), não de um PIN próprio, então não há mais
+        # checagem de "PIN já em uso" aqui.
         usuario = Usuario(
             nome=nome_limpo,
-            salt=salt,
-            pin_hash=self.hash_pin(pin, salt),
             perfil=perfil,
             ativo=True,
         )
-        self.uow.usuarios.salvar(usuario)
-        self.uow.commit()
-        return usuario
-
-    def validar_pin_gerente_ou_dono(self, senha: str) -> None:
-        """Autoriza uma ação que aceita tanto quem já autoriza ações de
-        gerente (`validar_pin_gerente`: PIN pessoal de GERENTE/ADMIN ou Senha
-        Operacional da Central de Loja) quanto a Senha Master (Dono) —
-        usado por ações mais sensíveis que dívida de consumo, como redefinir
-        o PIN de login de um operador de Caixa (§ tela Funcionários)."""
-        try:
-            self.validar_pin_gerente(senha)
-            return
-        except (NaoAutorizadoError, AcessoNegadoError):
-            pass
-        if not self.loja_config.senha_master_confere(senha):
-            raise AcessoNegadoError("Senha do Gerente ou do Dono incorreta.")
-
-    def definir_pin_operador_caixa(
-        self, nome_operador: str, novo_pin: str, perfil_padrao: PerfilUsuario = PerfilUsuario.GERENTE
-    ) -> Usuario:
-        """Cria (se ainda não existir) ou redefine o PIN de login do `Usuario`
-        correspondente a um operador de Caixa, dado o nome do `Funcionario`
-        (tela "Funcionários" > cargo Caixa > Editar senha, ver
-        `funcionarios_view._DialogSenhaCaixa`).
-
-        Quem chama este método já validou a Senha do Gerente/Dono
-        (`LojaConfigService.senha_operacional_confere`/`senha_master_confere`)
-        antes — a autorização acontece na UI, não aqui, mesmo padrão de
-        `CaixaService.abrir` aceitando a senha de fechamento cego.
-
-        Não passa pela checagem de "PIN já em uso por outro usuário ativo" de
-        `criar_usuario`: aqui a duplicidade é intencional (Vitor, 2026-09-05
-        — Caixa Turno - Manhã e Caixa Turno - Noite compartilham a Senha
-        Operacional como PIN de login), não um descuido a ser bloqueado.
-        """
-        self._validar_formato_pin(novo_pin)
-        usuario = self.uow.usuarios.buscar_por_nome(nome_operador)
-        salt = self.gerar_salt()
-        if usuario is None:
-            usuario = Usuario(
-                nome=nome_operador,
-                salt=salt,
-                pin_hash=self.hash_pin(novo_pin, salt),
-                perfil=perfil_padrao,
-                ativo=True,
-            )
-        else:
-            usuario.salt = salt
-            usuario.pin_hash = self.hash_pin(novo_pin, salt)
-            usuario.ativo = True
         self.uow.usuarios.salvar(usuario)
         self.uow.commit()
         return usuario
@@ -253,52 +191,51 @@ class AuthService:
         self.uow.commit()
         return usuario
 
-    def autenticar_por_pin(self, pin: str) -> Usuario:
-        """Descobre de quem é o PIN, sem mexer na sessão."""
+    # ------------------------------------------------------------------
+    # Cascata de PIN da loja (§3.13)
+    # ------------------------------------------------------------------
+    # Nível 3 (Master/Dono) > Nível 2 (Operacional/Caixa) > Nível 1 (Login).
+    # Quem digita o PIN de um nível autentica também onde um nível MENOR é
+    # pedido — por isso a busca sempre começa no topo (3) e desce até
+    # `nivel_minimo`, parando no primeiro que confere.
+
+    _VERIFICADORES_POR_NIVEL = {
+        3: "senha_master_confere",
+        2: "senha_operacional_confere",
+        1: "senha_login_confere",
+    }
+
+    def validar_pin_nivel(self, pin: str, nivel_minimo: int) -> bool:
+        """`True` se `pin` confere com a Senha Master, Operacional OU de
+        Login da loja — na ordem certa para que um nível mais alto sempre
+        autentique onde um mais baixo é exigido. `nivel_minimo` é o piso: 1
+        aceita qualquer um dos 3, 2 aceita Operacional ou Master, 3 só
+        aceita Master."""
         if not isinstance(pin, str) or not pin:
-            raise NaoAutorizadoError("Digite o PIN para continuar.")
-        for usuario in self.uow.usuarios.listar_ativos():
-            if self.confere_pin(pin, usuario.salt, usuario.pin_hash):
-                return usuario
-        raise NaoAutorizadoError("PIN inválido.")
+            return False
+        for nivel in range(3, nivel_minimo - 1, -1):
+            verificador = getattr(self.loja_config, self._VERIFICADORES_POR_NIVEL[nivel])
+            if verificador(pin):
+                return True
+        return False
 
     def validar_pin_gerente(self, pin: str) -> Usuario:
-        """Reautenticação para ação crítica: confere o PIN e devolve quem autorizou,
-        mantendo na sessão o usuário que estava operando (§3.1).
-
-        Aceita duas credenciais equivalentes (§3.13, decisão de substituir o
-        PIN pessoal pela Senha Operacional compartilhada):
-        1. O PIN pessoal de um usuário GERENTE/ADMIN (comportamento original).
-        2. A Senha Operacional (Gerente) da Central de Loja — não é PIN de
-           ninguém específico, então quem "autorizou" para efeito de
-           auditoria (`cancelado_por_id`/`autorizado_por_id`) é quem estava
-           logado operando o turno, não um gerente pessoal.
+        """Reautenticação para ação crítica (Nível 2 — Caixa/Autorizações):
+        confere o PIN contra a cascata (Operacional ou Master, §3.13) e
+        devolve quem autoriza para efeito de auditoria
+        (`cancelado_por_id`/`autorizado_por_id`) — como o PIN não é mais
+        pessoal de ninguém (removido de `Usuario`), quem "autorizou" é
+        sempre o usuário que já estava logado operando o turno, não um
+        gerente identificado pelo PIN em si.
         """
-        try:
-            usuario = self.autenticar_por_pin(pin)
-        except NaoAutorizadoError:
-            usuario = None
+        if not self.validar_pin_nivel(pin, nivel_minimo=2):
+            raise NaoAutorizadoError("PIN inválido.")
+        return self.usuario_atual()
 
-        if usuario is not None:
-            if usuario.perfil not in _PERFIS_GERENCIAIS:
-                raise AcessoNegadoError("O PIN informado não é de um gerente.")
-            return usuario
-
-        if self.loja_config.senha_operacional_confere(pin):
-            return self.usuario_atual()
-
-        raise NaoAutorizadoError("PIN inválido.")
-
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _validar_formato_pin(pin: str) -> None:
-        # Só dígito ASCII: o teclado da tela de login é numérico, então um PIN
-        # com letra (ou com dígito unicode colado de fora) nunca mais poderia
-        # ser digitado de volta pelo usuário.
-        if not isinstance(pin, str) or not pin.isascii() or not pin.isdigit():
-            raise RegraDeNegocioError("O PIN deve conter apenas números.")
-        if not PIN_MIN_DIGITOS <= len(pin) <= PIN_MAX_DIGITOS:
-            raise RegraDeNegocioError(
-                f"O PIN deve ter de {PIN_MIN_DIGITOS} a {PIN_MAX_DIGITOS} dígitos."
-            )
+    def validar_pin_dono(self, pin: str) -> Usuario:
+        """Reautenticação para a Central de Loja (Nível 3 — Master/Dono, ver
+        `LojaPinDialog`): só a Senha Master autentica, sem herdar de baixo
+        pra cima (o inverso da cascata normal não existe)."""
+        if not self.validar_pin_nivel(pin, nivel_minimo=3):
+            raise NaoAutorizadoError("PIN inválido.")
+        return self.usuario_atual()

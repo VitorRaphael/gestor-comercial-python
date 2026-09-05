@@ -202,7 +202,7 @@ def test_abrir_recusa_float(caixas, gerente):
 
 
 def test_abrir_negado_para_atendente(caixas, auth, gerente, atendente):
-    auth.login(PIN_ATENDENTE)
+    auth.login_como(atendente.id, PIN_ATENDENTE)
     with pytest.raises(AcessoNegadoError):
         caixas.abrir(Decimal("100.00"))
 
@@ -303,7 +303,7 @@ def test_fechar_caixa_inexistente(caixas, gerente):
 
 
 def test_fechar_negado_para_atendente(caixas, auth, gerente, atendente, caixa_aberto):
-    auth.login(PIN_ATENDENTE)
+    auth.login_como(atendente.id, PIN_ATENDENTE)
     with pytest.raises(AcessoNegadoError):
         caixas.fechar(caixa_aberto.id, Decimal("100.00"), dinheiro("0.00"))
 
@@ -361,7 +361,7 @@ def test_registrar_reforco_vincula_caixa_aberto_e_quem_registrou(caixas, gerente
 
 
 def test_registrar_reforco_liberado_para_atendente(caixas, auth, gerente, atendente, caixa_aberto):
-    auth.login(PIN_ATENDENTE)
+    auth.login_como(atendente.id, PIN_ATENDENTE)
     movimento = caixas.registrar_movimento(TipoMovimento.REFORCO, Decimal("20.00"))
 
     assert movimento.usuario_id == atendente.id
@@ -379,7 +379,7 @@ def test_registrar_consumo_funcionario_e_sempre_bloqueado(
     with pytest.raises(RegraDeNegocioError):
         caixas.registrar_movimento(TipoMovimento.CONSUMO_FUNCIONARIO, Decimal("12.50"))
 
-    auth.login(PIN_ATENDENTE)
+    auth.login_como(atendente.id, PIN_ATENDENTE)
     with pytest.raises(RegraDeNegocioError):
         caixas.registrar_movimento(TipoMovimento.CONSUMO_FUNCIONARIO, Decimal("12.50"))
 
@@ -394,13 +394,13 @@ def test_registrar_sangria_e_despesa_pelo_gerente(caixas, gerente, caixa_aberto)
 
 
 def test_registrar_sangria_negada_para_atendente(caixas, auth, gerente, atendente, caixa_aberto):
-    auth.login(PIN_ATENDENTE)
+    auth.login_como(atendente.id, PIN_ATENDENTE)
     with pytest.raises(AcessoNegadoError):
         caixas.registrar_movimento(TipoMovimento.SANGRIA, Decimal("30.00"))
 
 
 def test_registrar_despesa_negada_para_atendente(caixas, auth, gerente, atendente, caixa_aberto):
-    auth.login(PIN_ATENDENTE)
+    auth.login_como(atendente.id, PIN_ATENDENTE)
     with pytest.raises(AcessoNegadoError):
         caixas.registrar_movimento(TipoMovimento.DESPESA, Decimal("30.00"))
 
@@ -728,9 +728,9 @@ def test_listar_historico_filtra_por_periodo(uow, caixas):
 
 
 def test_listar_historico_filtra_por_operador_abertura_ou_fechamento(uow, auth, gerente):
-    abriu = auth.criar_usuario("Quem Abriu", "444444", PerfilUsuario.OPERADOR_CAIXA)
-    fechou = auth.criar_usuario("Quem Fechou", "555555", PerfilUsuario.OPERADOR_CAIXA)
-    de_outro = auth.criar_usuario("Outro", "666666", PerfilUsuario.OPERADOR_CAIXA)
+    abriu = auth.criar_usuario("Quem Abriu", PerfilUsuario.OPERADOR_CAIXA)
+    fechou = auth.criar_usuario("Quem Fechou", PerfilUsuario.OPERADOR_CAIXA)
+    de_outro = auth.criar_usuario("Outro", PerfilUsuario.OPERADOR_CAIXA)
 
     caixa_do_abridor = uow.caixas.salvar(
         Caixa(

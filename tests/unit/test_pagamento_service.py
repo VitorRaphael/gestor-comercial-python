@@ -321,13 +321,15 @@ def test_registrar_consumo_interno_sem_pin_de_gerente(pagamentos, conta_36, func
         )
 
 
-def test_registrar_consumo_interno_com_pin_de_atendente(pagamentos, conta_36, funcionario, atendente):
-    with pytest.raises(AcessoNegadoError):
+def test_registrar_consumo_interno_com_pin_invalido_e_bloqueado(pagamentos, conta_36, funcionario, atendente):
+    # Sem PIN pessoal por Usuario (§3.13): não há mais "PIN do atendente sem
+    # privilégio de gerente" — só PIN válido (Operacional/Master) ou inválido.
+    with pytest.raises(NaoAutorizadoError):
         pagamentos.registrar(
             conta_36.id,
             FormaPagamento.CONSUMO_INTERNO,
             Decimal("36.00"),
-            pin_gerente=PIN_ATENDENTE,
+            pin_gerente="000000",
             funcionario_consumo_id=funcionario.id,
         )
 
@@ -441,7 +443,7 @@ def test_calcular_saldo_devedor_de_funcionario_inexistente(pagamentos, gerente):
 
 def test_consultas_de_divida_sao_bloqueadas_para_atendente(pagamentos, auth, gerente, atendente, funcionario):
     # §3.1/§3.8: dívida de consumo interno não é leitura livre — só gerente.
-    auth.login(PIN_ATENDENTE)
+    auth.login_como(atendente.id, PIN_ATENDENTE)
     with pytest.raises(AcessoNegadoError):
         pagamentos.calcular_saldo_devedor(funcionario.id)
     with pytest.raises(AcessoNegadoError):
@@ -610,13 +612,13 @@ def test_quitar_sem_divida_e_bloqueado(pagamentos, gerente, funcionario):
         pagamentos.quitar(funcionario.id, Decimal("10.00"), PIN_GERENTE)
 
 
-def test_quitar_com_pin_de_atendente(
+def test_quitar_com_pin_invalido_e_bloqueado(
     pagamentos, comandas, gerente, caixa_aberto, produto, funcionario, atendente
 ):
     lancar_consumo(comandas, pagamentos, produto, 1, funcionario.id)
 
-    with pytest.raises(AcessoNegadoError):
-        pagamentos.quitar(funcionario.id, Decimal("5.00"), PIN_ATENDENTE)
+    with pytest.raises(NaoAutorizadoError):
+        pagamentos.quitar(funcionario.id, Decimal("5.00"), "000000")
 
     assert pagamentos.calcular_saldo_devedor(funcionario.id) == Decimal("10.00")
 

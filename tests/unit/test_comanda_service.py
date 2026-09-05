@@ -9,7 +9,6 @@ from gestor_comercial.domain.pagamento import Pagamento
 from gestor_comercial.domain.produto import Produto
 from gestor_comercial.services.comanda_service import ComandaService
 from gestor_comercial.services.exceptions import (
-    AcessoNegadoError,
     NaoAutorizadoError,
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
@@ -352,7 +351,7 @@ def test_cancelar_item_sai_do_total(comandas, comanda, produto, refri):
 
 
 def test_cancelar_item_nao_troca_o_usuario_da_sessao(comandas, auth, comanda, produto, atendente):
-    auth.login(PIN_ATENDENTE)
+    auth.login_como(atendente.id, PIN_ATENDENTE)
     item = comandas.lancar_item(comanda.id, produto.id, 1)
 
     comandas.cancelar_item(item.id, "veio errado", PIN_GERENTE)
@@ -385,11 +384,15 @@ def test_cancelar_item_sem_motivo(comandas, comanda, produto, motivo):
         comandas.cancelar_item(item.id, motivo, PIN_GERENTE)
 
 
-def test_cancelar_item_com_pin_de_atendente(comandas, comanda, produto, atendente):
+def test_cancelar_item_com_pin_invalido_e_bloqueado(comandas, comanda, produto, atendente):
+    # Sem PIN pessoal por Usuario (§3.13): não existe mais "PIN do atendente,
+    # mas sem privilégio de gerente" — só existe PIN válido (Operacional ou
+    # Master) ou inválido. Este caso agora cai no mesmo `NaoAutorizadoError`
+    # de `test_cancelar_item_com_pin_invalido`.
     item = comandas.lancar_item(comanda.id, produto.id, 1)
 
-    with pytest.raises(AcessoNegadoError):
-        comandas.cancelar_item(item.id, "veio errado", PIN_ATENDENTE)
+    with pytest.raises(NaoAutorizadoError):
+        comandas.cancelar_item(item.id, "veio errado", "000000")
 
     assert comandas.listar_itens(comanda.id)[0].cancelado is False
 
@@ -536,8 +539,8 @@ def test_reabrir_exige_pin_de_gerente(comandas, comanda, produto, atendente):
     comandas.lancar_item(comanda.id, produto.id, 1)
     comandas.fechar_para_conferencia(comanda.id)
 
-    with pytest.raises(AcessoNegadoError):
-        comandas.reabrir(comanda.id, PIN_ATENDENTE)
+    with pytest.raises(NaoAutorizadoError):
+        comandas.reabrir(comanda.id, "000000")
 
 
 def test_reabrir_comanda_que_nao_esta_em_conferencia(comandas, comanda, produto):
@@ -611,12 +614,12 @@ def test_fechar_com_saldo_em_aberto_e_liberado_com_pin_de_gerente(comandas, coma
     assert fechada.status is StatusComanda.FECHADA
 
 
-def test_fechar_com_pin_de_atendente_e_bloqueado(comandas, comanda, produto, atendente):
+def test_fechar_com_pin_invalido_e_bloqueado(comandas, comanda, produto, atendente):
     comandas.lancar_item(comanda.id, produto.id, 1)
     comandas.fechar_para_conferencia(comanda.id)
 
-    with pytest.raises(AcessoNegadoError):
-        comandas.fechar(comanda.id, pin_gerente=PIN_ATENDENTE)
+    with pytest.raises(NaoAutorizadoError):
+        comandas.fechar(comanda.id, pin_gerente="000000")
 
 
 def test_fechar_sem_ninguem_logado_e_bloqueado(auth, comandas, comanda, produto):
@@ -732,11 +735,11 @@ def test_cancelar_comanda_sem_motivo(comandas, comanda, produto, motivo):
         comandas.cancelar(comanda.id, motivo, PIN_GERENTE)
 
 
-def test_cancelar_comanda_com_pin_de_atendente(comandas, comanda, produto, atendente):
+def test_cancelar_comanda_com_pin_invalido_e_bloqueado(comandas, comanda, produto, atendente):
     comandas.lancar_item(comanda.id, produto.id, 1)
 
-    with pytest.raises(AcessoNegadoError):
-        comandas.cancelar(comanda.id, "cliente desistiu", PIN_ATENDENTE)
+    with pytest.raises(NaoAutorizadoError):
+        comandas.cancelar(comanda.id, "cliente desistiu", "000000")
 
     assert comandas.buscar(comanda.id).status is StatusComanda.ABERTA
 

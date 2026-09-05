@@ -18,9 +18,23 @@ from gestor_comercial.repository.base import Base
 from gestor_comercial.repository.unit_of_work import UnitOfWork
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.funcionario_service import FuncionarioService
+from gestor_comercial.services.loja_config_service import (
+    SENHA_LOGIN_PADRAO,
+    SENHA_MASTER_PADRAO,
+    SENHA_OPERACIONAL_PADRAO,
+)
 
-PIN_GERENTE = "111111"
-PIN_ATENDENTE = "222222"
+# Sem PIN pessoal por Usuario (§3.13, cascata unificada): não existe mais "o
+# PIN da Maria" — só os 3 segredos da loja. Estas constantes continuam
+# existindo (e com os mesmos nomes) só para minimizar o diff nos testes que
+# já chamavam `auth.login(PIN_X)`/`auth.criar_usuario(nome, PIN_X, perfil)":
+# qualquer uma autentica em `login_como` (Nível 1 basta), não representam
+# mais o PIN de ninguém específico.
+PIN_GERENTE = SENHA_MASTER_PADRAO
+PIN_ATENDENTE = SENHA_LOGIN_PADRAO
+PIN_OPERACIONAL = SENHA_OPERACIONAL_PADRAO
+PIN_MASTER = SENHA_MASTER_PADRAO
+PIN_LOGIN = SENHA_LOGIN_PADRAO
 
 
 @pytest.fixture
@@ -50,15 +64,15 @@ def funcionarios(uow, auth):
 @pytest.fixture
 def gerente(uow, auth):
     """Gerente (Usuario) já cadastrado e logado — o estado normal do app em operação."""
-    usuario = auth.criar_usuario("Gerente", PIN_GERENTE, PerfilUsuario.GERENTE)
-    auth.login(PIN_GERENTE)
+    usuario = auth.criar_usuario("Gerente", PerfilUsuario.GERENTE)
+    auth.login_como(usuario.id, PIN_GERENTE)
     return usuario
 
 
 @pytest.fixture
 def atendente(uow, auth, gerente):
     """Usuario operador de caixa (era ATENDENTE) — continua logando, só perfil renomeado."""
-    return auth.criar_usuario("Atendente", PIN_ATENDENTE, PerfilUsuario.OPERADOR_CAIXA)
+    return auth.criar_usuario("Atendente", PerfilUsuario.OPERADOR_CAIXA)
 
 
 @pytest.fixture

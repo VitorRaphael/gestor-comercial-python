@@ -2,9 +2,14 @@
 
 Hoje tem duas seções: "Selecionar Tema" (claro/escuro, que antes vivia
 duplicado na tela de Login e no rodapé da sidebar — ver `ThemeController`) e
-"Senhas e Acesso" (§3.13), o módulo de segredos operacionais da loja — Senha
-Master (Dono), Senha Operacional (Gerente) e CPF do Dono — sempre mascarados
-na tela, cada troca exigindo o segredo de nível acima (`LojaConfigService`).
+"Senhas e Acesso" (§3.13), o módulo de segredos operacionais da loja — cascata
+de 3 níveis (Senha de Login, Senha Operacional/Caixa, Senha Master/Dono) e
+CPF do Dono — sempre mascarados na tela, cada troca exigindo o segredo de
+nível acima (`LojaConfigService`). A troca do Nível 1 (Login) é a única que
+aceita duas credenciais alternativas (Nível 2 OU Nível 3): por isso
+`_alterar_senha_login` não passa um rótulo fixo de credencial, e sim chama
+`LojaConfigService.alterar_senha_login`, que já faz essa checagem "ou" —
+`_AlterarSegredoDialog` só coleta os dois valores, sem saber qual regra vale.
 """
 
 from __future__ import annotations
@@ -155,6 +160,9 @@ class ConfiguracoesView(QWidget):
         cartao_layout.addWidget(descricao)
         cartao_layout.addSpacing(12)
 
+        self._botao_senha_login, self._valor_senha_login = self._criar_linha_segredo(
+            cartao_layout, "Senha de Login", self._alterar_senha_login
+        )
         self._botao_senha_operacional, self._valor_senha_operacional = self._criar_linha_segredo(
             cartao_layout, "Senha Operacional (Gerente)", self._alterar_senha_operacional
         )
@@ -199,6 +207,25 @@ class ConfiguracoesView(QWidget):
         cadastrado = self._loja_config.cpf_dono_definido()
         self._botao_cpf_dono.setText("Alterar" if cadastrado else "Cadastrar")
         self._valor_cpf_dono.setText(MASCARA if cadastrado else "Não cadastrado")
+
+    def _alterar_senha_login(self) -> None:
+        modal = _AlterarSegredoDialog(
+            "Alterar Senha de Login",
+            rotulo_credencial="Senha Operacional (Caixa) ou Senha Master (Dono)",
+            rotulo_novo="Nova Senha de Login",
+            parent=self,
+        )
+        if modal.exec() != QDialog.DialogCode.Accepted:
+            return
+        senha_nivel_2_ou_3, nova_senha = modal.resultado()
+
+        self._label_erro.setText("")
+        try:
+            self._loja_config.alterar_senha_login(senha_nivel_2_ou_3, nova_senha)
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+            return
+        self._atualizar_secao_senhas()
 
     def _alterar_senha_operacional(self) -> None:
         modal = _AlterarSegredoDialog(

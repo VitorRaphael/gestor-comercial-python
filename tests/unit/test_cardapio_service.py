@@ -29,7 +29,7 @@ def cardapio(uow, auth, gerente):
 @pytest.fixture
 def como_atendente(auth, atendente):
     """Troca a sessão para um atendente, para testar o bloqueio de perfil de §3.1."""
-    auth.login(PIN_ATENDENTE)
+    auth.login_como(atendente.id, PIN_ATENDENTE)
     return atendente
 
 
@@ -640,7 +640,7 @@ def test_remover_componente_inexistente(cardapio):
 def test_remover_componente_exige_gerente(cardapio, categoria, produto, auth, atendente):
     combo = cardapio.criar_produto("Combo Lanche", Decimal("30.00"), categoria.id)
     item = cardapio.associar_componente(combo.id, produto.id, 1)
-    auth.login(PIN_ATENDENTE)
+    auth.login_como(atendente.id, PIN_ATENDENTE)
 
     with pytest.raises(AcessoNegadoError):
         cardapio.remover_componente(item.id)
