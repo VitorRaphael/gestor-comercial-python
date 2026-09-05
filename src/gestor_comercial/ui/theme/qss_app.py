@@ -117,9 +117,9 @@ def construir_qss_app(t: dict[str, str]) -> str:
       border-left: 3px solid {t['acento']};
     }}
 
-    /* ---------- Pílula de tema (sidebar) ---------- */
+    /* ---------- Pílula de tema (agora só na tela de Configurações) ---------- */
 
-    #sidebarTemaPilula {{
+    QFrame[variante="pilula-tema"] {{
       background: {t['superficie_2']};
       border: 1px solid {t['borda']};
       border-radius: 14px;
@@ -627,6 +627,87 @@ def construir_qss_app(t: dict[str, str]) -> str:
        QLabel herdam o fundo opaco global e pintam um retângulo escuro por
        cima do card mais claro em que o widget é embutido. */
     QWidget#secaoCancelamentos, QWidget#secaoCancelamentos QLabel {{ background: transparent; }}
+
+    /* ---------- Central de Loja ---------- */
+
+    QLabel#centralLojaBreadcrumb {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      background: transparent;
+    }}
+    QLabel#centralLojaTitulo {{ color: {t['texto']}; font-size: 26px; font-weight: 800; background: transparent; }}
+    QLabel#centralLojaSubtitulo {{ color: {t['texto_fraco']}; font-size: 13px; background: transparent; }}
+    QLabel#centralLojaSecaoTitulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+
+    QFrame[variante="loja-hub-card"] {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 14px;
+    }}
+    QFrame[variante="loja-hub-card"]:hover {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['acento']};
+    }}
+    QLabel[variante="loja-hub-icone"] {{
+      background: {t['acento']};
+      color: {t['acento_texto']};
+      border-radius: 10px;
+      font-size: 18px;
+      font-weight: 800;
+    }}
+    QLabel[variante="loja-hub-card-titulo"] {{
+      color: {t['texto']};
+      font-size: 14px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel[variante="loja-hub-card-subtitulo"] {{
+      color: {t['texto_fraco']};
+      font-size: 11px;
+      background: transparent;
+    }}
+    QPushButton[variante="voltar-pdv"] {{
+      background: {t['superficie_2']};
+      color: {t['texto']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+      padding: 10px 18px;
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    QPushButton[variante="voltar-pdv"]:hover {{ background: {t['borda']}; }}
+
+    /* ---------- Configurações / placeholders simples (Estoque) ---------- */
+
+    QLabel#configEyebrow {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      background: transparent;
+    }}
+    QLabel#configTitulo {{ color: {t['texto']}; font-size: 26px; font-weight: 800; background: transparent; }}
+    QLabel#configSubtitulo {{ color: {t['texto_fraco']}; font-size: 13px; background: transparent; }}
+    QLabel#configSecaoTitulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+    QFrame#configCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 14px;
+    }}
 
     /* ---------- Modais ---------- */
 

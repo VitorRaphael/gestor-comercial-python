@@ -19,7 +19,6 @@ from PySide6.QtGui import (
     QRadialGradient,
 )
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QComboBox,
     QFrame,
     QGridLayout,
@@ -273,26 +272,6 @@ def _construir_qss(t: dict[str, str]) -> str:
 
     QLabel#loginErro {{ color: {t['perigo']}; font-size: 12px; }}
     QLabel#loginRodapeVersao {{ color: {t['texto_fraquissimo']}; font-size: 10px; }}
-
-    QPushButton#loginTemaBotao {{
-        background: transparent;
-        color: {t['texto_fraco']};
-        border: none;
-        padding: 7px 14px;
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 1px;
-    }}
-    QPushButton#loginTemaBotao:checked {{
-        background: {t['acento']};
-        color: {t['acento_texto']};
-        border-radius: 14px;
-    }}
-    QFrame#loginTemaPilula {{
-        background: {t['superficie_2']};
-        border: 1px solid {t['borda']};
-        border-radius: 16px;
-    }}
     """
 
 
@@ -310,8 +289,27 @@ class LoginView(QWidget):
 
         self._montar_layout()
         self._carregar_usuarios()
+
+        # Sem isto, o PIN só passa a ser lido depois de um clique manual: no
+        # abrir da tela nenhum widget tem foco (ou o combo de operador herda
+        # o foco padrão e engole os dígitos como busca incremental de item),
+        # então o teclado físico não alcança `keyPressEvent` desta view.
+        # `NoFocus` nos filhos clicáveis garante que o foco nunca sai daqui
+        # -- ver também `showEvent`, chamado de novo sempre que a tela volta
+        # a aparecer (ex.: depois de deslogar).
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._combo_usuario.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._botao_ver_pin.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._botao_confirmar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
         controlador = ThemeController.instancia()
         self._aplicar_tema(_TEMA_CLARO if controlador.claro else _TEMA_ESCURO)
+        # Tema agora só se troca na tela de Configurações (dentro do shell
+        # autenticado) — se o usuário deslogar depois de trocar, o login
+        # precisa refletir sem precisar de um seletor próprio aqui.
+        controlador.mudou.connect(
+            lambda _tokens: self._aplicar_tema(_TEMA_CLARO if controlador.claro else _TEMA_ESCURO)
+        )
 
     # ------------------------------------------------------------------
     # Montagem
@@ -328,49 +326,6 @@ class LoginView(QWidget):
         layout_raiz.setSpacing(0)
         layout_raiz.addWidget(self._montar_painel_marca(), 6)
         layout_raiz.addWidget(self._montar_painel_terminal(), 5)
-
-    def _montar_barra_tema(self) -> QWidget:
-        barra = QWidget()
-        barra.setObjectName("loginBarraTema")
-        layout = QHBoxLayout(barra)
-        layout.setContentsMargins(0, 20, 56, 0)
-        layout.addStretch()
-
-        pilula = QFrame()
-        pilula.setObjectName("loginTemaPilula")
-        layout_pilula = QHBoxLayout(pilula)
-        layout_pilula.setContentsMargins(3, 3, 3, 3)
-        layout_pilula.setSpacing(0)
-
-        self._botao_claro = QPushButton("CLARO / VÍVIDO")
-        self._botao_escuro = QPushButton("ESCURO / CONCRETO")
-        for botao in (self._botao_claro, self._botao_escuro):
-            botao.setObjectName("loginTemaBotao")
-            botao.setCheckable(True)
-            botao.setCursor(Qt.CursorShape.PointingHandCursor)
-            layout_pilula.addWidget(botao)
-
-        self._grupo_tema = QButtonGroup(self)
-        self._grupo_tema.setExclusive(True)
-        self._grupo_tema.addButton(self._botao_claro)
-        self._grupo_tema.addButton(self._botao_escuro)
-        # Estado inicial reflete o que o ThemeController já tiver (ex.: usuário
-        # deslogou vindo do shell em modo claro -- o login reabre já claro).
-        controlador = ThemeController.instancia()
-        self._botao_claro.setChecked(controlador.claro)
-        self._botao_escuro.setChecked(not controlador.claro)
-        self._botao_claro.toggled.connect(
-            lambda marcado: marcado and self._mudar_tema(claro=True)
-        )
-        self._botao_escuro.toggled.connect(
-            lambda marcado: marcado and self._mudar_tema(claro=False)
-        )
-        # Tema trocado por fora (ex.: pílula da sidebar, ver `main_window.py`)
-        # também reflete aqui, sem reemitir `toggled` (valor igual não dispara).
-        controlador.mudou.connect(lambda _tokens: self._botao_claro.setChecked(controlador.claro))
-
-        layout.addWidget(pilula)
-        return barra
 
     def _montar_painel_marca(self) -> QWidget:
         painel = PainelPontilhado()
@@ -423,7 +378,6 @@ class LoginView(QWidget):
         layout_externo = QVBoxLayout(painel)
         layout_externo.setContentsMargins(0, 0, 56, 0)
         layout_externo.setSpacing(0)
-        layout_externo.addWidget(self._montar_barra_tema())
         layout_externo.addStretch()
 
         self._cartao = QFrame()
@@ -524,6 +478,10 @@ class LoginView(QWidget):
             botao.setCursor(Qt.CursorShape.PointingHandCursor)
             botao.setMinimumHeight(48)
             botao.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            # Clicar no numpad não pode roubar o foco da tela: senão o
+            # próximo dígito digitado no teclado físico vai parar no botão
+            # (que ignora), exigindo outro clique pra "acordar" o teclado.
+            botao.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             if rotulo == "LIMPAR":
                 botao.clicked.connect(self._limpar_pin)
             elif rotulo == "⌫":
@@ -542,12 +500,6 @@ class LoginView(QWidget):
         """Reaplica só a folha de estilo — nenhum widget é recriado."""
         self.setStyleSheet(_construir_qss(tokens))
         self._logo.definir_paleta(tokens["logo_clara"], tokens["logo_media"], tokens["logo_escura"])
-
-    def _mudar_tema(self, claro: bool) -> None:
-        self._aplicar_tema(_TEMA_CLARO if claro else _TEMA_ESCURO)
-        # Empurra pro app inteiro: sidebar/shell já abrem no tema certo
-        # assim que o login autenticar, sem precisar de um segundo toggle lá.
-        ThemeController.instancia().alternar_para(claro)
 
     # ------------------------------------------------------------------
     # PIN / numpad
@@ -578,6 +530,13 @@ class LoginView(QWidget):
     # ------------------------------------------------------------------
     # Teclado físico
     # ------------------------------------------------------------------
+
+    def showEvent(self, event) -> None:  # noqa: N802 (override Qt)
+        super().showEvent(event)
+        # Chamado toda vez que esta tela volta a ficar visível (abertura do
+        # app e cada logout) -- garante que o PIN já é lido sem precisar de
+        # um clique manual antes.
+        self.setFocus()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 (override Qt)
         texto = event.text()

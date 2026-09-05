@@ -12,9 +12,7 @@ view isolada, como os testes manuais desta sessão já fizeram.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -45,6 +43,8 @@ from gestor_comercial.services.pagamento_service import PagamentoService
 from gestor_comercial.ui.views.caixa_view import CaixaView
 from gestor_comercial.ui.views.cardapio_view import CardapioView
 from gestor_comercial.ui.views.comanda_view import ComandaView
+from gestor_comercial.ui.views.configuracoes_view import ConfiguracoesView
+from gestor_comercial.ui.views.estoque_view import EstoqueView
 from gestor_comercial.ui.views.funcionarios_view import FuncionariosView
 from gestor_comercial.ui.views.impressoras_view import ImpressorasView
 from gestor_comercial.ui.views.loja_hub_view import LojaHubView
@@ -52,18 +52,18 @@ from gestor_comercial.ui.views.login_view import LoginView
 from gestor_comercial.ui.views.mesas_view import MesasView
 from gestor_comercial.ui.views.pagamento_dialog import PagamentoDialog
 from gestor_comercial.ui.views.relatorios_view import RelatoriosView
-from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.gerente_pin_dialog import GerentePinDialog
 from gestor_comercial.ui.widgets.loja_pin_dialog import LojaPinDialog
 from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
 
-# Destinos administrativos que só existem atrás do hub "Loja" (ver
-# _abrir_loja): saíram da sidebar direta para não poluir a navegação do dia a
-# dia nem expor Relatórios (faturamento/diferença de caixa do mês) a quem só
-# precisa lançar venda. O PIN da Loja tranca de novo assim que qualquer um
-# desses destinos é abandonado por fora do hub (ex.: clique direto em "Mesas").
-_ROTULOS_LOJA = {"Loja", "Cardápio", "Impressoras", "Funcionários", "Relatórios"}
+# Destinos administrativos atrás do PIN de supervisor da Loja (ver
+# _abrir_area_loja): só existem como card dentro do hub "Central de Loja"
+# (ver LojaHubView), sem atalho próprio na sidebar. O PIN é exigido a cada
+# acesso e tranca de novo assim que qualquer um deles é abandonado por fora
+# da área da Loja (ex.: clique direto em "Mesas"). "Configurações" fica de
+# fora: não expõe dado sensível, não precisa de PIN.
+_ROTULOS_LOJA = {"Loja", "Cardápio", "Estoque", "Impressoras", "Funcionários", "Relatórios"}
 
 _ROTULOS_PERFIL = {
     PerfilUsuario.ADMIN: "Admin",
@@ -143,15 +143,17 @@ class MainWindow(QMainWindow):
 
         self._caixa_view = CaixaView(caixa_service, self._impressao)
         self._cardapio_view = CardapioView(cardapio_service)
+        self._estoque_view = EstoqueView()
         self._funcionarios_view = FuncionariosView(self._funcionarios, self._pagamentos)
         self._impressoras_view = ImpressorasView(cardapio_service, self._impressao)
         self._relatorios_view = RelatoriosView(caixa_service, auth_service, self._impressao)
+        self._configuracoes_view = ConfiguracoesView()
 
         self._loja_hub_view = LojaHubView()
         self._loja_hub_view.destino_selecionado.connect(self._navegar_agora)
         self._loja_hub_view.voltar.connect(self._sair_da_loja)
         self._loja_desbloqueada = False
-        # Mesmo raciocínio da Loja (ver _abrir_loja): a tela de Caixa expõe a
+        # Mesmo raciocínio da Loja (ver _abrir_area_loja): a tela de Caixa expõe a
         # gaveta, movimentos e histórico de fechamentos, então também fica
         # atrás de PIN — só que de um gerente de verdade, não do código de
         # supervisor fixo da Loja (ver GerentePinDialog).
@@ -163,9 +165,11 @@ class MainWindow(QMainWindow):
             self._comanda_view,
             self._caixa_view,
             self._cardapio_view,
+            self._estoque_view,
             self._funcionarios_view,
             self._impressoras_view,
             self._relatorios_view,
+            self._configuracoes_view,
             self._loja_hub_view,
         ):
             self._paginas.addWidget(pagina)
@@ -192,9 +196,6 @@ class MainWindow(QMainWindow):
 
         # Cada destino recarrega a própria página antes de mostrá-la, para
         # nunca exibir dado velho de quando o app ainda estava no login.
-        # Cardápio/Funcionários/Impressoras/Relatórios não têm botão próprio
-        # na sidebar (ver _ROTULOS_LOJA): só são alcançados a partir do hub
-        # "Loja", por isso continuam mapeados aqui mas fora de _botoes_nav.
         self._destinos_nav = {
             "Mesas": lambda: (self._mesas_view, self._mesas_view.carregar_mesas),
             "Caixa": lambda: (self._caixa_view, self._caixa_view.atualizar),
@@ -204,10 +205,13 @@ class MainWindow(QMainWindow):
             # ao saber que existe é o cenário que essa tela existe pra pegar).
             # Os dados de fechamento continuam sendo gravados normalmente —
             # só não tem UI pra consultar por enquanto. Ver HistoricoCaixaView.
+            "Loja": lambda: (self._loja_hub_view, lambda: None),
             "Cardápio": lambda: (self._cardapio_view, self._cardapio_view.atualizar),
+            "Estoque": lambda: (self._estoque_view, self._estoque_view.atualizar),
             "Funcionários": lambda: (self._funcionarios_view, self._funcionarios_view.atualizar),
             "Impressoras": lambda: (self._impressoras_view, self._impressoras_view.atualizar),
             "Relatórios": lambda: (self._relatorios_view, self._relatorios_view.atualizar),
+            "Configurações": lambda: (self._configuracoes_view, lambda: None),
         }
         self._botoes_nav: dict[str, QPushButton] = {}
 
@@ -225,22 +229,18 @@ class MainWindow(QMainWindow):
             layout.addWidget(botao)
             self._botoes_nav[rotulo] = botao
 
-        # "Loja" substitui os 4 acessos diretos (Cardápio, Impressoras,
-        # Funcionários, Relatórios): um único item na sidebar, atrás de PIN
-        # de supervisor (ver LojaPinDialog/_abrir_loja), pra não exigir
-        # logout/login do operador de caixa cada vez que alguém precisa
-        # mexer no cardápio ou conferir faturamento no meio do expediente.
-        layout.addSpacing(16)
-        layout.addWidget(self._montar_rotulo_grupo("LOJA"))
-        layout.addSpacing(4)
-        botao_loja = QPushButton("Loja")
+        layout.addStretch()
+
+        # Cardápio, Estoque, Funcionários, Impressoras, Relatórios e
+        # Configurações vivem só como cards dentro da Central de Loja (ver
+        # `LojaHubView`) -- não duplicam entrada aqui na sidebar. Um único
+        # atalho, atrás do PIN de supervisor (ver LojaPinDialog/
+        # _abrir_area_loja), no rodapé, logo acima do "Sair".
+        botao_loja = QPushButton("Central de Loja")
         botao_loja.setProperty("variante", "nav")
-        botao_loja.clicked.connect(self._abrir_loja)
+        botao_loja.clicked.connect(lambda _checked=False: self._abrir_area_loja("Loja"))
         layout.addWidget(botao_loja)
         self._botoes_nav["Loja"] = botao_loja
-
-        layout.addStretch()
-        layout.addWidget(self._montar_pilula_tema())
         layout.addSpacing(8)
 
         divisor = QFrame()
@@ -259,42 +259,6 @@ class MainWindow(QMainWindow):
         rotulo = QLabel(texto)
         rotulo.setObjectName("sidebarGrupoRotulo")
         return rotulo
-
-    def _montar_pilula_tema(self) -> QWidget:
-        """Mesmo alternador claro/escuro da tela de login (ver
-        `LoginView._montar_barra_tema`), agora também na sidebar -- o tema
-        vale pro app inteiro (`ThemeController`), então precisa dar pra
-        trocar sem passar pelo login de novo."""
-        pilula = QFrame()
-        pilula.setObjectName("sidebarTemaPilula")
-        layout = QHBoxLayout(pilula)
-        layout.setContentsMargins(3, 3, 3, 3)
-        layout.setSpacing(0)
-
-        botao_claro = QPushButton("CLARO")
-        botao_escuro = QPushButton("ESCURO")
-        for botao in (botao_claro, botao_escuro):
-            botao.setProperty("variante", "temaBotao")
-            botao.setCheckable(True)
-            botao.setCursor(Qt.CursorShape.PointingHandCursor)
-            layout.addWidget(botao)
-
-        controlador = ThemeController.instancia()
-        grupo = QButtonGroup(pilula)
-        grupo.setExclusive(True)
-        grupo.addButton(botao_claro)
-        grupo.addButton(botao_escuro)
-        botao_claro.setChecked(controlador.claro)
-        botao_escuro.setChecked(not controlador.claro)
-        botao_claro.toggled.connect(lambda marcado: marcado and controlador.alternar_para(True))
-        botao_escuro.toggled.connect(lambda marcado: marcado and controlador.alternar_para(False))
-        # Se o tema mudar por fora (ex.: usuário deslogou e trocou na tela de
-        # login), a pílula da sidebar reflete sem precisar recriar o shell.
-        # `setChecked` não reemite `toggled` quando o valor não muda, então
-        # não há risco de loop entre esta pílula e a do login.
-        controlador.mudou.connect(lambda _tokens: botao_claro.setChecked(controlador.claro))
-
-        return pilula
 
     def _montar_barra_usuario(self) -> QHBoxLayout:
         barra = QHBoxLayout()
@@ -323,9 +287,12 @@ class MainWindow(QMainWindow):
             return
         self._navegar_agora(rotulo)
 
-    def _abrir_loja(self) -> None:
+    def _abrir_area_loja(self, rotulo: str) -> None:
+        """Ponto de entrada comum para o botão "Central de Loja" da sidebar
+        e para cada card do hub (ver `_ROTULOS_LOJA`) -- todos atrás do
+        mesmo PIN de supervisor, exigido a cada acesso."""
         if self._paginas.currentWidget() is self._comanda_view:
-            self._comanda_view.tentar_sair(self._abrir_loja)
+            self._comanda_view.tentar_sair(lambda: self._abrir_area_loja(rotulo))
             return
         if not self._loja_desbloqueada:
             # Reautenticação a cada acesso, não só na primeira vez: um PIN
@@ -335,8 +302,7 @@ class MainWindow(QMainWindow):
             if modal.exec() != QDialog.DialogCode.Accepted:
                 return
             self._loja_desbloqueada = True
-        self._mostrar_pagina(self._loja_hub_view)
-        self._marcar_nav_ativo("Loja")
+        self._navegar_agora(rotulo)
 
     def _sair_da_loja(self) -> None:
         self._trancar_loja()
@@ -351,7 +317,7 @@ class MainWindow(QMainWindow):
             return
         if not self._caixa_desbloqueada:
             # Reautenticação a cada acesso, mesmo raciocínio da Loja (ver
-            # _abrir_loja): gaveta e histórico de fechamentos são dados
+            # _abrir_area_loja): gaveta e histórico de fechamentos são dados
             # sensíveis, e um PIN digitado há uma hora não prova quem está
             # com o mouse na mão agora.
             modal = GerentePinDialog(self._auth, self)
@@ -367,10 +333,14 @@ class MainWindow(QMainWindow):
         pagina, recarregar = self._destinos_nav[rotulo]()
         recarregar()
         self._mostrar_pagina(pagina)
-        # Sair de um dos 4 módulos administrativos sem passar pelo "← Voltar
+        # Sair de um dos módulos administrativos sem passar pelo "← Voltar
         # ao PDV" do hub (ex.: clicando direto em "Mesas" na sidebar) também
         # tranca a Loja — o PIN nunca deve valer para a próxima entrada.
         if rotulo in _ROTULOS_LOJA:
+            # Só "Central de Loja" tem botão próprio na sidebar (ver
+            # _montar_sidebar) -- os demais módulos da área só existem como
+            # card dentro do hub, então qualquer um deles mantém o mesmo
+            # botão "Central de Loja" aceso.
             self._marcar_nav_ativo("Loja")
         else:
             self._trancar_loja()
@@ -442,6 +412,7 @@ class MainWindow(QMainWindow):
     def _ao_logar(self, usuario: Usuario) -> None:
         rotulo_perfil = _ROTULOS_PERFIL.get(usuario.perfil, usuario.perfil.value)
         self._label_usuario.setText(f"{usuario.nome} · {rotulo_perfil}")
+        self._loja_hub_view.definir_usuario(f"{rotulo_perfil.upper()} · {usuario.nome.upper()}")
         # Sessão nova: Loja e Caixa não herdam o desbloqueio de quem usou antes.
         self._trancar_loja()
         self._trancar_caixa()
