@@ -54,6 +54,7 @@ from gestor_comercial.ui.views.pagamento_dialog import PagamentoDialog
 from gestor_comercial.ui.views.relatorios_view import RelatoriosView
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
+from gestor_comercial.ui.widgets.gerente_pin_dialog import GerentePinDialog
 from gestor_comercial.ui.widgets.loja_pin_dialog import LojaPinDialog
 from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
 
@@ -150,6 +151,11 @@ class MainWindow(QMainWindow):
         self._loja_hub_view.destino_selecionado.connect(self._navegar_agora)
         self._loja_hub_view.voltar.connect(self._sair_da_loja)
         self._loja_desbloqueada = False
+        # Mesmo raciocínio da Loja (ver _abrir_loja): a tela de Caixa expõe a
+        # gaveta, movimentos e histórico de fechamentos, então também fica
+        # atrás de PIN — só que de um gerente de verdade, não do código de
+        # supervisor fixo da Loja (ver GerentePinDialog).
+        self._caixa_desbloqueada = False
 
         self._paginas = QStackedWidget()
         for pagina in (
@@ -210,7 +216,12 @@ class MainWindow(QMainWindow):
         for rotulo in ("Mesas", "Caixa"):
             botao = QPushButton(rotulo)
             botao.setProperty("variante", "nav")
-            botao.clicked.connect(lambda _checked=False, r=rotulo: self._navegar(r))
+            if rotulo == "Caixa":
+                # Caixa exige PIN de gerente a cada acesso (ver _abrir_caixa),
+                # então não passa pelo _navegar genérico como Mesas.
+                botao.clicked.connect(self._abrir_caixa)
+            else:
+                botao.clicked.connect(lambda _checked=False, r=rotulo: self._navegar(r))
             layout.addWidget(botao)
             self._botoes_nav[rotulo] = botao
 
@@ -334,6 +345,24 @@ class MainWindow(QMainWindow):
     def _trancar_loja(self) -> None:
         self._loja_desbloqueada = False
 
+    def _abrir_caixa(self) -> None:
+        if self._paginas.currentWidget() is self._comanda_view:
+            self._comanda_view.tentar_sair(self._abrir_caixa)
+            return
+        if not self._caixa_desbloqueada:
+            # Reautenticação a cada acesso, mesmo raciocínio da Loja (ver
+            # _abrir_loja): gaveta e histórico de fechamentos são dados
+            # sensíveis, e um PIN digitado há uma hora não prova quem está
+            # com o mouse na mão agora.
+            modal = GerentePinDialog(self._auth, self)
+            if modal.exec() != QDialog.DialogCode.Accepted:
+                return
+            self._caixa_desbloqueada = True
+        self._navegar_agora("Caixa")
+
+    def _trancar_caixa(self) -> None:
+        self._caixa_desbloqueada = False
+
     def _navegar_agora(self, rotulo: str) -> None:
         pagina, recarregar = self._destinos_nav[rotulo]()
         recarregar()
@@ -345,6 +374,11 @@ class MainWindow(QMainWindow):
             self._marcar_nav_ativo("Loja")
         else:
             self._trancar_loja()
+            # Mesma lógica pro Caixa: só continua destravado enquanto o
+            # próprio Caixa está na tela. Sair pra Mesas (ou qualquer outro
+            # destino) exige o PIN de novo na próxima entrada.
+            if rotulo != "Caixa":
+                self._trancar_caixa()
             self._marcar_nav_ativo(rotulo)
 
     def _mostrar_pagina(self, pagina: QWidget) -> None:
@@ -408,8 +442,9 @@ class MainWindow(QMainWindow):
     def _ao_logar(self, usuario: Usuario) -> None:
         rotulo_perfil = _ROTULOS_PERFIL.get(usuario.perfil, usuario.perfil.value)
         self._label_usuario.setText(f"{usuario.nome} · {rotulo_perfil}")
-        # Sessão nova: a Loja não herda o desbloqueio de quem usou o caixa antes.
+        # Sessão nova: Loja e Caixa não herdam o desbloqueio de quem usou antes.
         self._trancar_loja()
+        self._trancar_caixa()
         # Aviso de impressão é da sessão anterior; quem entra agora não tem o que
         # fazer com o cupom de outro turno.
         self._aviso_impressao.limpar()
