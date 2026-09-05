@@ -17,7 +17,6 @@ from gestor_comercial.ui.widgets.flow_layout import FlowLayout
 # (rótulo, subtítulo, glifo do ícone)
 _SECAO_CATALOGO = (
     ("Cardápio", "Categorias, produtos, preços e combos", "C"),
-    ("Estoque", "Insumos, saldos mínimos e custo", "E"),
     ("Impressoras", "Recibo, produção e impressora padrão", "⎙"),
 )
 _SECAO_EQUIPE = (

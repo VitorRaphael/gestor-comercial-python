@@ -440,6 +440,7 @@ class MainWindow(QMainWindow):
         rotulo_perfil = _ROTULOS_PERFIL.get(usuario.perfil, usuario.perfil.value)
         self._label_usuario.setText(f"{usuario.nome} · {rotulo_perfil}")
         self._loja_hub_view.definir_usuario(f"{rotulo_perfil.upper()} · {usuario.nome.upper()}")
+        self._impressoras_view.definir_usuario(f"{rotulo_perfil.upper()} · {usuario.nome.upper()}")
         # Sessão nova: Loja e Caixa não herdam o desbloqueio de quem usou antes.
         self._trancar_loja()
         self._trancar_caixa()

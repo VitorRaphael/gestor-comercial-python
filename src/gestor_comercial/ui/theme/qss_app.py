@@ -164,6 +164,19 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QPushButton[variante="perigo"]:hover {{ background: {t['perigo_hover']}; }}
     QPushButton[variante="perigo"]:pressed {{ background: {t['perigo']}; }}
 
+    /* Ciano: ação de "desativar" no Cardápio -- nem neutra, nem destrutiva. */
+    QPushButton[variante="ciano"] {{ background: #0891b2; color: #ecfeff; border: none; }}
+    QPushButton[variante="ciano"]:hover {{ background: #06b6d4; }}
+    QPushButton[variante="ciano"]:disabled {{ background: {t['borda']}; color: {t['texto_fraquissimo']}; }}
+
+    /* Tracejado: "+ Nova categoria" no rodapé da coluna de categorias. */
+    QPushButton[variante="tracejado"] {{
+      background: transparent;
+      color: {t['texto_fraco']};
+      border: 1px dashed {t['borda']};
+    }}
+    QPushButton[variante="tracejado"]:hover {{ color: {t['texto']}; border-color: {t['texto_fraco']}; }}
+
     /* Variante compacta de "perigo" para botões dentro de linha de tabela
        (Remover/Cancelar em `ComandaView`): o padding padrão de QPushButton
        (10px 16px + fonte 13px) exige ~38px de altura, mais que a linha da
@@ -712,4 +725,104 @@ def construir_qss_app(t: dict[str, str]) -> str:
     /* ---------- Modais ---------- */
 
     QDialog {{ background: {t['superficie']}; }}
+
+    /* ---------- Tela de Impressoras ---------- */
+
+    QFrame#impressorasPainel {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+    QFrame#impressorasIndicador {{ background: transparent; border-radius: 2px; }}
+    QFrame#impressorasIndicador[ativo="true"] {{ background: {t['acento']}; }}
+
+    QFrame#impressoraIconeBox {{
+      background: {t['superficie_2']};
+      border-radius: 8px;
+    }}
+    QLabel#impressoraIconeGlifo {{ color: {t['acento']}; font-size: 16px; background: transparent; }}
+    QLabel#impressoraNomeLabel {{ color: {t['texto']}; font-weight: 600; font-size: 13px; background: transparent; }}
+    QLabel#impressoraSubLabel {{
+      color: {t['texto_fraquissimo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    QLabel#impressoraConexaoIcone {{ font-size: 13px; background: transparent; }}
+    QLabel#impressoraConexaoTexto {{ color: {t['texto_fraco']}; font-size: 12px; background: transparent; }}
+    QLabel#impressoraDestinoTexto {{ color: {t['texto_fraco']}; font-size: 12px; background: transparent; }}
+    QLabel#impressoraBobinaTexto {{ color: {t['texto_fraco']}; font-size: 12px; background: transparent; }}
+
+    QLabel[variante="badgePadrao"] {{
+      color: {t['acento']};
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      background: transparent;
+    }}
+    QLabel[variante="badgePadrao"][ativo="false"] {{ color: {t['texto_fraquissimo']}; font-weight: 600; }}
+
+    QLabel[variante="badgeStatusImpressora"] {{
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+    }}
+    QLabel[variante="badgeStatusImpressora"][status="online"] {{
+      background: rgba(34, 197, 94, 0.16);
+      color: {t['sucesso']};
+    }}
+    QLabel[variante="badgeStatusImpressora"][status="offline"] {{
+      background: rgba(239, 68, 68, 0.16);
+      color: {t['perigo_hover']};
+    }}
+
+    QPushButton[variante="pilula-ciano"] {{
+      background: #38bdf8;
+      color: #04222E;
+      border: none;
+      border-radius: 14px;
+      padding: 8px 16px;
+      font-size: 12px;
+      font-weight: 800;
+    }}
+    QPushButton[variante="pilula-ciano"]:hover {{ background: #60cbfa; }}
+    QPushButton[variante="pilula-ciano"]:disabled {{ background: {t['borda']}; color: {t['texto_fraquissimo']}; }}
+
+    QLabel#impressorasSelecaoLabel {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+
+    QFrame#impressorasBarraAcoes {{
+      background: {t['superficie_2']};
+      border-top: 1px solid {t['borda']};
+      border-bottom-left-radius: 16px;
+      border-bottom-right-radius: 16px;
+    }}
+
+    QFrame#categoriaLinha {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 10px;
+    }}
+    QFrame#categoriaLinha:hover {{ border-color: {t['texto_fraco']}; }}
+    QFrame#categoriaLinha[marcada="true"] {{ border-color: {t['acento']}; }}
+    QLabel#categoriaMarcador {{
+      border: 1.5px solid {t['borda']};
+      border-radius: 8px;
+      background: transparent;
+    }}
+    QLabel#categoriaMarcador[marcada="true"] {{
+      border-color: {t['acento']};
+      background: {t['acento']};
+    }}
+    QLabel#categoriaNomeLabel {{ color: {t['texto']}; font-size: 12px; font-weight: 600; background: transparent; }}
+
+    QLabel#impressorasPendentesLink {{ color: {t['mesa_ocupada_borda']}; font-size: 11px; font-weight: 700; background: transparent; }}
     """

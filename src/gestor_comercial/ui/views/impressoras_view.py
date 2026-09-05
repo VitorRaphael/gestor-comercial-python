@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -36,7 +37,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize, Signal
 
 from gestor_comercial.domain.enums import TipoConexaoImpressora
 from gestor_comercial.domain.impressora import COLUNAS_PADRAO, Impressora
@@ -54,7 +55,9 @@ from gestor_comercial.services.exceptions import (
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 
-_COLUNAS = ["Nome", "Conexão", "Destino", "Bobina", "Padrão", "Status"]
+# Coluna 0 é só o traço indicador (~4px) da linha selecionada -- não é
+# impressora nenhuma, então não entra em `_preencher_linha` como dado.
+_COLUNAS = ["", "Nome", "Conexão", "Destino", "Bobina", "Padrão", "Status"]
 
 _ROTULOS_TIPO = {
     TipoConexaoImpressora.USB: "USB",
@@ -62,6 +65,15 @@ _ROTULOS_TIPO = {
     TipoConexaoImpressora.REDE: "Rede",
     TipoConexaoImpressora.WINDOWS: "Windows",
     TipoConexaoImpressora.ARQUIVO: "Arquivo (.txt)",
+}
+
+# Glifo de conexão por tipo -- só decoração, não afeta a leitura da coluna.
+_GLIFOS_CONEXAO = {
+    TipoConexaoImpressora.USB: "🔌",
+    TipoConexaoImpressora.SERIAL: "🔌",
+    TipoConexaoImpressora.REDE: "🌐",
+    TipoConexaoImpressora.WINDOWS: "🖥",
+    TipoConexaoImpressora.ARQUIVO: "📄",
 }
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
@@ -86,18 +98,31 @@ class ImpressorasView(QWidget):
 
     def _montar_layout(self) -> None:
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 12, 0, 0)
+        layout.setSpacing(4)
+
+        self._breadcrumb = QLabel("GERENTE")
+        self._breadcrumb.setObjectName("centralLojaBreadcrumb")
+        layout.addWidget(self._breadcrumb)
 
         cabecalho = QHBoxLayout()
+        bloco_titulo = QVBoxLayout()
+        bloco_titulo.setSpacing(4)
         titulo = QLabel("Impressoras")
-        titulo.setStyleSheet("font-weight: 600; font-size: 18px;")
-        cabecalho.addWidget(titulo)
+        titulo.setObjectName("centralLojaTitulo")
+        bloco_titulo.addWidget(titulo)
+        subtitulo = QLabel("Recibo do cliente, fechamento de caixa e produção")
+        subtitulo.setObjectName("centralLojaSubtitulo")
+        bloco_titulo.addWidget(subtitulo)
+        cabecalho.addLayout(bloco_titulo)
         cabecalho.addStretch()
 
         botao_nova = QPushButton("Nova impressora")
-        botao_nova.setProperty("variante", "primario")
+        botao_nova.setProperty("variante", "pilula-destaque")
         botao_nova.clicked.connect(self._criar)
-        cabecalho.addWidget(botao_nova)
+        cabecalho.addWidget(botao_nova, alignment=Qt.AlignmentFlag.AlignTop)
         layout.addLayout(cabecalho)
+        layout.addSpacing(20)
 
         self._label_erro = QLabel("")
         self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
@@ -106,41 +131,72 @@ class ImpressorasView(QWidget):
         self._aviso = AvisoDeImpressao()
         layout.addWidget(self._aviso)
 
+        linha_principal = QHBoxLayout()
+        linha_principal.setSpacing(16)
+        linha_principal.addWidget(self._montar_painel_tabela(), stretch=2)
+        linha_principal.addWidget(self._montar_painel_categorias(), stretch=1)
+        layout.addLayout(linha_principal)
+
+    def _montar_painel_tabela(self) -> QWidget:
+        coluna = QVBoxLayout()
+        coluna.setContentsMargins(0, 0, 0, 0)
+        coluna.setSpacing(10)
+
+        painel = QFrame()
+        painel.setObjectName("impressorasPainel")
+        layout_painel = QVBoxLayout(painel)
+        layout_painel.setContentsMargins(0, 0, 0, 0)
+        layout_painel.setSpacing(0)
+
         self._tabela = QTableWidget(0, len(_COLUNAS))
         self._tabela.setHorizontalHeaderLabels(_COLUNAS)
+        self._tabela.setFrameShape(QFrame.Shape.NoFrame)
         self._tabela.verticalHeader().setVisible(False)
         self._tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._tabela.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self._tabela.itemSelectionChanged.connect(self._atualizar_categorias)
+        self._tabela.setShowGrid(False)
+        self._tabela.verticalHeader().setDefaultSectionSize(52)
+        cabecalho_tabela = self._tabela.horizontalHeader()
+        cabecalho_tabela.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self._tabela.setColumnWidth(0, 4)
+        cabecalho_tabela.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        cabecalho_tabela.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self._tabela.itemSelectionChanged.connect(self._ao_selecionar_linha)
+        layout_painel.addWidget(self._tabela)
 
-        linha_principal = QHBoxLayout()
-        linha_principal.addWidget(self._tabela, stretch=3)
-        linha_principal.addWidget(self._montar_painel_categorias(), stretch=1)
-        layout.addLayout(linha_principal)
+        barra_acoes = QFrame()
+        barra_acoes.setObjectName("impressorasBarraAcoes")
+        layout_acoes = QHBoxLayout(barra_acoes)
+        layout_acoes.setContentsMargins(16, 12, 16, 12)
 
-        acoes = QHBoxLayout()
+        self._label_selecao = QLabel("NENHUMA SELECIONADA")
+        self._label_selecao.setObjectName("impressorasSelecaoLabel")
+        layout_acoes.addWidget(self._label_selecao)
+        layout_acoes.addStretch()
+
         self._botao_editar = QPushButton("Editar")
+        self._botao_editar.setProperty("variante", "secundario")
         self._botao_editar.clicked.connect(self._editar)
-        acoes.addWidget(self._botao_editar)
+        layout_acoes.addWidget(self._botao_editar)
 
         self._botao_padrao = QPushButton("Definir como padrão")
-        self._botao_padrao.setProperty("variante", "secundario")
+        self._botao_padrao.setProperty("variante", "pilula-ciano")
         self._botao_padrao.clicked.connect(self._definir_padrao)
-        acoes.addWidget(self._botao_padrao)
+        layout_acoes.addWidget(self._botao_padrao)
 
         self._botao_teste = QPushButton("Imprimir teste")
         self._botao_teste.setProperty("variante", "secundario")
         self._botao_teste.clicked.connect(self._imprimir_teste)
-        acoes.addWidget(self._botao_teste)
+        layout_acoes.addWidget(self._botao_teste)
 
         self._botao_excluir = QPushButton("Excluir")
         self._botao_excluir.setProperty("variante", "perigo")
         self._botao_excluir.clicked.connect(self._excluir)
-        acoes.addWidget(self._botao_excluir)
-        acoes.addStretch()
-        layout.addLayout(acoes)
+        layout_acoes.addWidget(self._botao_excluir)
+
+        layout_painel.addWidget(barra_acoes)
+        coluna.addWidget(painel)
 
         self._label_ajuda = QLabel(
             "A impressora padrão recebe o recibo do cliente, o fechamento de caixa e "
@@ -149,23 +205,34 @@ class ImpressorasView(QWidget):
         )
         self._label_ajuda.setProperty("variante", "fraco")
         self._label_ajuda.setWordWrap(True)
-        layout.addWidget(self._label_ajuda)
+        coluna.addWidget(self._label_ajuda)
+
+        envelope = QWidget()
+        envelope.setLayout(coluna)
+        return envelope
 
     def _montar_painel_categorias(self) -> QWidget:
-        painel = QWidget()
+        painel = QFrame()
+        painel.setObjectName("impressorasPainel")
         layout = QVBoxLayout(painel)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
 
-        titulo = QLabel("Categorias desta impressora")
-        titulo.setStyleSheet("font-weight: 600;")
-        layout.addWidget(titulo)
+        eyebrow = QLabel("CATEGORIAS DESTA IMPRESSORA")
+        eyebrow.setObjectName("impressorasSelecaoLabel")
+        layout.addWidget(eyebrow)
+
+        self._titulo_categorias = QLabel("—")
+        self._titulo_categorias.setStyleSheet("font-weight: 700; font-size: 16px;")
+        layout.addWidget(self._titulo_categorias)
+        layout.addSpacing(6)
 
         self._lista_categorias = QListWidget()
-        # Uma categoria só tem uma impressora (§3.2, FK 1:N): marcar aqui
-        # troca o vínculo, nunca soma — reflete exatamente o que
-        # `associar_impressora`/`desassociar_impressora` fazem no banco.
-        self._lista_categorias.itemChanged.connect(self._ao_marcar_categoria)
-        layout.addWidget(self._lista_categorias)
+        self._lista_categorias.setFrameShape(QFrame.Shape.NoFrame)
+        self._lista_categorias.setStyleSheet("background: transparent;")
+        self._lista_categorias.setSpacing(6)
+        self._lista_categorias.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        layout.addWidget(self._lista_categorias, stretch=1)
 
         ajuda = QLabel(
             "Marque as categorias que devem sair nesta impressora. Uma "
@@ -175,7 +242,17 @@ class ImpressorasView(QWidget):
         ajuda.setWordWrap(True)
         layout.addWidget(ajuda)
 
+        self._label_pendentes = QLabel("")
+        self._label_pendentes.setObjectName("impressorasPendentesLink")
+        self._label_pendentes.setWordWrap(True)
+        layout.addWidget(self._label_pendentes)
+
         return painel
+
+    def definir_usuario(self, nome_perfil: str) -> None:
+        """`nome_perfil` já vem formatado (ex.: "GERENTE · VITOR"), igual ao
+        breadcrumb do restante do shell (ver `MainWindow._ao_logar`)."""
+        self._breadcrumb.setText(nome_perfil)
 
     def atualizar(self) -> None:
         self._label_erro.setText("")
@@ -186,40 +263,63 @@ class ImpressorasView(QWidget):
         self._tabela.setRowCount(len(self._impressoras))
         for linha, impressora in enumerate(self._impressoras):
             self._preencher_linha(linha, impressora)
+        self._ao_selecionar_linha()
+
+    def _ao_selecionar_linha(self) -> None:
+        self._atualizar_indicadores_linha()
+        impressora = self._impressora_selecionada()
+        self._label_selecao.setText(
+            f"SELECIONADA · {impressora.nome.upper()}" if impressora else "NENHUMA SELECIONADA"
+        )
         self._atualizar_categorias()
 
+    def _atualizar_indicadores_linha(self) -> None:
+        linha_selecionada = self._tabela.currentRow()
+        for linha in range(self._tabela.rowCount()):
+            indicador = self._tabela.cellWidget(linha, 0)
+            if indicador is None:
+                continue
+            indicador.setProperty("ativo", "true" if linha == linha_selecionada else "false")
+            indicador.style().unpolish(indicador)
+            indicador.style().polish(indicador)
+
     def _atualizar_categorias(self) -> None:
-        # `blockSignals` evita que popular a lista dispare `_ao_marcar_categoria`
-        # como se o gerente tivesse clicado em cada checkbox.
-        self._lista_categorias.blockSignals(True)
         self._lista_categorias.clear()
 
         impressora = self._impressora_selecionada()
         if impressora is None:
-            self._lista_categorias.blockSignals(False)
+            self._titulo_categorias.setText("—")
+            self._label_pendentes.setText("")
             return
 
+        self._titulo_categorias.setText(impressora.nome)
+
+        todas_categorias = self._service.listar_categorias()
         vinculadas = {c.id for c in self._service.listar_categorias_da_impressora(impressora.id)}
-        for categoria in self._service.listar_categorias():
-            item = QListWidgetItem(categoria.nome)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(
-                Qt.CheckState.Checked if categoria.id in vinculadas else Qt.CheckState.Unchecked
-            )
-            item.setData(Qt.ItemDataRole.UserRole, categoria.id)
+        for categoria in todas_categorias:
+            linha = _LinhaCategoria(categoria.id, categoria.nome, categoria.id in vinculadas)
+            linha.alternada.connect(self._ao_marcar_categoria)
+            item = QListWidgetItem()
+            item.setSizeHint(linha.sizeHint())
             self._lista_categorias.addItem(item)
+            self._lista_categorias.setItemWidget(item, linha)
 
-        self._lista_categorias.blockSignals(False)
+        if impressora.padrao:
+            sem_impressora = sum(1 for c in todas_categorias if c.impressora_id is None)
+            self._label_pendentes.setText(
+                f"{sem_impressora} seguem para a padrão." if sem_impressora else ""
+            )
+        else:
+            self._label_pendentes.setText("")
 
-    def _ao_marcar_categoria(self, item: QListWidgetItem) -> None:
+    def _ao_marcar_categoria(self, categoria_id: int, marcada: bool) -> None:
         impressora = self._impressora_selecionada()
         if impressora is None:
             return
-        categoria_id = item.data(Qt.ItemDataRole.UserRole)
 
         self._mostrar_erro("")
         try:
-            if item.checkState() == Qt.CheckState.Checked:
+            if marcada:
                 self._service.associar_impressora(categoria_id, impressora.id)
             else:
                 self._service.desassociar_impressora(categoria_id)
@@ -228,16 +328,103 @@ class ImpressorasView(QWidget):
         # Outra impressora pode ter perdido essa categoria (troca de vínculo);
         # a checklist dela só se atualiza quando o gerente clicar nela de novo,
         # então não há duplicidade visível, só desatualizada até o próximo clique.
+        if impressora.padrao:
+            todas_categorias = self._service.listar_categorias()
+            sem_impressora = sum(1 for c in todas_categorias if c.impressora_id is None)
+            self._label_pendentes.setText(
+                f"{sem_impressora} seguem para a padrão." if sem_impressora else ""
+            )
 
     def _preencher_linha(self, linha: int, impressora: Impressora) -> None:
-        tipo = _ROTULOS_TIPO.get(impressora.tipo_conexao, impressora.tipo_conexao.value)
-        self._tabela.setItem(linha, 0, QTableWidgetItem(impressora.nome))
-        self._tabela.setItem(linha, 1, QTableWidgetItem(tipo))
-        self._tabela.setItem(linha, 2, QTableWidgetItem(_descricao_destino(impressora)))
-        self._tabela.setItem(linha, 3, QTableWidgetItem(f"{impressora.colunas} colunas"))
-        self._tabela.setItem(linha, 4, QTableWidgetItem("Sim" if impressora.padrao else "—"))
-        status = "Ativa" if impressora.ativa else "Desativada"
-        self._tabela.setItem(linha, 5, QTableWidgetItem(status))
+        indicador = QFrame()
+        indicador.setObjectName("impressorasIndicador")
+        indicador.setFixedWidth(4)
+        self._tabela.setCellWidget(linha, 0, indicador)
+
+        self._tabela.setCellWidget(linha, 1, self._montar_celula_nome(impressora))
+        self._tabela.setCellWidget(linha, 2, self._montar_celula_conexao(impressora))
+
+        item_destino = QTableWidgetItem(_descricao_destino(impressora))
+        item_destino.setFlags(item_destino.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self._tabela.setItem(linha, 3, item_destino)
+
+        item_bobina = QTableWidgetItem(f"{impressora.colunas} colunas")
+        item_bobina.setFlags(item_bobina.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self._tabela.setItem(linha, 4, item_bobina)
+
+        self._tabela.setCellWidget(linha, 5, self._montar_celula_padrao(impressora))
+        self._tabela.setCellWidget(linha, 6, self._montar_celula_status(impressora))
+
+    def _montar_celula_nome(self, impressora: Impressora) -> QWidget:
+        celula = QWidget()
+        layout = QHBoxLayout(celula)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(10)
+
+        icone_box = QFrame()
+        icone_box.setObjectName("impressoraIconeBox")
+        icone_box.setFixedSize(36, 36)
+        layout_icone = QVBoxLayout(icone_box)
+        layout_icone.setContentsMargins(0, 0, 0, 0)
+        glifo = QLabel("🖨")
+        glifo.setObjectName("impressoraIconeGlifo")
+        glifo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout_icone.addWidget(glifo)
+        layout.addWidget(icone_box)
+
+        bloco_texto = QVBoxLayout()
+        bloco_texto.setSpacing(2)
+        nome = QLabel(impressora.nome)
+        nome.setObjectName("impressoraNomeLabel")
+        bloco_texto.addWidget(nome)
+        total_categorias = len(self._service.listar_categorias_da_impressora(impressora.id))
+        rotulo = "CATEGORIA" if total_categorias == 1 else "CATEGORIAS"
+        sub = QLabel(f"{total_categorias} {rotulo}")
+        sub.setObjectName("impressoraSubLabel")
+        bloco_texto.addWidget(sub)
+        layout.addLayout(bloco_texto)
+        layout.addStretch()
+        return celula
+
+    def _montar_celula_conexao(self, impressora: Impressora) -> QWidget:
+        celula = QWidget()
+        layout = QHBoxLayout(celula)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(8)
+
+        glifo = QLabel(_GLIFOS_CONEXAO.get(impressora.tipo_conexao, "🔌"))
+        glifo.setObjectName("impressoraConexaoIcone")
+        layout.addWidget(glifo)
+
+        texto = QLabel(_ROTULOS_TIPO.get(impressora.tipo_conexao, impressora.tipo_conexao.value))
+        texto.setObjectName("impressoraConexaoTexto")
+        layout.addWidget(texto)
+        layout.addStretch()
+        return celula
+
+    def _montar_celula_padrao(self, impressora: Impressora) -> QWidget:
+        celula = QWidget()
+        layout = QHBoxLayout(celula)
+        layout.setContentsMargins(12, 6, 12, 6)
+
+        rotulo = QLabel("★ SIM" if impressora.padrao else "NÃO")
+        rotulo.setProperty("variante", "badgePadrao")
+        rotulo.setProperty("ativo", "true" if impressora.padrao else "false")
+        layout.addWidget(rotulo)
+        layout.addStretch()
+        return celula
+
+    def _montar_celula_status(self, impressora: Impressora) -> QWidget:
+        celula = QWidget()
+        layout = QHBoxLayout(celula)
+        layout.setContentsMargins(12, 6, 12, 6)
+
+        rotulo = QLabel("ONLINE" if impressora.ativa else "OFFLINE")
+        rotulo.setProperty("variante", "badgeStatusImpressora")
+        rotulo.setProperty("status", "online" if impressora.ativa else "offline")
+        layout.addWidget(rotulo)
+        layout.addStretch()
+        return celula
 
     def _impressora_selecionada(self) -> Impressora | None:
         linha = self._tabela.currentRow()
@@ -323,6 +510,54 @@ class ImpressorasView(QWidget):
 
     def _mostrar_erro(self, mensagem: str) -> None:
         self._label_erro.setText(mensagem)
+
+
+class _LinhaCategoria(QFrame):
+    """Card clicável de uma categoria no painel lateral -- substitui o item
+    checkável padrão do `QListWidget` pelo marcador circular do mockup.
+    Alterna o próprio estado visual no clique; quem decide se a chamada ao
+    service (associar/desassociar) foi aceita é o `_ImpressorasView`."""
+
+    alternada = Signal(int, bool)
+
+    def __init__(self, categoria_id: int, nome: str, marcada: bool, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("categoriaLinha")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._id = categoria_id
+        self._marcada = marcada
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
+
+        self._marcador = QLabel()
+        self._marcador.setObjectName("categoriaMarcador")
+        self._marcador.setFixedSize(16, 16)
+        layout.addWidget(self._marcador)
+
+        nome_label = QLabel(nome)
+        nome_label.setObjectName("categoriaNomeLabel")
+        layout.addWidget(nome_label, stretch=1)
+
+        self._aplicar_estado()
+
+    def sizeHint(self) -> QSize:
+        return QSize(super().sizeHint().width(), 40)
+
+    def mousePressEvent(self, evento) -> None:  # noqa: N802 (override Qt)
+        if evento.button() == Qt.MouseButton.LeftButton:
+            self._marcada = not self._marcada
+            self._aplicar_estado()
+            self.alternada.emit(self._id, self._marcada)
+        super().mousePressEvent(evento)
+
+    def _aplicar_estado(self) -> None:
+        valor = "true" if self._marcada else "false"
+        for widget in (self, self._marcador):
+            widget.setProperty("marcada", valor)
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
 
 
 class _ImpressoraDialog(QDialog):
