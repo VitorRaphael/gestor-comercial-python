@@ -10,7 +10,15 @@ QSS não suporta `var()`, então os dicts abaixo são interpolados direto nos
 templates de `qss_app.py` / `login_view.py` a cada troca de tema.
 """
 
-TEMA_ESCURO: dict[str, str] = {
+# ----------------------------------------------------------------------
+# Cópia congelada dos tokens do tema escuro/claro tal como eram antes do
+# redesign "Concreto" (2026-09-05) -- usada exclusivamente pela tela de
+# Login (`login_view.py`), que foi propositalmente excluída do redesign e
+# deve permanecer visualmente intacta. NUNCA edite estes dois dicts; toda
+# mudança de paleta do shell entra em `TEMA_ESCURO`/`TEMA_CLARO` abaixo.
+# ----------------------------------------------------------------------
+
+TEMA_ESCURO_LOGIN: dict[str, str] = {
     "bg_marca": "#000000",
     "bg_terminal": "#101010",
     "divisor_vertical": "#202020",
@@ -28,6 +36,72 @@ TEMA_ESCURO: dict[str, str] = {
     "perigo_hover": "#ef4444",
     "rosa": "#ec4899",
     "aviso": "#eab308",
+    "ciano_metrica": "#22D3EE",
+    "mesa_bg": "#1a1a1a",
+    "mesa_ocupada_bg": "#1a1a1a",
+    "mesa_ocupada_borda": "#38bdf8",
+    "mesa_fechando_borda": "#f59e0b",
+    "mesa_livre_bg": "#1a1a1a",
+    "logo_clara": "#ffd873",
+    "logo_media": "#E5A93C",
+    "logo_escura": "#9c6f10",
+}
+
+TEMA_CLARO_LOGIN: dict[str, str] = {
+    "bg_marca": "#F4F2EB",
+    "bg_terminal": "#F4F2EB",
+    "divisor_vertical": "#d8deec",
+    "canto_azul": "#0055FF",
+    "superficie": "#FFFFFF",
+    "superficie_2": "#f4f6fb",
+    "borda": "#d8deec",
+    "texto": "#0F141C",
+    "texto_fraco": "#5b6178",
+    "texto_fraquissimo": "#8a90a8",
+    "acento": "#0055FF",
+    "acento_texto": "#ffffff",
+    "sucesso": "#16a34a",
+    "perigo": "#DC2626",
+    "perigo_hover": "#ef4444",
+    "rosa": "#db2777",
+    "aviso": "#b45309",
+    "ciano_metrica": "#0e7490",
+    "mesa_bg": "#FFFFFF",
+    "mesa_ocupada_bg": "#FFFFFF",
+    "mesa_ocupada_borda": "#0284c7",
+    "mesa_fechando_borda": "#b45309",
+    "mesa_livre_bg": "#FFFFFF",
+    "logo_clara": "#f5f7fb",
+    "logo_media": "#c3cadb",
+    "logo_escura": "#8991a8",
+}
+
+# ----------------------------------------------------------------------
+# Tema escuro do shell (tudo exceto Login) -- redesign "Concreto"
+# (2026-09-05): grafite aquecido em vez de preto chapado, com destaques
+# âmbar/ciano/verde suave/coral. Consumido por `qss_app.py` via
+# `ThemeController`. Ver `TEMA_ESCURO_LOGIN` acima para a paleta congelada
+# usada só pelo login.
+# ----------------------------------------------------------------------
+
+TEMA_ESCURO: dict[str, str] = {
+    "bg_marca": "#0F0F0E",
+    "bg_terminal": "#121211",
+    "divisor_vertical": "#202020",
+    "canto_azul": "#2f5bd6",
+    "superficie": "#161615",
+    "superficie_2": "#1C1C1A",
+    "borda": "rgba(255, 255, 255, 0.08)",
+    "texto": "#FFFFFF",
+    "texto_fraco": "#A1A1AA",
+    "texto_fraquissimo": "#71717A",
+    "acento": "#E5A93C",
+    "acento_texto": "#0C0E12",
+    "sucesso": "#4ADE80",
+    "perigo": "#F87171",
+    "perigo_hover": "#FCA5A5",
+    "rosa": "#ec4899",
+    "aviso": "#eab308",
     # Ciano de métricas de produto (Dashboard Mensal: barra de ranking do mix
     # de vendas) — deliberadamente diferente do ciano de "ação neutra"
     # (#0891b2) usado em botões, pra não confundir dado com controle.
@@ -36,13 +110,13 @@ TEMA_ESCURO: dict[str, str] = {
     # três, só a barra/borda superior muda de cor por status — não é mais
     # fundo tingido por estado (era roxo pra ocupada antes do redesign
     # "Dark Industrial").
-    "mesa_bg": "#1a1a1a",
-    "mesa_ocupada_bg": "#1a1a1a",
-    "mesa_ocupada_borda": "#38bdf8",
+    "mesa_bg": "#161615",
+    "mesa_ocupada_bg": "#1C1C1A",
+    "mesa_ocupada_borda": "#22D3EE",
     # "Fechando" = comanda em conferência (pré-conta emitida, itens travados)
     # numa mesa ocupada — estado intermediário entre ocupada e livre de novo.
-    "mesa_fechando_borda": "#f59e0b",
-    "mesa_livre_bg": "#1a1a1a",
+    "mesa_fechando_borda": "#E5A93C",
+    "mesa_livre_bg": "#181817",
     # Logo isométrico na mesma tonalidade vívida do acento (botão ENTER/pílula
     # ESCURO), só com camadas mais escuras por baixo pra dar profundidade.
     "logo_clara": "#ffd873",

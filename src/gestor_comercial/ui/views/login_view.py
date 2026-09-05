@@ -35,12 +35,15 @@ from gestor_comercial.domain.usuario import Usuario
 from gestor_comercial.services.auth_service import AuthService, PIN_MAX_DIGITOS
 from gestor_comercial.services.exceptions import NaoAutorizadoError
 from gestor_comercial.ui.theme.controller import ThemeController
-from gestor_comercial.ui.theme.tokens import TEMA_CLARO as _TEMA_CLARO
-from gestor_comercial.ui.theme.tokens import TEMA_ESCURO as _TEMA_ESCURO
+from gestor_comercial.ui.theme.tokens import TEMA_CLARO_LOGIN as _TEMA_CLARO
+from gestor_comercial.ui.theme.tokens import TEMA_ESCURO_LOGIN as _TEMA_ESCURO
 from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
 
-# Os dicts de paleta vivem em `ui/theme/tokens.py` (compartilhados com o
-# resto do shell via `ThemeController`). Esta tela ainda mantém seu próprio
+# Os dicts de paleta (`TEMA_ESCURO_LOGIN`/`TEMA_CLARO_LOGIN`) vivem em
+# `ui/theme/tokens.py`, mas são uma cópia congelada só desta tela --
+# propositalmente isolada do redesign "Concreto" do resto do shell
+# (`TEMA_ESCURO`/`TEMA_CLARO`, consumidos via `ThemeController`), pra manter
+# o login visualmente intacto. Esta tela ainda mantém seu próprio
 # `setStyleSheet` local (ver `_aplicar_tema`) porque tem widgets/gradientes
 # só dela (o painel de marca, o logo isométrico) que não fazem sentido no
 # QSS genérico do app -- mas troca de tema aqui também empurra pro
