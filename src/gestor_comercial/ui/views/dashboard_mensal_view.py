@@ -418,11 +418,19 @@ def _formatar_reais_com_sinal(valor: Decimal) -> str:
 
 
 def _limpar_layout(layout: QVBoxLayout) -> None:
+    # `takeAt` só tira o item do LAYOUT — o widget continua filho visível do
+    # container até o `deleteLater()` agendado realmente rodar no próximo
+    # ciclo de eventos. Entre um `_preencher_*` e o outro (ex.: trocar de
+    # mês no Dashboard Mensal), isso empilhava a linha antiga por baixo da
+    # nova na mesma posição, produzindo texto sobreposto/corrompido no
+    # repaint ("Mix de Vendas do Mês" ilegível). `setParent(None)` desliga o
+    # widget da árvore na hora — some do repaint mesmo antes do GC de verdade.
     while layout.count():
         item = layout.takeAt(0)
         sub_layout = item.layout()
         widget = item.widget()
         if widget is not None:
+            widget.setParent(None)
             widget.deleteLater()
         elif sub_layout is not None:
             _limpar_layout(sub_layout)

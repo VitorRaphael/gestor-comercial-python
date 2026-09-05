@@ -482,19 +482,29 @@ def _diferenca_total(resumo: ResumoCaixa) -> Decimal | None:
 
 
 def _limpar_layout_horizontal(layout: QHBoxLayout) -> None:
+    # Ver o comentário de `_limpar_layout_vertical` abaixo — mesmo bug,
+    # mesma correção: `setParent(None)` antes do `deleteLater()`.
     while layout.count():
         item = layout.takeAt(0)
         widget = item.widget()
         if widget is not None:
+            widget.setParent(None)
             widget.deleteLater()
 
 
 def _limpar_layout_vertical(layout: QVBoxLayout) -> None:
+    # `takeAt` só tira o item do LAYOUT — o widget continua filho visível do
+    # container até o `deleteLater()` agendado realmente rodar no próximo
+    # ciclo de eventos. Entre um `_preencher_*` e o outro (trocar de mês,
+    # trocar filtro de operador), isso empilhava a linha antiga por baixo da
+    # nova na mesma posição, produzindo texto sobreposto/corrompido no
+    # repaint. `setParent(None)` desliga o widget da árvore na hora.
     while layout.count():
         item = layout.takeAt(0)
         sub_layout = item.layout()
         widget = item.widget()
         if widget is not None:
+            widget.setParent(None)
             widget.deleteLater()
         elif sub_layout is not None:
             _limpar_layout_vertical(sub_layout)
