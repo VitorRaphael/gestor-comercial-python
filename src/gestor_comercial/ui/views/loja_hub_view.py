@@ -3,15 +3,14 @@ operação, organizados por área em cards.
 
 Agrupa Cardápio, Estoque, Impressoras, Funcionários, Relatórios e
 Configurações atrás de um único ponto de entrada com PIN na sidebar (ver
-`MainWindow._abrir_area_loja`), mas cada um desses módulos também tem seu
-próprio atalho direto na sidebar -- este hub existe como visão geral, não
-como o único caminho até eles.
+`MainWindow._abrir_area_loja`). Não tem botão de saída próprio -- voltar ao
+PDV é só clicar em "Mesas" na sidebar, como qualquer outra tela do shell.
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from gestor_comercial.ui.widgets.flow_layout import FlowLayout
 
@@ -71,7 +70,6 @@ class _CardModulo(QFrame):
 
 class LojaHubView(QWidget):
     destino_selecionado = Signal(str)
-    voltar = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -96,13 +94,6 @@ class LojaHubView(QWidget):
         layout.addWidget(self._montar_secao("CATÁLOGO E PRODUÇÃO", _SECAO_CATALOGO))
         layout.addSpacing(24)
         layout.addWidget(self._montar_secao("EQUIPE, RESULTADOS E SISTEMA", _SECAO_EQUIPE))
-        layout.addSpacing(24)
-
-        botao_voltar = QPushButton("← Voltar ao PDV")
-        botao_voltar.setProperty("variante", "voltar-pdv")
-        botao_voltar.setCursor(Qt.CursorShape.PointingHandCursor)
-        botao_voltar.clicked.connect(self.voltar.emit)
-        layout.addWidget(botao_voltar, 0, Qt.AlignmentFlag.AlignLeft)
 
         layout.addStretch()
 

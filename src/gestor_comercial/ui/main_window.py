@@ -160,7 +160,6 @@ class MainWindow(QMainWindow):
 
         self._loja_hub_view = LojaHubView()
         self._loja_hub_view.destino_selecionado.connect(self._navegar_agora)
-        self._loja_hub_view.voltar.connect(self._sair_da_loja)
         self._loja_desbloqueada = False
         # Mesmo raciocínio da Loja (ver _abrir_area_loja): a tela de Caixa expõe a
         # gaveta, movimentos e histórico de fechamentos, então também fica
@@ -334,10 +333,6 @@ class MainWindow(QMainWindow):
                 return
             self._loja_desbloqueada = True
         self._navegar_agora(rotulo)
-
-    def _sair_da_loja(self) -> None:
-        self._trancar_loja()
-        self._navegar("Mesas")
 
     def _trancar_loja(self) -> None:
         self._loja_desbloqueada = False
