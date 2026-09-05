@@ -958,22 +958,44 @@ def construir_qss_app(t: dict[str, str]) -> str:
     /* Mix de vendas do mês (ranking) */
     QLabel#relatoriosRankIndice {{
       color: {t['texto_fraquissimo']};
-      font-size: 11px;
+      font-size: 13px;
       font-weight: 700;
       font-family: "Consolas", monospace;
       background: transparent;
+      min-height: 18px;
     }}
-    QLabel#relatoriosRankNome {{ color: {t['texto']}; font-size: 13px; font-weight: 600; background: transparent; }}
-    QLabel#relatoriosRankQtd {{ color: {t['texto_fraco']}; font-size: 11px; background: transparent; }}
-    QLabel#relatoriosRankValor {{ color: {t['texto']}; font-size: 13px; font-weight: 700; background: transparent; }}
+    QLabel#relatoriosRankNome {{
+      color: {t['texto']};
+      font-size: 14px;
+      font-weight: 600;
+      background: transparent;
+      min-height: 18px;
+    }}
+    QLabel#relatoriosRankQtd {{
+      color: {t['texto_fraco']};
+      font-size: 13px;
+      background: transparent;
+      min-height: 18px;
+    }}
+    QLabel#relatoriosRankValor {{
+      color: {t['texto']};
+      font-size: 14px;
+      font-weight: 700;
+      background: transparent;
+      min-height: 18px;
+    }}
     QProgressBar#relatoriosBarraRanking {{
-      background: {t['borda']};
+      background: #1C1C1A;
       border: none;
-      border-radius: 2px;
-      max-height: 4px;
-      min-height: 4px;
+      border-radius: 3px;
+      max-height: 5px;
+      min-height: 5px;
     }}
-    QProgressBar#relatoriosBarraRanking::chunk {{ background: {t['ciano_metrica']}; border-radius: 2px; }}
+    QProgressBar#relatoriosBarraRanking::chunk {{ background: #22D3EE; border-radius: 3px; }}
+    QScrollArea#relatoriosRolagemRanking {{ background: transparent; border: none; }}
+    QScrollArea#relatoriosRolagemRanking > QWidget > QWidget {{ background: transparent; }}
+    QScrollArea#relatoriosRolagemHistorico {{ background: transparent; border: none; }}
+    QScrollArea#relatoriosRolagemHistorico > QWidget > QWidget {{ background: transparent; }}
 
     /* ---------- Tela de Funcionários (redesign "Concreto", §3.14) ---------- */
 

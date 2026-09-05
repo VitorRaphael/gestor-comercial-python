@@ -33,6 +33,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -66,6 +68,7 @@ from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
 
 _COLUNAS = ["DATA", "TURNO / SEQ", "OPERADOR", "FATURAMENTO", "DIFERENÇA", "AÇÕES"]
 _COLUNA_ACOES = 5
+_ALTURA_MAXIMA_TABELA = 420
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
@@ -114,9 +117,18 @@ class HistoricoCaixaView(QWidget):
         self._aviso_impressao = AvisoDeImpressao()
         layout_externo.addWidget(self._aviso_impressao)
 
+        # Corpo rolável: cards, tabela e painéis de fechamento não competem
+        # por espaço na altura fixa da janela (máquina do food truck) — a
+        # tabela de turnos sempre reserva altura própria (`setMinimumHeight`)
+        # e o que não couber rola, em vez de ser espremido até ficar ilegível.
+        conteudo = QWidget()
+        layout_conteudo = QVBoxLayout(conteudo)
+        layout_conteudo.setContentsMargins(0, 0, 4, 0)
+        layout_conteudo.setSpacing(16)
+
         grade_cards = QGridLayout()
         grade_cards.setSpacing(14)
-        layout_externo.addLayout(grade_cards)
+        layout_conteudo.addLayout(grade_cards)
         self._card_faturamento = CardKpi("Faturamento no período")
         self._card_ticket = CardKpi("Ticket médio por turno")
         self._card_diferenca = CardKpi("Diferença acumulada")
@@ -134,19 +146,32 @@ class HistoricoCaixaView(QWidget):
         self._tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._tabela.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        cabecalho_tabela = self._tabela.horizontalHeader()
+        for coluna in (0, 1, 3, 4, _COLUNA_ACOES):
+            cabecalho_tabela.setSectionResizeMode(coluna, QHeaderView.ResizeMode.ResizeToContents)
+        cabecalho_tabela.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self._tabela.setColumnWidth(_COLUNA_ACOES, 110)
         self._tabela.cellDoubleClicked.connect(self._ao_dar_duplo_clique)
-        layout_externo.addWidget(self._tabela, 1)
+        self._tabela.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        layout_conteudo.addWidget(self._tabela)
 
         self._rodape_tabela = self._montar_rodape_tabela()
-        layout_externo.addWidget(self._rodape_tabela)
+        layout_conteudo.addWidget(self._rodape_tabela)
 
         # §3.14 — seções complementares de fechamento, no final da tela.
         painel_fechamento = QHBoxLayout()
         painel_fechamento.setSpacing(16)
         painel_fechamento.addWidget(self._montar_painel_gaveta(), 35)
         painel_fechamento.addWidget(self._montar_painel_atendentes(), 65)
-        layout_externo.addLayout(painel_fechamento)
+        layout_conteudo.addLayout(painel_fechamento)
+
+        rolagem = QScrollArea()
+        rolagem.setObjectName("relatoriosRolagemHistorico")
+        rolagem.setWidget(conteudo)
+        rolagem.setWidgetResizable(True)
+        rolagem.setFrameShape(QFrame.Shape.NoFrame)
+        rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        layout_externo.addWidget(rolagem, 1)
 
     def _montar_filtros(self) -> QHBoxLayout:
         linha = QHBoxLayout()
@@ -338,6 +363,22 @@ class HistoricoCaixaView(QWidget):
         for linha, caixa in enumerate(self._fechamentos):
             self._preencher_linha(linha, caixa)
         self._tabela.clearSelection()
+        self._ajustar_altura_tabela()
+
+    def _ajustar_altura_tabela(self) -> None:
+        # `QTableWidget` não recalcula seu `sizeHint` pelo conteúdo real das
+        # linhas — sem isso, o layout reservava sempre a mesma altura (vazia
+        # com poucos turnos, ou cortada com muitos), deixando o rodapé
+        # "N TURNOS FECHADOS" longe da última linha visível. Mede a altura
+        # real (cabeçalho + linhas) e trava nela, com teto pra lista grande
+        # continuar rolando dentro da própria tabela em vez de esticar a
+        # página.
+        self._tabela.resizeRowsToContents()
+        altura = self._tabela.horizontalHeader().height() + 2 * self._tabela.frameWidth()
+        for linha in range(self._tabela.rowCount()):
+            altura += self._tabela.rowHeight(linha)
+        altura = max(altura, self._tabela.horizontalHeader().height() + 56)
+        self._tabela.setFixedHeight(min(altura, _ALTURA_MAXIMA_TABELA))
 
     def _preencher_linha(self, linha: int, caixa: Caixa) -> None:
         operador = caixa.fechado_por.nome if caixa.fechado_por is not None else "—"

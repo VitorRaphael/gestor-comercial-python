@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QProgressBar,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -88,10 +90,15 @@ class DashboardMensalView(QWidget):
             self._cards[chave_titulo] = card
             grade_cards.addWidget(card, 0, coluna)
 
+        painel_formas = self._montar_painel_formas_pagamento()
+        painel_ranking = self._montar_painel_ranking()
+        painel_formas.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        painel_ranking.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+
         painel_graficos = QHBoxLayout()
         painel_graficos.setSpacing(16)
-        painel_graficos.addWidget(self._montar_painel_formas_pagamento(), 35)
-        painel_graficos.addWidget(self._montar_painel_ranking(), 65)
+        painel_graficos.addWidget(painel_formas, 35)
+        painel_graficos.addWidget(painel_ranking, 65)
         layout_externo.addLayout(painel_graficos, 1)
 
         # §3.14 — seções complementares de fechamento, no final da tela.
@@ -165,10 +172,19 @@ class DashboardMensalView(QWidget):
         cabecalho.addWidget(self._label_indicador_ranking)
         layout.addLayout(cabecalho)
 
-        self._layout_ranking = QVBoxLayout()
-        self._layout_ranking.setSpacing(10)
-        layout.addLayout(self._layout_ranking)
-        layout.addStretch()
+        conteudo_ranking = QWidget()
+        self._layout_ranking = QVBoxLayout(conteudo_ranking)
+        self._layout_ranking.setContentsMargins(0, 0, 0, 0)
+        self._layout_ranking.setSpacing(12)
+
+        rolagem = QScrollArea()
+        rolagem.setObjectName("relatoriosRolagemRanking")
+        rolagem.setWidget(conteudo_ranking)
+        rolagem.setWidgetResizable(True)
+        rolagem.setMinimumHeight(260)
+        rolagem.setFrameShape(QFrame.Shape.NoFrame)
+        rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        layout.addWidget(rolagem, 1)
         return painel
 
     def _montar_painel_gaveta(self) -> QFrame:
@@ -298,6 +314,7 @@ class DashboardMensalView(QWidget):
             self._layout_ranking.addLayout(
                 _criar_linha_ranking(indice, item.produto_nome, item.quantidade, item.valor_total, proporcao)
             )
+        self._layout_ranking.addStretch()
 
 
     def _preencher_gaveta(self, gaveta: FechamentoGaveta) -> None:
@@ -362,26 +379,30 @@ def _criar_linha_ranking(
     indice: int, produto_nome: str, quantidade: int, valor_total: Decimal, proporcao: int
 ) -> QVBoxLayout:
     bloco = QVBoxLayout()
-    bloco.setSpacing(4)
+    bloco.setSpacing(6)
 
     topo = QHBoxLayout()
     topo.setSpacing(10)
     label_indice = QLabel(f"{indice:02d}")
     label_indice.setObjectName("relatoriosRankIndice")
     label_indice.setFixedWidth(24)
+    label_indice.setMinimumHeight(18)
     topo.addWidget(label_indice)
 
     label_nome = QLabel(produto_nome)
     label_nome.setObjectName("relatoriosRankNome")
+    label_nome.setMinimumHeight(18)
     topo.addWidget(label_nome, 1)
 
     label_qtd = QLabel(f"{quantidade} un")
     label_qtd.setObjectName("relatoriosRankQtd")
+    label_qtd.setMinimumHeight(18)
     topo.addWidget(label_qtd)
 
     label_valor = QLabel(_formatar_reais(valor_total))
     label_valor.setObjectName("relatoriosRankValor")
     label_valor.setFixedWidth(90)
+    label_valor.setMinimumHeight(18)
     label_valor.setAlignment(label_valor.alignment() | _ALINHAR_DIREITA)
     topo.addWidget(label_valor)
     bloco.addLayout(topo)
