@@ -336,7 +336,7 @@ class ImpressorasView(QWidget):
             )
 
     def _preencher_linha(self, linha: int, impressora: Impressora) -> None:
-        indicador = QFrame()
+        indicador = _CelulaSelecionavel(self._tabela)
         indicador.setObjectName("impressorasIndicador")
         indicador.setFixedWidth(4)
         self._tabela.setCellWidget(linha, 0, indicador)
@@ -356,7 +356,7 @@ class ImpressorasView(QWidget):
         self._tabela.setCellWidget(linha, 6, self._montar_celula_status(impressora))
 
     def _montar_celula_nome(self, impressora: Impressora) -> QWidget:
-        celula = QWidget()
+        celula = _CelulaSelecionavel(self._tabela)
         layout = QHBoxLayout(celula)
         layout.setContentsMargins(12, 6, 12, 6)
         layout.setSpacing(10)
@@ -387,7 +387,7 @@ class ImpressorasView(QWidget):
         return celula
 
     def _montar_celula_conexao(self, impressora: Impressora) -> QWidget:
-        celula = QWidget()
+        celula = _CelulaSelecionavel(self._tabela)
         layout = QHBoxLayout(celula)
         layout.setContentsMargins(12, 6, 12, 6)
         layout.setSpacing(8)
@@ -403,7 +403,7 @@ class ImpressorasView(QWidget):
         return celula
 
     def _montar_celula_padrao(self, impressora: Impressora) -> QWidget:
-        celula = QWidget()
+        celula = _CelulaSelecionavel(self._tabela)
         layout = QHBoxLayout(celula)
         layout.setContentsMargins(12, 6, 12, 6)
 
@@ -415,7 +415,7 @@ class ImpressorasView(QWidget):
         return celula
 
     def _montar_celula_status(self, impressora: Impressora) -> QWidget:
-        celula = QWidget()
+        celula = _CelulaSelecionavel(self._tabela)
         layout = QHBoxLayout(celula)
         layout.setContentsMargins(12, 6, 12, 6)
 
@@ -510,6 +510,24 @@ class ImpressorasView(QWidget):
 
     def _mostrar_erro(self, mensagem: str) -> None:
         self._label_erro.setText(mensagem)
+
+
+class _CelulaSelecionavel(QWidget):
+    """Widget de célula da tabela de impressoras que repassa o clique para a
+    linha: por padrão o Qt entrega o mousePressEvent ao `cellWidget` e nunca
+    ao `QTableWidget`, então sem isso clicar no nome/conexão/padrão/status
+    nunca selecionava a linha (e o painel de categorias ficava sempre vazio).
+    """
+
+    def __init__(self, tabela: QTableWidget, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._tabela = tabela
+
+    def mousePressEvent(self, evento) -> None:  # noqa: N802 (override Qt)
+        indice = self._tabela.indexAt(self.pos())
+        if indice.isValid():
+            self._tabela.selectRow(indice.row())
+        super().mousePressEvent(evento)
 
 
 class _LinhaCategoria(QFrame):
