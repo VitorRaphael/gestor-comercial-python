@@ -13,8 +13,8 @@ from __future__ import annotations
 import unicodedata
 from decimal import Decimal
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
@@ -24,6 +24,9 @@ from PySide6.QtWidgets import (
 )
 
 from gestor_comercial.domain.produto import Produto
+from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
+
+_TAMANHO_MINIATURA = 40
 
 
 def _normalizar(texto: str) -> str:
@@ -75,6 +78,7 @@ class BuscaProdutoWidget(QWidget):
         layout.addWidget(self._campo_busca)
 
         self._lista_resultados = QListWidget()
+        self._lista_resultados.setIconSize(QSize(_TAMANHO_MINIATURA, _TAMANHO_MINIATURA))
         self._lista_resultados.itemActivated.connect(self._item_ativado)
         layout.addWidget(self._lista_resultados)
 
@@ -147,6 +151,10 @@ class BuscaProdutoWidget(QWidget):
                 texto += "  [COMBO]"
             item = QListWidgetItem(texto)
             item.setData(Qt.ItemDataRole.UserRole, produto.id)
+            # Pixmap já vem cacheado (ver thumbnail_cache) — digitar rápido na
+            # busca não reprocessa nada, só troca o texto/ícone já prontos.
+            pixmap = obter_pixmap(produto.imagem_path, _TAMANHO_MINIATURA, produto.nome)
+            item.setIcon(QIcon(pixmap))
             self._lista_resultados.addItem(item)
         if self._lista_resultados.count() > 0:
             self._lista_resultados.setCurrentRow(0)

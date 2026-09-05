@@ -621,7 +621,7 @@ class _ProdutosPainel(QFrame):
 
         self.tabela.setRowCount(len(self._produtos))
         for linha, produto in enumerate(self._produtos):
-            self.tabela.setItem(linha, 0, QTableWidgetItem(produto.nome))
+            self.tabela.setCellWidget(linha, 0, _criar_celula_produto(produto))
             self.tabela.setCellWidget(linha, 1, _criar_badge_tipo(produto.is_combo))
             self.tabela.setItem(linha, 2, QTableWidgetItem(_formatar_reais(produto.preco)))
             self.tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(produto.custo)))
@@ -1246,6 +1246,33 @@ def _criar_badge_status(ativo: bool) -> QWidget:
         "margin: 0px;"
     )
     return _celula_centralizada(label)
+
+
+_TAMANHO_MINIATURA_PRODUTO = 28
+
+
+def _criar_celula_produto(produto: Produto) -> QWidget:
+    """Miniatura + nome do produto, coluna "Produto" da tabela do cardápio.
+
+    Sem isso, a única foto visível no fluxo inteiro era o preview dentro do
+    dialog de edição — impossível saber de relance quais itens já têm foto e
+    quais ainda dependem do placeholder (ver pedido do Vitor).
+    """
+    celula = QWidget()
+    celula.setStyleSheet("background: transparent;")
+    layout = QHBoxLayout(celula)
+    layout.setContentsMargins(10, 0, 6, 0)
+    layout.setSpacing(8)
+
+    miniatura = QLabel()
+    miniatura.setFixedSize(_TAMANHO_MINIATURA_PRODUTO, _TAMANHO_MINIATURA_PRODUTO)
+    miniatura.setPixmap(obter_pixmap(produto.imagem_path, _TAMANHO_MINIATURA_PRODUTO, produto.nome))
+    layout.addWidget(miniatura)
+
+    rotulo = QLabel(produto.nome)
+    rotulo.setStyleSheet("background: transparent;")
+    layout.addWidget(rotulo, stretch=1)
+    return celula
 
 
 def _criar_badge_tipo(is_combo: bool) -> QWidget:

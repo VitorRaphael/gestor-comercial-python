@@ -1,9 +1,10 @@
 """Cardápio: categorias, produtos, combos e impressoras.
 
 Porte de CategoriaService.java, ProdutoService.java, ComboItemService.java e
-ImpressoraService.java (§3.2, §3.3 e §3.12 da arquitetura). A foto do produto
-ficou de fora: não existe `foto_url` nesta versão — é um app desktop, o
-cardápio é lido de uma lista, não de uma vitrine com imagem.
+ImpressoraService.java (§3.2, §3.3 e §3.12 da arquitetura). Produto tem
+`imagem_path` opcional: nome do arquivo da miniatura já processada (ver
+`gestor_comercial.services.imagem_service`), nunca o caminho absoluto nem o
+arquivo original — a compressão acontece na UI antes de chamar este service.
 
 Cadastrar, editar, desativar e excluir são ações administrativas (§3.1) e
 exigem gerente. Listar e buscar não exigem: o atendente precisa do cardápio
@@ -166,6 +167,7 @@ class CardapioService:
         custo: Decimal = ZERO,
         descricao: str | None = None,
         is_combo: bool = False,
+        imagem_path: str | None = None,
     ) -> Produto:
         self.auth.exigir_gerente()
         nome_limpo = self._texto_obrigatorio(nome, "Informe o nome do produto.")
@@ -181,6 +183,7 @@ class CardapioService:
             categoria_id=categoria.id,
             ativo=True,
             is_combo=bool(is_combo),
+            imagem_path=self._imagem_path_limpo(imagem_path),
         )
         self.uow.produtos.salvar(produto)
         self.uow.commit()
@@ -206,6 +209,7 @@ class CardapioService:
         custo: Decimal,
         categoria_id: int,
         descricao: str | None = None,
+        imagem_path: str | None = None,
     ) -> Produto:
         self.auth.exigir_gerente()
         produto = self.buscar_produto(produto_id)
@@ -221,6 +225,9 @@ class CardapioService:
         produto.custo = custo_final
         produto.categoria_id = categoria.id
         produto.descricao = self._descricao_limpa(descricao)
+        # Substituição total, igual ao resto do formulário: a tela sempre manda
+        # o estado atual da imagem (inclusive None, quando o gerente remove).
+        produto.imagem_path = self._imagem_path_limpo(imagem_path)
         self.uow.produtos.salvar(produto)
         self.uow.commit()
         return produto
@@ -702,6 +709,16 @@ class CardapioService:
         if not isinstance(descricao, str):
             return None
         return descricao.strip() or None
+
+    @staticmethod
+    def _imagem_path_limpo(imagem_path: str | None) -> str | None:
+        # Só o nome do arquivo é aceito aqui (ver imagem_service): a pasta é
+        # sempre resolvida em runtime, então nada com "/" ou "\" pode entrar
+        # no banco por engano.
+        if not isinstance(imagem_path, str):
+            return None
+        texto = imagem_path.strip()
+        return texto or None
 
     @staticmethod
     def _quantidade_valida(quantidade: int) -> int:

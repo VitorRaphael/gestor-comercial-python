@@ -155,6 +155,12 @@ class ItemRankingMensal:
     produto_nome: str
     quantidade: int
     valor_total: Decimal
+    # Não faz parte do snapshot congelado (`resumo_produtos_json`, indexado só
+    # por nome — o produto pode ter sido renomeado/excluído desde o
+    # fechamento). Resolvido à parte em `resumo_mensal`, por nome, contra o
+    # cadastro ATUAL de produtos — melhor esforço só para a miniatura da UI,
+    # nunca para o valor faturado. `None` cai no placeholder normalmente.
+    imagem_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -814,6 +820,7 @@ class CaixaService:
         ]
         ticket_medio = dinheiro(faturamento / comandas_pagas) if comandas_pagas > 0 else ZERO
         ranking_produtos = sorted(ranking.values(), key=lambda item: item.valor_total, reverse=True)
+        ranking_produtos = self._com_imagem_atual(ranking_produtos)
 
         return ResumoMensal(
             ano=ano,
@@ -826,6 +833,26 @@ class CaixaService:
             cancelamentos_valor=dinheiro(cancelamentos_valor),
             ranking_produtos=ranking_produtos,
         )
+
+    def _com_imagem_atual(self, ranking: list[ItemRankingMensal]) -> list[ItemRankingMensal]:
+        """Preenche `imagem_path` casando por nome contra o cadastro atual.
+
+        Melhor esforço, não fonte de verdade: um produto renomeado ou
+        excluído depois do fechamento simplesmente fica sem foto no ranking
+        (cai no placeholder da UI), o número de faturamento não é afetado.
+        """
+        if not ranking:
+            return ranking
+        imagem_por_nome = {produto.nome: produto.imagem_path for produto in self.uow.produtos.listar_todos()}
+        return [
+            ItemRankingMensal(
+                produto_nome=item.produto_nome,
+                quantidade=item.quantidade,
+                valor_total=item.valor_total,
+                imagem_path=imagem_por_nome.get(item.produto_nome),
+            )
+            for item in ranking
+        ]
 
     def listar_fechamentos_do_mes_civil(
         self, ano: int, mes: int, usuario_id: int | None = None

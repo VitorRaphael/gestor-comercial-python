@@ -17,6 +17,7 @@ class Produto(Base):
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_combo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     categoria_id: Mapped[int] = mapped_column(ForeignKey("categorias.id"), nullable=False)
+    imagem_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     categoria: Mapped["Categoria"] = relationship(back_populates="produtos")
     itens_comanda: Mapped[list["ItemComanda"]] = relationship(back_populates="produto")
