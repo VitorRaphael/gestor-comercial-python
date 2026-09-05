@@ -295,7 +295,11 @@ class MainWindow(QMainWindow):
         botao = QPushButton("← Central de Loja")
         botao.setProperty("variante", "voltar-pdv")
         botao.setCursor(Qt.CursorShape.PointingHandCursor)
-        botao.clicked.connect(lambda: self._abrir_area_loja("Loja"))
+        # Direto pra `_navegar_agora`, sem passar por `_abrir_area_loja`: o
+        # PIN já foi pedido pra entrar nesta área (ver sidebar/hub) -- pedir
+        # de novo só pra voltar um nível, dentro da mesma área já
+        # desbloqueada, não faz sentido nenhum pro usuário.
+        botao.clicked.connect(lambda: self._navegar_agora("Loja"))
         layout.addWidget(botao)
         layout.addStretch()
         self._barra_voltar_loja.setVisible(False)
