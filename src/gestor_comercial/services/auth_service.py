@@ -90,6 +90,28 @@ class AuthService:
         self._usuario_logado = usuario
         return usuario
 
+    def login_como(self, usuario_id: int, pin: str) -> Usuario:
+        """Login quando a tela já sabe QUEM está tentando entrar (dropdown de
+        operador escolhido antes do PIN, ver `LoginView`) — autentica o PIN
+        contra esse usuário específico, não contra "qualquer PIN que bata"
+        (`login`/`autenticar_por_pin`).
+
+        Necessário desde que operadores de turno passaram a poder
+        compartilhar a mesma senha (§ Caixa Turno - Manhã/Noite, decisão do
+        Vitor de usar a Senha Operacional como PIN dos dois): com `login()`,
+        dois usuários ativos com PIN idêntico faziam a autenticação "resolver"
+        sempre para o primeiro da lista, nunca para o que a pessoa realmente
+        selecionou — o `aberto_por_id`/`fechado_por_id` gravado no caixa saía
+        errado mesmo com PIN certo.
+        """
+        usuario = self.buscar_usuario(usuario_id)
+        if not usuario.ativo:
+            raise NaoAutorizadoError("Este usuário está inativo.")
+        if not self.confere_pin(pin, usuario.salt, usuario.pin_hash):
+            raise NaoAutorizadoError("PIN inválido.")
+        self._usuario_logado = usuario
+        return usuario
+
     def logout(self) -> None:
         self._usuario_logado = None
 
@@ -141,6 +163,57 @@ class AuthService:
             perfil=perfil,
             ativo=True,
         )
+        self.uow.usuarios.salvar(usuario)
+        self.uow.commit()
+        return usuario
+
+    def validar_pin_gerente_ou_dono(self, senha: str) -> None:
+        """Autoriza uma ação que aceita tanto quem já autoriza ações de
+        gerente (`validar_pin_gerente`: PIN pessoal de GERENTE/ADMIN ou Senha
+        Operacional da Central de Loja) quanto a Senha Master (Dono) —
+        usado por ações mais sensíveis que dívida de consumo, como redefinir
+        o PIN de login de um operador de Caixa (§ tela Funcionários)."""
+        try:
+            self.validar_pin_gerente(senha)
+            return
+        except (NaoAutorizadoError, AcessoNegadoError):
+            pass
+        if not self.loja_config.senha_master_confere(senha):
+            raise AcessoNegadoError("Senha do Gerente ou do Dono incorreta.")
+
+    def definir_pin_operador_caixa(
+        self, nome_operador: str, novo_pin: str, perfil_padrao: PerfilUsuario = PerfilUsuario.GERENTE
+    ) -> Usuario:
+        """Cria (se ainda não existir) ou redefine o PIN de login do `Usuario`
+        correspondente a um operador de Caixa, dado o nome do `Funcionario`
+        (tela "Funcionários" > cargo Caixa > Editar senha, ver
+        `funcionarios_view._DialogSenhaCaixa`).
+
+        Quem chama este método já validou a Senha do Gerente/Dono
+        (`LojaConfigService.senha_operacional_confere`/`senha_master_confere`)
+        antes — a autorização acontece na UI, não aqui, mesmo padrão de
+        `CaixaService.abrir` aceitando a senha de fechamento cego.
+
+        Não passa pela checagem de "PIN já em uso por outro usuário ativo" de
+        `criar_usuario`: aqui a duplicidade é intencional (Vitor, 2026-09-05
+        — Caixa Turno - Manhã e Caixa Turno - Noite compartilham a Senha
+        Operacional como PIN de login), não um descuido a ser bloqueado.
+        """
+        self._validar_formato_pin(novo_pin)
+        usuario = self.uow.usuarios.buscar_por_nome(nome_operador)
+        salt = self.gerar_salt()
+        if usuario is None:
+            usuario = Usuario(
+                nome=nome_operador,
+                salt=salt,
+                pin_hash=self.hash_pin(novo_pin, salt),
+                perfil=perfil_padrao,
+                ativo=True,
+            )
+        else:
+            usuario.salt = salt
+            usuario.pin_hash = self.hash_pin(novo_pin, salt)
+            usuario.ativo = True
         self.uow.usuarios.salvar(usuario)
         self.uow.commit()
         return usuario

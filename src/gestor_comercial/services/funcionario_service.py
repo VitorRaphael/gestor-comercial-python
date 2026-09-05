@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from gestor_comercial.domain.enums import CargoFuncionario
 from gestor_comercial.domain.funcionario import Funcionario
+from gestor_comercial.domain.usuario import Usuario
 from gestor_comercial.repository.unit_of_work import UnitOfWork
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.exceptions import (
@@ -64,6 +65,22 @@ class FuncionarioService:
 
     def listar_todos(self) -> list[Funcionario]:
         return self.uow.funcionarios.listar_todos()
+
+    def listar_operadores_caixa(self) -> list[Usuario]:
+        """`Usuario` de login (§ pills de filtro do Histórico Diário/Dashboard
+        Mensal) que correspondem a um `Funcionario` ativo com cargo Caixa —
+        casados por nome, já que não há FK entre as duas tabelas (§ decisão
+        de manter `Usuario`/`Funcionario` separados, ver `d23a4f888a77`).
+
+        Generaliza pra qualquer Caixa cadastrado no futuro, não só os dois
+        turnos de bootstrap: qualquer `Funcionario` com `cargo == "Caixa"` e
+        `ativo == True` que tenha um `Usuario` de login com o mesmo nome
+        aparece aqui.
+        """
+        nomes_caixa = {
+            f.nome for f in self.listar_ativos() if f.cargo == CargoFuncionario.CAIXA.value
+        }
+        return [u for u in self.auth.listar_ativos() if u.nome in nomes_caixa]
 
     def buscar(self, funcionario_id: int) -> Funcionario:
         funcionario = self.uow.funcionarios.buscar_por_id(funcionario_id)

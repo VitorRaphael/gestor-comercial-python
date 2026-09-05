@@ -152,7 +152,9 @@ class MainWindow(QMainWindow):
             self._funcionarios, self._pagamentos, auth_service, caixa_service
         )
         self._impressoras_view = ImpressorasView(cardapio_service, self._impressao)
-        self._relatorios_view = RelatoriosView(caixa_service, auth_service, self._impressao)
+        self._relatorios_view = RelatoriosView(
+            caixa_service, auth_service, self._impressao, self._funcionarios
+        )
         self._configuracoes_view = ConfiguracoesView(auth_service)
 
         self._loja_hub_view = LojaHubView()

@@ -749,7 +749,7 @@ class CaixaService:
     # Dashboard Consolidado Mensal
     # ------------------------------------------------------------------
 
-    def resumo_mensal(self, ano: int, mes: int) -> ResumoMensal:
+    def resumo_mensal(self, ano: int, mes: int, usuario_id: int | None = None) -> ResumoMensal:
         """Acumulado do mês civil (`startOfMonth`–`endOfMonth`), a partir dos
         fechamentos já registrados.
 
@@ -762,7 +762,7 @@ class CaixaService:
         None) simplesmente não contribui pro ranking do mês.
         """
         inicio, fim = _intervalo_do_mes(ano, mes)
-        caixas = self.listar_historico(inicio=inicio, fim=fim)
+        caixas = self.listar_historico(inicio=inicio, fim=fim, usuario_id=usuario_id)
 
         faturamento = ZERO
         # Semeia com todas as formas em ZERO: o Dashboard Mensal precisa
@@ -827,14 +827,16 @@ class CaixaService:
             ranking_produtos=ranking_produtos,
         )
 
-    def listar_fechamentos_do_mes_civil(self, ano: int, mes: int) -> list[Caixa]:
-        """Os mesmos fechamentos que `resumo_mensal(ano, mes)` agrega
+    def listar_fechamentos_do_mes_civil(
+        self, ano: int, mes: int, usuario_id: int | None = None
+    ) -> list[Caixa]:
+        """Os mesmos fechamentos que `resumo_mensal(ano, mes, usuario_id)` agrega
         internamente (eixo `fechado_em`) — exposto para quem, como o
         Dashboard Mensal, precisa dos ids dos turnos além dos totais já
         prontos, para alimentar `ranking_por_atendente`/
         `fechamento_da_gaveta_do_periodo` sem duplicar o cálculo do intervalo."""
         inicio, fim = _intervalo_do_mes(ano, mes)
-        return self.listar_historico(inicio=inicio, fim=fim)
+        return self.listar_historico(inicio=inicio, fim=fim, usuario_id=usuario_id)
 
     # ------------------------------------------------------------------
     # Fechamento da Gaveta e Performance por Atendente (§3.14)

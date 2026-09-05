@@ -6,14 +6,32 @@ from decimal import Decimal
 from gestor_comercial.domain.categoria import Categoria
 from gestor_comercial.domain.combo_item import ComboItem
 from gestor_comercial.domain.enums import PerfilUsuario
+from gestor_comercial.domain.funcionario import Funcionario
 from gestor_comercial.domain.mesa import Mesa
 from gestor_comercial.domain.produto import Produto
 from gestor_comercial.domain.usuario import Usuario
 from gestor_comercial.repository.base import SessionLocal
 
 TOTAL_MESAS = 60
-ADMIN_NOME = "Gerente"
-ADMIN_PIN_PADRAO = "264072"
+
+# Substituem o antigo usuário genérico "Gerente" (single-user bootstrap):
+# agora o primeiro boot já cria os dois operadores reais de turno do food
+# truck, cada um com perfil GERENTE (abrir/fechar caixa exige perfil
+# gerencial em `AuthService.exigir_gerente`, ver caixa_service.abrir()).
+#
+# Os dois compartilham o mesmo PIN de login (decisão do Vitor, 2026-09-05):
+# a Senha Operacional (Gerente) da Central de Loja, "26407200" — mesmo valor
+# de `LojaConfigService.SENHA_OPERACIONAL_PADRAO` (não importado daqui para
+# não inverter a camada repository->services; ver auth_service.login_como,
+# que resolve login por operador SELECIONADO + PIN, não só por PIN, já que
+# o PIN sozinho não distingue mais os dois operadores).
+NOME_CAIXA_MANHA = "Caixa Turno - Manhã"
+TURNO_HORARIO_MANHA = "T1 · Manhã · 08h–16h"
+
+NOME_CAIXA_NOITE = "Caixa Turno - Noite"
+TURNO_HORARIO_NOITE = "T2 · Noite · 16h–00h"
+
+PIN_CAIXA_PADRAO = "26407200"
 
 # Cardápio portado do Gestor Comercial (Java). Combos ficam de fora
 # propositalmente: só fazem sentido depois que todos os itens já
@@ -203,18 +221,45 @@ def seed_mesas(session) -> None:
             session.add(Mesa(numero=numero))
 
 
-def seed_usuario_admin(session) -> None:
+def seed_usuarios_turno(session) -> None:
     if session.query(Usuario).count() > 0:
         return
-    salt = gerar_salt()
-    session.add(
-        Usuario(
-            nome=ADMIN_NOME,
-            pin_hash=hash_pin(ADMIN_PIN_PADRAO, salt),
-            salt=salt,
-            perfil=PerfilUsuario.GERENTE,
+    for nome in (NOME_CAIXA_MANHA, NOME_CAIXA_NOITE):
+        salt = gerar_salt()
+        session.add(
+            Usuario(
+                nome=nome,
+                pin_hash=hash_pin(PIN_CAIXA_PADRAO, salt),
+                salt=salt,
+                perfil=PerfilUsuario.GERENTE,
+            )
         )
-    )
+
+
+def seed_funcionarios_turno(session) -> None:
+    # Idempotente por nome (não por contagem): precisa rodar tanto num boot
+    # fresco quanto numa instalação existente que só ganhou os dois
+    # `Usuario` via migração de dados (d3f8a1c4e6b9) e ainda não tem os
+    # `Funcionario` correspondentes pra aparecer na tela Funcionários.
+    existentes = {
+        f.nome for f in session.query(Funcionario.nome).filter(
+            Funcionario.nome.in_([NOME_CAIXA_MANHA, NOME_CAIXA_NOITE])
+        )
+    }
+    for nome, turno_horario in (
+        (NOME_CAIXA_MANHA, TURNO_HORARIO_MANHA),
+        (NOME_CAIXA_NOITE, TURNO_HORARIO_NOITE),
+    ):
+        if nome not in existentes:
+            session.add(
+                Funcionario(
+                    nome=nome,
+                    cargo="Caixa",
+                    ativo=True,
+                    saldo_devedor=Decimal("0"),
+                    turno_horario=turno_horario,
+                )
+            )
 
 
 def seed_cardapio(session) -> None:
@@ -279,7 +324,8 @@ def seed_combos(session) -> None:
 def run_seed() -> None:
     with SessionLocal() as session:
         seed_mesas(session)
-        seed_usuario_admin(session)
+        seed_usuarios_turno(session)
+        seed_funcionarios_turno(session)
         seed_cardapio(session)
         seed_combos(session)
         session.commit()

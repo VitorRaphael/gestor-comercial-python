@@ -87,17 +87,17 @@ def test_confere_pin_nao_quebra_com_salt_corrompido():
 
 
 def test_hash_bate_bit_a_bit_com_o_seed():
-    """Se este teste cair, o 'Gerente' criado no primeiro boot não consegue logar."""
+    """Se este teste cair, os operadores de turno criados no primeiro boot não conseguem logar."""
     salt_do_seed = seed.gerar_salt()
-    assert AuthService.hash_pin(seed.ADMIN_PIN_PADRAO, salt_do_seed) == seed.hash_pin(
-        seed.ADMIN_PIN_PADRAO, salt_do_seed
+    assert AuthService.hash_pin(seed.PIN_CAIXA_PADRAO, salt_do_seed) == seed.hash_pin(
+        seed.PIN_CAIXA_PADRAO, salt_do_seed
     )
 
     salt_do_service = AuthService.gerar_salt()
     assert AuthService.confere_pin(
-        seed.ADMIN_PIN_PADRAO,
+        seed.PIN_CAIXA_PADRAO,
         salt_do_service,
-        seed.hash_pin(seed.ADMIN_PIN_PADRAO, salt_do_service),
+        seed.hash_pin(seed.PIN_CAIXA_PADRAO, salt_do_service),
     )
 
 
@@ -105,14 +105,14 @@ def test_usuario_do_seed_consegue_logar(uow, auth):
     salt = seed.gerar_salt()
     uow.usuarios.salvar(
         Usuario(
-            nome=seed.ADMIN_NOME,
-            pin_hash=seed.hash_pin(seed.ADMIN_PIN_PADRAO, salt),
+            nome=seed.NOME_CAIXA_NOITE,
+            pin_hash=seed.hash_pin(seed.PIN_CAIXA_PADRAO, salt),
             salt=salt,
             perfil=PerfilUsuario.GERENTE,
         )
     )
-    logado = auth.login(seed.ADMIN_PIN_PADRAO)
-    assert logado.nome == seed.ADMIN_NOME
+    logado = auth.login(seed.PIN_CAIXA_PADRAO)
+    assert logado.nome == seed.NOME_CAIXA_NOITE
 
 
 # ----------------------------------------------------------------------

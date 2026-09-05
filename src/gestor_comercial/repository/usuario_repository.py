@@ -19,3 +19,7 @@ class UsuarioRepository(Repository[Usuario]):
             .where(Usuario.ativo.is_(True), Usuario.perfil == perfil)
         )
         return self.session.scalar(stmt) or 0
+
+    def buscar_por_nome(self, nome: str) -> Usuario | None:
+        stmt = select(Usuario).where(Usuario.nome == nome)
+        return self.session.scalars(stmt).first()

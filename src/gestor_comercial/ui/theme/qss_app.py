@@ -1082,6 +1082,13 @@ def construir_qss_app(t: dict[str, str]) -> str:
       letter-spacing: 0.5px;
       background: transparent;
     }}
+    QLabel#funcionariosLinhaTurno {{
+      color: {t['texto_fraco']};
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      background: transparent;
+    }}
     QLabel#funcionariosLinhaConsumoValor {{ color: {t['texto']}; font-size: 13px; font-weight: 700; background: transparent; }}
     QLabel#funcionariosLinhaConsumoRotulo {{
       color: {t['texto_fraquissimo']};

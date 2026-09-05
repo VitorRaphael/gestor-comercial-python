@@ -583,13 +583,11 @@ class LoginView(QWidget):
             return
 
         try:
-            funcionario = self._auth_service.login(self._pin)
-
-            if funcionario.id != funcionario_selecionado.id:
-                self._label_erro.setText("O PIN não corresponde ao operador selecionado.")
-                self._limpar_pin()
-                return
-
+            # Autentica contra o operador ESCOLHIDO no dropdown, não contra
+            # "qualquer usuário ativo cujo PIN bata" — necessário desde que
+            # dois operadores (Caixa Turno - Manhã/Noite) passaram a poder
+            # compartilhar o mesmo PIN (ver `AuthService.login_como`).
+            funcionario = self._auth_service.login_como(funcionario_selecionado.id, self._pin)
         except NaoAutorizadoError as erro:
             self._label_erro.setText(str(erro))
             self._limpar_pin()

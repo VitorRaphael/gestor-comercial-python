@@ -19,6 +19,7 @@ class Funcionario(Base):
     telefone: Mapped[str | None] = mapped_column(String(30))
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     saldo_devedor: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0, nullable=False)
+    turno_horario: Mapped[str | None] = mapped_column(String(60))
 
     comandas_atendidas: Mapped[list["Comanda"]] = relationship(back_populates="atendente")
     quitacoes: Mapped[list["QuitacaoConsumo"]] = relationship(

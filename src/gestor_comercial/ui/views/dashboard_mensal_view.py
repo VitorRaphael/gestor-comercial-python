@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QProgressBar,
+    QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -38,7 +39,12 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.ui.widgets.kpi_card import CardKpi
+
+# Sentinela do item "Todos" do filtro de operador — mesmo padrão do
+# Histórico Diário (`historico_caixa_view._TODOS_OS_OPERADORES`).
+_TODOS_OS_OPERADORES = None
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
@@ -59,9 +65,16 @@ _MESES = [
 class DashboardMensalView(QWidget):
     """Painel gerencial acumulado do mês civil, com seletor de meses anteriores."""
 
-    def __init__(self, caixa_service: CaixaService, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        caixa_service: CaixaService,
+        funcionario_service: FuncionarioService,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._caixas = caixa_service
+        self._funcionarios = funcionario_service
+        self._operador_selecionado: int | None = _TODOS_OS_OPERADORES
         self._montar_layout()
 
     # ------------------------------------------------------------------
@@ -129,6 +142,11 @@ class DashboardMensalView(QWidget):
 
     def _montar_filtro_mes(self) -> QHBoxLayout:
         linha = QHBoxLayout()
+        linha.setSpacing(8)
+
+        self._layout_pills_operador = QHBoxLayout()
+        self._layout_pills_operador.setSpacing(8)
+        linha.addLayout(self._layout_pills_operador)
         linha.addStretch()
 
         frame_mes = QFrame()
@@ -272,6 +290,7 @@ class DashboardMensalView(QWidget):
         """Chamada só quando a aba é aberta — nunca no construtor (carregamento
         estritamente sob demanda). Sempre busca de novo: é assim que o painel
         reflete um fechamento de caixa feito desde a última visita à aba."""
+        self._popular_pills_operador()
         self._carregar()
 
     def periodo_atual(self) -> str:
@@ -280,15 +299,42 @@ class DashboardMensalView(QWidget):
     def conectar_mudanca_periodo(self, callback) -> None:
         self._seletor_mes.currentIndexChanged.connect(callback)
 
+    def _popular_pills_operador(self) -> None:
+        # Mesmo padrão do Histórico Diário: reconstrói do zero pra refletir
+        # um Caixa desativado/cadastrado entre duas visitas à aba.
+        selecionado = self._operador_selecionado
+        _limpar_layout(self._layout_pills_operador)
+
+        opcoes: list[tuple[str, int | None]] = [("Todos", _TODOS_OS_OPERADORES)]
+        opcoes.extend(
+            (operador.nome, operador.id) for operador in self._funcionarios.listar_operadores_caixa()
+        )
+        if selecionado not in (valor for _, valor in opcoes):
+            selecionado = _TODOS_OS_OPERADORES
+
+        for nome, valor in opcoes:
+            pill = QPushButton(nome)
+            pill.setProperty("variante", "filtro-pill")
+            pill.setProperty("ativo", valor == selecionado)
+            pill.clicked.connect(lambda _=False, v=valor: self._selecionar_operador(v))
+            self._layout_pills_operador.addWidget(pill)
+        self._operador_selecionado = selecionado
+
+    def _selecionar_operador(self, operador_id: int | None) -> None:
+        self._operador_selecionado = operador_id
+        self._popular_pills_operador()
+        self._carregar()
+
     def _carregar(self) -> None:
         self._label_erro.setText("")
         ano_mes = self._seletor_mes.currentData()
         if ano_mes is None:
             return
         ano, mes = ano_mes
+        usuario_id = self._operador_selecionado
         try:
-            resumo = self._caixas.resumo_mensal(ano, mes)
-            fechamentos = self._caixas.listar_fechamentos_do_mes_civil(ano, mes)
+            resumo = self._caixas.resumo_mensal(ano, mes, usuario_id)
+            fechamentos = self._caixas.listar_fechamentos_do_mes_civil(ano, mes, usuario_id)
             gaveta = self._caixas.fechamento_da_gaveta_do_periodo([c.id for c in fechamentos])
             ranking_atendentes = self._caixas.ranking_por_atendente([c.id for c in fechamentos])
         except _ERROS_SERVICE as erro:

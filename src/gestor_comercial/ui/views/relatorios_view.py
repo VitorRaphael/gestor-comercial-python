@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.caixa_service import CaixaService
+from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.views.dashboard_mensal_view import DashboardMensalView
 from gestor_comercial.ui.views.historico_caixa_view import HistoricoCaixaView
@@ -47,12 +48,15 @@ class RelatoriosView(QWidget):
         caixa_service: CaixaService,
         auth_service: AuthService,
         impressao_service: ImpressaoService,
+        funcionario_service: FuncionarioService,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
 
-        self._historico_view = HistoricoCaixaView(caixa_service, auth_service, impressao_service)
-        self._dashboard_view = DashboardMensalView(caixa_service)
+        self._historico_view = HistoricoCaixaView(
+            caixa_service, auth_service, impressao_service, funcionario_service
+        )
+        self._dashboard_view = DashboardMensalView(caixa_service, funcionario_service)
         self._abas_carregadas: set[int] = set()
 
         self._montar_layout()

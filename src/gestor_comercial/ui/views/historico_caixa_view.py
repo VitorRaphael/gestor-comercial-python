@@ -8,7 +8,7 @@ como fechamento do dia em que foi aberto — por isso a consulta usa
 `listar_historico` (eixo `fechado_em`, usado só para achar "o Nº fechamento
 de hoje" na hora de fechar o caixa).
 
-Só lê o que `CaixaService`/`AuthService` já expõem — nenhuma regra de negócio
+Só lê o que `CaixaService`/`AuthService`/`FuncionarioService` já expõem — nenhuma regra de negócio
 mora aqui, igual às outras views (§ arquitetura, camadas). As ações "Ver
 cancelamentos"/"Reimprimir fechamento" são acionadas pela barra de ações
 compartilhada em `RelatoriosView` (ver `ver_cancelamentos`/`reimprimir`
@@ -56,6 +56,7 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.theme.tokens import PERIGO_HOVER, SUCESSO
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
@@ -90,12 +91,14 @@ class HistoricoCaixaView(QWidget):
         caixa_service: CaixaService,
         auth_service: AuthService,
         impressao_service: ImpressaoService,
+        funcionario_service: FuncionarioService,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._caixas = caixa_service
         self._auth = auth_service
         self._impressao = impressao_service
+        self._funcionarios = funcionario_service
         self._fechamentos: list[Caixa] = []
         self._resumos: dict[int, ResumoCaixa] = {}
         self._operador_selecionado: int | None = _TODOS_OS_OPERADORES
@@ -296,7 +299,9 @@ class HistoricoCaixaView(QWidget):
         _limpar_layout_horizontal(self._layout_pills_operador)
 
         opcoes: list[tuple[str, int | None]] = [("Todos", _TODOS_OS_OPERADORES)]
-        opcoes.extend((funcionario.nome, funcionario.id) for funcionario in self._auth.listar_todos())
+        opcoes.extend(
+            (operador.nome, operador.id) for operador in self._funcionarios.listar_operadores_caixa()
+        )
         if selecionado not in (valor for _, valor in opcoes):
             selecionado = _TODOS_OS_OPERADORES
 
