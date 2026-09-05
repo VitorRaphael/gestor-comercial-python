@@ -147,10 +147,15 @@ class HistoricoCaixaView(QWidget):
         self._tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         cabecalho_tabela = self._tabela.horizontalHeader()
-        for coluna in (0, 1, 3, 4, _COLUNA_ACOES):
+        for coluna in (0, 1, 3, 4):
             cabecalho_tabela.setSectionResizeMode(coluna, QHeaderView.ResizeMode.ResizeToContents)
         cabecalho_tabela.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self._tabela.setColumnWidth(_COLUNA_ACOES, 110)
+        # `Fixed` (não `ResizeToContents`) porque essa coluna hospeda um
+        # `QPushButton` — sem largura própria garantida, o botão "🖨 2ª via"
+        # ficava espremido/cortado ao invés de manter respiro (padding) igual
+        # ao resto da pílula.
+        cabecalho_tabela.setSectionResizeMode(_COLUNA_ACOES, QHeaderView.ResizeMode.Fixed)
+        self._tabela.setColumnWidth(_COLUNA_ACOES, 140)
         self._tabela.cellDoubleClicked.connect(self._ao_dar_duplo_clique)
         self._tabela.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         layout_conteudo.addWidget(self._tabela)

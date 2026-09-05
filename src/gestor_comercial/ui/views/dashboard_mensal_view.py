@@ -79,9 +79,19 @@ class DashboardMensalView(QWidget):
         self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
         layout_externo.addWidget(self._label_erro)
 
+        # Corpo rolável: sem isso, os painéis (formas de pagamento, mix de
+        # vendas) disputavam a altura fixa da janela (máquina do food truck) e
+        # o Qt ignorava a altura mínima deles, sobrepondo/cortando o conteúdo
+        # em vez de simplesmente rolar — mesmo padrão do Histórico Diário
+        # (`historico_caixa_view.HistoricoCaixaView._montar_layout`).
+        conteudo = QWidget()
+        layout_conteudo = QVBoxLayout(conteudo)
+        layout_conteudo.setContentsMargins(0, 0, 4, 0)
+        layout_conteudo.setSpacing(16)
+
         grade_cards = QGridLayout()
         grade_cards.setSpacing(14)
-        layout_externo.addLayout(grade_cards)
+        layout_conteudo.addLayout(grade_cards)
         self._cards: dict[str, CardKpi] = {}
         for coluna, chave_titulo in enumerate(
             ["faturamento", "turnos", "ticket_medio", "cancelamentos"]
@@ -92,21 +102,30 @@ class DashboardMensalView(QWidget):
 
         painel_formas = self._montar_painel_formas_pagamento()
         painel_ranking = self._montar_painel_ranking()
-        painel_formas.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-        painel_ranking.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        painel_formas.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        painel_formas.setMinimumWidth(320)
+        painel_ranking.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
 
         painel_graficos = QHBoxLayout()
         painel_graficos.setSpacing(16)
-        painel_graficos.addWidget(painel_formas, 35)
-        painel_graficos.addWidget(painel_ranking, 65)
-        layout_externo.addLayout(painel_graficos, 1)
+        painel_graficos.addWidget(painel_formas, 40)
+        painel_graficos.addWidget(painel_ranking, 60)
+        layout_conteudo.addLayout(painel_graficos)
 
         # §3.14 — seções complementares de fechamento, no final da tela.
         painel_fechamento = QHBoxLayout()
         painel_fechamento.setSpacing(16)
         painel_fechamento.addWidget(self._montar_painel_gaveta(), 35)
         painel_fechamento.addWidget(self._montar_painel_atendentes(), 65)
-        layout_externo.addLayout(painel_fechamento)
+        layout_conteudo.addLayout(painel_fechamento)
+
+        rolagem = QScrollArea()
+        rolagem.setObjectName("relatoriosRolagemHistorico")
+        rolagem.setWidget(conteudo)
+        rolagem.setWidgetResizable(True)
+        rolagem.setFrameShape(QFrame.Shape.NoFrame)
+        rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        layout_externo.addWidget(rolagem, 1)
 
     def _montar_filtro_mes(self) -> QHBoxLayout:
         linha = QHBoxLayout()
@@ -181,7 +200,10 @@ class DashboardMensalView(QWidget):
         rolagem.setObjectName("relatoriosRolagemRanking")
         rolagem.setWidget(conteudo_ranking)
         rolagem.setWidgetResizable(True)
-        rolagem.setMinimumHeight(260)
+        # Altura calculada pra caber 6 itens do ranking sem rolar: cada linha
+        # tem ~46px (rótulo/qtd/valor + barra + espaçamento interno de 6px) e
+        # o layout entre linhas soma 12px — o antigo 260px só exibia ~4.
+        rolagem.setMinimumHeight(6 * 46 + 5 * 12)
         rolagem.setFrameShape(QFrame.Shape.NoFrame)
         rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         layout.addWidget(rolagem, 1)

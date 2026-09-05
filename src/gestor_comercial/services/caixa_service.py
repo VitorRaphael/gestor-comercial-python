@@ -765,7 +765,11 @@ class CaixaService:
         caixas = self.listar_historico(inicio=inicio, fim=fim)
 
         faturamento = ZERO
-        por_forma: dict[FormaPagamento, Decimal] = {}
+        # Semeia com todas as formas em ZERO: o Dashboard Mensal precisa
+        # listar PIX/Consumo interno mesmo sem venda no mês — diferente de
+        # `totais_por_forma` (usado no comprovante de um único caixa), que
+        # omite de propósito as formas sem movimento.
+        por_forma: dict[FormaPagamento, Decimal] = {forma: ZERO for forma in FormaPagamento}
         cancelamentos_qtd = 0
         cancelamentos_valor = ZERO
         ranking: dict[str, ItemRankingMensal] = {}
