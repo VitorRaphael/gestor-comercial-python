@@ -1221,3 +1221,27 @@ def test_fechamento_da_gaveta_do_periodo_sem_turnos(caixas):
     assert gaveta.total_faturado == dinheiro("0.00")
     assert gaveta.diferenca is None
     assert "Nenhum" in gaveta.identificacao
+
+
+# ----------------------------------------------------------------------
+# identificacao_turno (§3.1 -- "Caixa Turno - Noite", não pelo operador)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "hora, periodo_esperado",
+    [(6, "Manhã"), (11, "Manhã"), (12, "Tarde"), (17, "Tarde"), (18, "Noite"), (2, "Noite")],
+)
+def test_identificacao_turno_deriva_periodo_da_hora_de_abertura(caixas, hora, periodo_esperado):
+    caixa = Caixa(status=StatusCaixa.ABERTO, valor_abertura=dinheiro("50.00"), aberto_em=datetime(2026, 8, 20, hora, 0))
+    assert caixas.identificacao_turno(caixa) == f"Caixa Turno - {periodo_esperado}"
+
+
+def test_fechamento_da_gaveta_usa_identificacao_de_turno(uow, caixas, gerente):
+    caixa = _caixa_fechado(uow, fechado_em=datetime(2026, 8, 5, 22, 0))
+    caixa.aberto_em = datetime(2026, 8, 5, 19, 0)
+    caixa.numero_sequencial_dia = 1
+    uow.commit()
+
+    gaveta = caixas.fechamento_da_gaveta(caixa.id)
+    assert gaveta.identificacao.startswith("Caixa Turno - Noite")

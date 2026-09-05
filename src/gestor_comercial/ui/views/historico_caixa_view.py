@@ -346,7 +346,8 @@ class HistoricoCaixaView(QWidget):
         diferenca_total = _diferenca_total(resumo)
         diferenca = "—" if diferenca_total is None else _formatar_reais_com_sinal(diferenca_total)
         turno = "—" if caixa.numero_sequencial_dia is None else f"T{caixa.numero_sequencial_dia}"
-        sequencial = f"{turno} · #{caixa.id}"
+        periodo = self._caixas.identificacao_turno(caixa).removeprefix("Caixa Turno - ")
+        sequencial = f"{periodo} · {turno}"
 
         self._tabela.setItem(linha, 0, QTableWidgetItem(caixa.aberto_em.strftime("%d/%m")))
         self._tabela.setItem(linha, 1, QTableWidgetItem(sequencial))

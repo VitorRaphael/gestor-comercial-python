@@ -156,7 +156,7 @@ class MainWindow(QMainWindow):
         self._funcionarios_view = FuncionariosView(self._funcionarios, self._pagamentos, auth_service)
         self._impressoras_view = ImpressorasView(cardapio_service, self._impressao)
         self._relatorios_view = RelatoriosView(caixa_service, auth_service, self._impressao)
-        self._configuracoes_view = ConfiguracoesView()
+        self._configuracoes_view = ConfiguracoesView(auth_service)
 
         self._loja_hub_view = LojaHubView()
         self._loja_hub_view.destino_selecionado.connect(self._navegar_agora)

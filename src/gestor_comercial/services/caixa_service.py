@@ -836,6 +836,15 @@ class CaixaService:
     # Fechamento da Gaveta e Performance por Atendente (§3.14)
     # ------------------------------------------------------------------
 
+    def identificacao_turno(self, caixa: Caixa) -> str:
+        """"Caixa Turno - Noite" etc. (§3.1): o turno é identificado pelo
+        PERÍODO em que foi aberto, não por quem operou — é o nome que
+        pertence à operação/gaveta, não ao CPF de um funcionário específico.
+        Período deriva da hora de `aberto_em` (heurística simples: sem
+        cadastro de escala no sistema, é a única informação que já existe
+        pra todo turno, aberto ou fechado)."""
+        return f"Caixa Turno - {periodo_do_turno(caixa.aberto_em)}"
+
     def fechamento_da_gaveta(self, caixa_id: int) -> FechamentoGaveta:
         """Fotografia enxuta de um turno já fechado, para a seção "Fechamento
         da Gaveta" no rodapé do Histórico Diário/Dashboard Mensal."""
@@ -843,9 +852,12 @@ class CaixaService:
         resumo = self.resumo(caixa_id)
 
         if caixa.numero_sequencial_dia is not None and caixa.fechado_em is not None:
-            identificacao = f"Caixa Turno T{caixa.numero_sequencial_dia} — {caixa.fechado_em:%d/%m/%Y}"
+            identificacao = (
+                f"{self.identificacao_turno(caixa)} · T{caixa.numero_sequencial_dia}"
+                f" — {caixa.fechado_em:%d/%m/%Y}"
+            )
         else:
-            identificacao = f"Caixa #{caixa.id}"
+            identificacao = self.identificacao_turno(caixa)
 
         saldo_apurado = ZERO
         if resumo.valor_contado_dinheiro is not None:
@@ -970,6 +982,17 @@ class CaixaService:
             return None
         limpo = texto.strip()
         return limpo or None
+
+
+def periodo_do_turno(momento: datetime) -> str:
+    """Manhã (05h-11h59) / Tarde (12h-17h59) / Noite (18h-04h59) — heurística
+    de food truck (sem cadastro de escala), usada por `identificacao_turno`."""
+    hora = momento.hour
+    if 5 <= hora < 12:
+        return "Manhã"
+    if 12 <= hora < 18:
+        return "Tarde"
+    return "Noite"
 
 
 def _faturamento_total_de(resumo: ResumoCaixa) -> Decimal:

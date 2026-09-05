@@ -330,7 +330,7 @@ class CaixaView(QWidget):
 
         self._caixa_id = caixa.id
         self._ultimo_caixa_id = caixa.id
-        self._label_titulo.setText(f"Caixa {caixa.id} — aberto")
+        self._label_titulo.setText(self._caixa_service.identificacao_turno(caixa))
         self._label_subtitulo.setText(
             f"Aberto às {caixa.aberto_em:%H:%M}"
             + (f" por {caixa.aberto_por.nome}" if caixa.aberto_por else "")
