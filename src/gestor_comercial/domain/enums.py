@@ -42,6 +42,18 @@ class TipoMovimento(enum.Enum):
     CONSUMO_FUNCIONARIO = "CONSUMO_FUNCIONARIO"
 
 
+class CargoFuncionario(enum.Enum):
+    """Opções fixas do dropdown "Cargo" em Funcionários (§3.13). Guardado
+    como texto (`Funcionario.cargo` é `String`, não `Enum` de banco) para não
+    exigir migração de dado histórico — validado aqui, na camada de serviço."""
+
+    GERENTE = "Gerente"
+    CAIXA = "Caixa"
+    GARCOM = "Garçom"
+    COZINHA = "Cozinha"
+    ATENDENTE = "Atendente"
+
+
 class TipoConexaoImpressora(enum.Enum):
     """Como o cupom chega até a impressora térmica (§3.12).
 

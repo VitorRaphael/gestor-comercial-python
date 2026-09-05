@@ -40,6 +40,11 @@ class AuthService:
     def __init__(self, uow: UnitOfWork) -> None:
         self.uow = uow
         self._usuario_logado: Usuario | None = None
+        # Import tardio pra evitar ciclo (loja_config_service não importa
+        # auth_service no nível de módulo, só usa os métodos estáticos).
+        from gestor_comercial.services.loja_config_service import LojaConfigService
+
+        self.loja_config = LojaConfigService(uow)
 
     # ------------------------------------------------------------------
     # Hash do PIN (porte de PinHashService.java)
@@ -186,11 +191,30 @@ class AuthService:
 
     def validar_pin_gerente(self, pin: str) -> Usuario:
         """Reautenticação para ação crítica: confere o PIN e devolve quem autorizou,
-        mantendo na sessão o usuário que estava operando (§3.1)."""
-        usuario = self.autenticar_por_pin(pin)
-        if usuario.perfil not in _PERFIS_GERENCIAIS:
-            raise AcessoNegadoError("O PIN informado não é de um gerente.")
-        return usuario
+        mantendo na sessão o usuário que estava operando (§3.1).
+
+        Aceita duas credenciais equivalentes (§3.13, decisão de substituir o
+        PIN pessoal pela Senha Operacional compartilhada):
+        1. O PIN pessoal de um usuário GERENTE/ADMIN (comportamento original).
+        2. A Senha Operacional (Gerente) da Central de Loja — não é PIN de
+           ninguém específico, então quem "autorizou" para efeito de
+           auditoria (`cancelado_por_id`/`autorizado_por_id`) é quem estava
+           logado operando o turno, não um gerente pessoal.
+        """
+        try:
+            usuario = self.autenticar_por_pin(pin)
+        except NaoAutorizadoError:
+            usuario = None
+
+        if usuario is not None:
+            if usuario.perfil not in _PERFIS_GERENCIAIS:
+                raise AcessoNegadoError("O PIN informado não é de um gerente.")
+            return usuario
+
+        if self.loja_config.senha_operacional_confere(pin):
+            return self.usuario_atual()
+
+        raise NaoAutorizadoError("PIN inválido.")
 
     # ------------------------------------------------------------------
 

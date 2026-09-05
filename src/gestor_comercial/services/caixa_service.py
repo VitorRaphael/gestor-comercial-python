@@ -29,6 +29,7 @@ from gestor_comercial.services.dinheiro import ZERO, dinheiro
 from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
+    TurnoAnteriorPendenteError,
 )
 
 FORMAS_MAQUININHA = (FormaPagamento.CREDITO, FormaPagamento.DEBITO, FormaPagamento.PIX)
@@ -171,6 +172,30 @@ class ResumoMensal:
     ranking_produtos: list[ItemRankingMensal]
 
 
+@dataclass(frozen=True)
+class FechamentoGaveta:
+    """Seção "Fechamento da Gaveta (Turno)" ao final do Histórico Diário e do
+    Dashboard Mensal (§3.14): identifica o turno, o total faturado e a
+    quebra/sobra apurada na conferência."""
+
+    caixa_id: int
+    identificacao: str
+    total_faturado: Decimal
+    saldo_apurado: Decimal
+    diferenca: Decimal | None
+
+
+@dataclass(frozen=True)
+class ItemRankingAtendente:
+    """Uma linha da seção "Performance por Atendente" (§3.14): quanto cada
+    vendedor faturou no período e qual a fatia dele no total. "Balcão"
+    agrupa comandas sem `atendente_id` definido."""
+
+    atendente_nome: str
+    valor_total: Decimal
+    percentual: Decimal
+
+
 class CaixaService:
     """Abertura/fechamento do caixa, movimentos da gaveta e conferência (§3.9, §3.10)."""
 
@@ -182,16 +207,42 @@ class CaixaService:
     # Abertura e fechamento
     # ------------------------------------------------------------------
 
-    def abrir(self, valor_abertura: Decimal) -> Caixa:
+    def abrir(
+        self,
+        valor_abertura: Decimal,
+        senha_fechamento_cego: str | None = None,
+    ) -> Caixa:
         # §3.1: o Java já documentava "atendente tentando abrir o caixa" como
         # acesso negado — quem declara o fundo de troco é quem responde por ele.
         gerente = self.auth.exigir_gerente()
         valor = self._valor_monetario(valor_abertura, "valor de abertura")
         if valor < ZERO:
             raise RegraDeNegocioError("O valor de abertura não pode ser negativo.")
-        if self.uow.caixas.buscar_aberto() is not None:
-            raise RegraDeNegocioError(
-                "Já existe um caixa aberto. Feche o caixa atual antes de abrir outro."
+
+        pendente = self.uow.caixas.buscar_aberto()
+        if pendente is not None:
+            # §3.13: trava contra esquecimento de fechamento. Sem a senha, a
+            # UI mostra o aviso impeditivo e pede a senha; com ela (Master ou
+            # Operacional — qualquer uma prova que quem está abrindo é
+            # autorizado), o turno esquecido é fechado às cegas antes de abrir
+            # o novo, sem exigir contagem real de gaveta que ninguém fez.
+            if not senha_fechamento_cego:
+                raise TurnoAnteriorPendenteError(
+                    "Turno anterior não fechado. Deseja realizar o fechamento cego agora?"
+                )
+            if not (
+                self.auth.loja_config.senha_master_confere(senha_fechamento_cego)
+                or self.auth.loja_config.senha_operacional_confere(senha_fechamento_cego)
+            ):
+                raise RegraDeNegocioError(
+                    "Senha incorreta para o fechamento cego do turno anterior."
+                )
+            self.fechar(
+                pendente.id,
+                valor_contado_dinheiro=ZERO,
+                valor_contado_maquininha=ZERO,
+                observacao="Fechamento cego (turno anterior não conferido pelo operador).",
+                ignorar_comandas_abertas=True,
             )
 
         caixa = Caixa(
@@ -210,6 +261,7 @@ class CaixaService:
         valor_contado_dinheiro: Decimal,
         valor_contado_maquininha: Decimal,
         observacao: str | None = None,
+        ignorar_comandas_abertas: bool = False,
     ) -> Caixa:
         gerente = self.auth.exigir_gerente()
         caixa = self.buscar(caixa_id)
@@ -241,7 +293,7 @@ class CaixaService:
             if comanda.status in (StatusComanda.ABERTA, StatusComanda.EM_CONFERENCIA)
             and self.uow.itens.existe_na_comanda(comanda.id)
         ]
-        if abertas:
+        if abertas and not ignorar_comandas_abertas:
             pendencia = (
                 "1 comanda aberta" if len(abertas) == 1 else f"{len(abertas)} comandas abertas"
             )
@@ -771,6 +823,114 @@ class CaixaService:
             ranking_produtos=ranking_produtos,
         )
 
+    def listar_fechamentos_do_mes_civil(self, ano: int, mes: int) -> list[Caixa]:
+        """Os mesmos fechamentos que `resumo_mensal(ano, mes)` agrega
+        internamente (eixo `fechado_em`) — exposto para quem, como o
+        Dashboard Mensal, precisa dos ids dos turnos além dos totais já
+        prontos, para alimentar `ranking_por_atendente`/
+        `fechamento_da_gaveta_do_periodo` sem duplicar o cálculo do intervalo."""
+        inicio, fim = _intervalo_do_mes(ano, mes)
+        return self.listar_historico(inicio=inicio, fim=fim)
+
+    # ------------------------------------------------------------------
+    # Fechamento da Gaveta e Performance por Atendente (§3.14)
+    # ------------------------------------------------------------------
+
+    def fechamento_da_gaveta(self, caixa_id: int) -> FechamentoGaveta:
+        """Fotografia enxuta de um turno já fechado, para a seção "Fechamento
+        da Gaveta" no rodapé do Histórico Diário/Dashboard Mensal."""
+        caixa = self.buscar(caixa_id)
+        resumo = self.resumo(caixa_id)
+
+        if caixa.numero_sequencial_dia is not None and caixa.fechado_em is not None:
+            identificacao = f"Caixa Turno T{caixa.numero_sequencial_dia} — {caixa.fechado_em:%d/%m/%Y}"
+        else:
+            identificacao = f"Caixa #{caixa.id}"
+
+        saldo_apurado = ZERO
+        if resumo.valor_contado_dinheiro is not None:
+            saldo_apurado += resumo.valor_contado_dinheiro
+        if resumo.valor_contado_maquininha is not None:
+            saldo_apurado += resumo.valor_contado_maquininha
+
+        diferenca = None
+        if resumo.diferenca_dinheiro is not None and resumo.diferenca_maquininha is not None:
+            diferenca = dinheiro(resumo.diferenca_dinheiro + resumo.diferenca_maquininha)
+
+        return FechamentoGaveta(
+            caixa_id=caixa_id,
+            identificacao=identificacao,
+            total_faturado=_faturamento_total_de(resumo),
+            saldo_apurado=dinheiro(saldo_apurado),
+            diferenca=diferenca,
+        )
+
+    def fechamento_da_gaveta_do_periodo(self, caixa_ids: Iterable[int]) -> FechamentoGaveta:
+        """Agrega `fechamento_da_gaveta` de todos os turnos de um período
+        (mês do Histórico Diário ou do Dashboard Mensal) numa única linha —
+        évita a pergunta "qual dos N turnos listados é O fechamento da
+        seção?" quando o período tem mais de um turno."""
+        ids = list(caixa_ids)
+        total_faturado = ZERO
+        saldo_apurado = ZERO
+        diferenca_acumulada = ZERO
+        diferenca_valida = bool(ids)
+
+        for caixa_id in ids:
+            gaveta = self.fechamento_da_gaveta(caixa_id)
+            total_faturado += gaveta.total_faturado
+            saldo_apurado += gaveta.saldo_apurado
+            if gaveta.diferenca is None:
+                diferenca_valida = False
+            else:
+                diferenca_acumulada += gaveta.diferenca
+
+        if not ids:
+            identificacao = "Nenhum turno fechado no período"
+        elif len(ids) == 1:
+            identificacao = self.fechamento_da_gaveta(ids[0]).identificacao
+        else:
+            identificacao = f"{len(ids)} turnos fechados no período"
+
+        return FechamentoGaveta(
+            caixa_id=ids[0] if len(ids) == 1 else 0,
+            identificacao=identificacao,
+            total_faturado=dinheiro(total_faturado),
+            saldo_apurado=dinheiro(saldo_apurado),
+            diferenca=dinheiro(diferenca_acumulada) if diferenca_valida else None,
+        )
+
+    def ranking_por_atendente(self, caixa_ids: Iterable[int]) -> list[ItemRankingAtendente]:
+        """Vendas do período agrupadas por quem atendeu a comanda
+        (`Comanda.atendente_id`), para a seção "Performance por Atendente".
+
+        Uma comanda sem atendente definido (venda direta de balcão, sem
+        vincular ninguém) entra no grupo "Balcão" em vez de ser descartada —
+        senão a soma dos grupos nunca bateria com o faturamento total do
+        período. A base de cada comanda é a soma de TODOS os pagamentos dela
+        (qualquer forma, inclusive consumo interno), a mesma definição de
+        "faturado" usada em `resumo`/`_faturamento_total_de`.
+        """
+        totais: dict[str, Decimal] = {}
+        for caixa_id in caixa_ids:
+            for pagamento in self.uow.pagamentos.listar_por_caixa(caixa_id):
+                atendente = pagamento.comanda.atendente
+                nome = atendente.nome if atendente is not None else "Balcão"
+                totais[nome] = totais.get(nome, ZERO) + dinheiro(pagamento.valor)
+
+        faturamento_total = dinheiro(sum(totais.values(), ZERO))
+        itens = [
+            ItemRankingAtendente(
+                atendente_nome=nome,
+                valor_total=dinheiro(valor),
+                percentual=(
+                    dinheiro((valor / faturamento_total) * 100) if faturamento_total > ZERO else ZERO
+                ),
+            )
+            for nome, valor in totais.items()
+        ]
+        return sorted(itens, key=lambda item: item.valor_total, reverse=True)
+
     @staticmethod
     def _origem_da_comanda(comanda) -> str:
         """'Mesa 04' ou 'Balcão #12' — de onde veio o item cancelado."""
@@ -810,6 +970,14 @@ class CaixaService:
             return None
         limpo = texto.strip()
         return limpo or None
+
+
+def _faturamento_total_de(resumo: ResumoCaixa) -> Decimal:
+    """Mesma regra da linha "Total" de `conferencia_pagamentos` — duplicada
+    aqui (e em `historico_caixa_view._faturamento_total`) de propósito: são
+    duas camadas diferentes (service/view) que não devem depender uma da
+    outra só por essa conta de uma linha."""
+    return resumo.total_dinheiro + resumo.total_maquininha + resumo.total_consumo_interno
 
 
 def _intervalo_do_mes(ano: int, mes: int) -> tuple[date, date]:

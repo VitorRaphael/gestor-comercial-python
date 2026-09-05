@@ -24,7 +24,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from gestor_comercial.services.caixa_service import CaixaService, ResumoMensal
+from gestor_comercial.services.caixa_service import (
+    CaixaService,
+    FechamentoGaveta,
+    ItemRankingAtendente,
+    ResumoMensal,
+)
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
     NaoAutorizadoError,
@@ -88,6 +93,13 @@ class DashboardMensalView(QWidget):
         painel_graficos.addWidget(self._montar_painel_formas_pagamento(), 35)
         painel_graficos.addWidget(self._montar_painel_ranking(), 65)
         layout_externo.addLayout(painel_graficos, 1)
+
+        # §3.14 — seções complementares de fechamento, no final da tela.
+        painel_fechamento = QHBoxLayout()
+        painel_fechamento.setSpacing(16)
+        painel_fechamento.addWidget(self._montar_painel_gaveta(), 35)
+        painel_fechamento.addWidget(self._montar_painel_atendentes(), 65)
+        layout_externo.addLayout(painel_fechamento)
 
     def _montar_filtro_mes(self) -> QHBoxLayout:
         linha = QHBoxLayout()
@@ -159,6 +171,45 @@ class DashboardMensalView(QWidget):
         layout.addStretch()
         return painel
 
+    def _montar_painel_gaveta(self) -> QFrame:
+        painel = QFrame()
+        painel.setObjectName("relatoriosPainel")
+        layout = QVBoxLayout(painel)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(10)
+
+        titulo = QLabel("FECHAMENTO DA GAVETA")
+        titulo.setObjectName("relatoriosPainelTitulo")
+        layout.addWidget(titulo)
+
+        self._label_gaveta_identificacao = QLabel("—")
+        self._label_gaveta_identificacao.setObjectName("relatoriosFormaNome")
+        self._label_gaveta_identificacao.setWordWrap(True)
+        layout.addWidget(self._label_gaveta_identificacao)
+
+        layout.addLayout(_linha_rotulo_valor("Total faturado", self, "_label_gaveta_faturado"))
+        layout.addLayout(_linha_rotulo_valor("Saldo apurado", self, "_label_gaveta_saldo"))
+        layout.addLayout(_linha_rotulo_valor("Diferença (quebra/sobra)", self, "_label_gaveta_diferenca"))
+        layout.addStretch()
+        return painel
+
+    def _montar_painel_atendentes(self) -> QFrame:
+        painel = QFrame()
+        painel.setObjectName("relatoriosPainel")
+        layout = QVBoxLayout(painel)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(14)
+
+        titulo = QLabel("PERFORMANCE POR ATENDENTE")
+        titulo.setObjectName("relatoriosPainelTitulo")
+        layout.addWidget(titulo)
+
+        self._layout_atendentes = QVBoxLayout()
+        self._layout_atendentes.setSpacing(10)
+        layout.addLayout(self._layout_atendentes)
+        layout.addStretch()
+        return painel
+
     def _popular_seletor_mes(self) -> None:
         # Mês vigente sempre entra primeiro, mesmo sem nenhum fechamento ainda —
         # é o caso normal de abrir o dashboard no primeiro dia do mês novo.
@@ -199,10 +250,15 @@ class DashboardMensalView(QWidget):
         ano, mes = ano_mes
         try:
             resumo = self._caixas.resumo_mensal(ano, mes)
+            fechamentos = self._caixas.listar_fechamentos_do_mes_civil(ano, mes)
+            gaveta = self._caixas.fechamento_da_gaveta_do_periodo([c.id for c in fechamentos])
+            ranking_atendentes = self._caixas.ranking_por_atendente([c.id for c in fechamentos])
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
         self._preencher(resumo)
+        self._preencher_gaveta(gaveta)
+        self._preencher_atendentes(ranking_atendentes)
 
     def _preencher(self, resumo: ResumoMensal) -> None:
         self._cards["faturamento"].definir_valor(_formatar_reais(resumo.faturamento_bruto))
@@ -241,6 +297,28 @@ class DashboardMensalView(QWidget):
             proporcao = int((item.valor_total / maior_valor) * 100) if maior_valor else 0
             self._layout_ranking.addLayout(
                 _criar_linha_ranking(indice, item.produto_nome, item.quantidade, item.valor_total, proporcao)
+            )
+
+
+    def _preencher_gaveta(self, gaveta: FechamentoGaveta) -> None:
+        self._label_gaveta_identificacao.setText(gaveta.identificacao)
+        self._label_gaveta_faturado.setText(_formatar_reais(gaveta.total_faturado))
+        self._label_gaveta_saldo.setText(_formatar_reais(gaveta.saldo_apurado))
+        if gaveta.diferenca is None:
+            self._label_gaveta_diferenca.setText("—")
+        else:
+            self._label_gaveta_diferenca.setText(_formatar_reais_com_sinal(gaveta.diferenca))
+
+    def _preencher_atendentes(self, ranking: list[ItemRankingAtendente]) -> None:
+        _limpar_layout(self._layout_atendentes)
+        if not ranking:
+            vazio = QLabel("Nenhuma venda vinculada a atendente neste período.")
+            vazio.setObjectName("relatoriosFormaNome")
+            self._layout_atendentes.addWidget(vazio)
+            return
+        for item in ranking:
+            self._layout_atendentes.addLayout(
+                _criar_linha_forma(item.atendente_nome, item.valor_total, item.percentual)
             )
 
 
@@ -315,6 +393,28 @@ def _criar_linha_ranking(
     barra.setTextVisible(False)
     bloco.addWidget(barra)
     return bloco
+
+
+def _linha_rotulo_valor(rotulo: str, dono: QWidget, atributo_label_valor: str) -> QHBoxLayout:
+    """Uma linha 'RÓTULO ... VALOR', guardando o QLabel do valor em `dono`
+    (via `setattr`) para `_preencher_gaveta` atualizar depois."""
+    linha = QHBoxLayout()
+    label_rotulo = QLabel(rotulo)
+    label_rotulo.setObjectName("relatoriosRodapeRotulo")
+    linha.addWidget(label_rotulo)
+    linha.addStretch()
+    label_valor = QLabel("—")
+    label_valor.setObjectName("relatoriosFormaValor")
+    linha.addWidget(label_valor)
+    setattr(dono, atributo_label_valor, label_valor)
+    return linha
+
+
+def _formatar_reais_com_sinal(valor: Decimal) -> str:
+    if valor == 0:
+        return "—"
+    sinal = "-" if valor < 0 else ""
+    return f"{sinal}R$ {abs(valor):.2f}".replace(".", ",")
 
 
 def _limpar_layout(layout: QVBoxLayout) -> None:

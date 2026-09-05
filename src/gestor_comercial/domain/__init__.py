@@ -5,6 +5,7 @@ from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.funcionario import Funcionario
 from gestor_comercial.domain.impressora import Impressora
 from gestor_comercial.domain.item_comanda import ItemComanda
+from gestor_comercial.domain.loja_config import LojaConfig
 from gestor_comercial.domain.mesa import Mesa
 from gestor_comercial.domain.movimento_caixa import MovimentoCaixa
 from gestor_comercial.domain.pagamento import Pagamento
@@ -20,6 +21,7 @@ __all__ = [
     "Funcionario",
     "Impressora",
     "ItemComanda",
+    "LojaConfig",
     "Mesa",
     "MovimentoCaixa",
     "Pagamento",

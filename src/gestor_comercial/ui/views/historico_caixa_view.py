@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QProgressBar,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -40,7 +41,13 @@ from PySide6.QtWidgets import (
 
 from gestor_comercial.domain.caixa import Caixa
 from gestor_comercial.services.auth_service import AuthService
-from gestor_comercial.services.caixa_service import CaixaService, ResumoCaixa, ResumoCancelamentos
+from gestor_comercial.services.caixa_service import (
+    CaixaService,
+    FechamentoGaveta,
+    ItemRankingAtendente,
+    ResumoCaixa,
+    ResumoCancelamentos,
+)
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
     NaoAutorizadoError,
@@ -134,6 +141,13 @@ class HistoricoCaixaView(QWidget):
         self._rodape_tabela = self._montar_rodape_tabela()
         layout_externo.addWidget(self._rodape_tabela)
 
+        # §3.14 — seções complementares de fechamento, no final da tela.
+        painel_fechamento = QHBoxLayout()
+        painel_fechamento.setSpacing(16)
+        painel_fechamento.addWidget(self._montar_painel_gaveta(), 35)
+        painel_fechamento.addWidget(self._montar_painel_atendentes(), 65)
+        layout_externo.addLayout(painel_fechamento)
+
     def _montar_filtros(self) -> QHBoxLayout:
         linha = QHBoxLayout()
         linha.setSpacing(8)
@@ -173,6 +187,45 @@ class HistoricoCaixaView(QWidget):
         self._label_total_periodo.setObjectName("relatoriosRodapeValor")
         layout.addWidget(self._label_total_periodo)
         return rodape
+
+    def _montar_painel_gaveta(self) -> QFrame:
+        painel = QFrame()
+        painel.setObjectName("relatoriosPainel")
+        layout = QVBoxLayout(painel)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(10)
+
+        titulo = QLabel("FECHAMENTO DA GAVETA")
+        titulo.setObjectName("relatoriosPainelTitulo")
+        layout.addWidget(titulo)
+
+        self._label_gaveta_identificacao = QLabel("—")
+        self._label_gaveta_identificacao.setObjectName("relatoriosFormaNome")
+        self._label_gaveta_identificacao.setWordWrap(True)
+        layout.addWidget(self._label_gaveta_identificacao)
+
+        layout.addLayout(_linha_rotulo_valor("Total faturado", self, "_label_gaveta_faturado"))
+        layout.addLayout(_linha_rotulo_valor("Saldo apurado", self, "_label_gaveta_saldo"))
+        layout.addLayout(_linha_rotulo_valor("Diferença (quebra/sobra)", self, "_label_gaveta_diferenca"))
+        layout.addStretch()
+        return painel
+
+    def _montar_painel_atendentes(self) -> QFrame:
+        painel = QFrame()
+        painel.setObjectName("relatoriosPainel")
+        layout = QVBoxLayout(painel)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(14)
+
+        titulo = QLabel("PERFORMANCE POR ATENDENTE")
+        titulo.setObjectName("relatoriosPainelTitulo")
+        layout.addWidget(titulo)
+
+        self._layout_atendentes = QVBoxLayout()
+        self._layout_atendentes.setSpacing(10)
+        layout.addLayout(self._layout_atendentes)
+        layout.addStretch()
+        return painel
 
     def _popular_seletor_mes(self) -> None:
         # Mesmo padrão do Histórico Mensal: mês vigente primeiro, mais 11 pra
@@ -255,6 +308,10 @@ class HistoricoCaixaView(QWidget):
         self._resumos = {caixa.id: self._caixas.resumo(caixa.id) for caixa in fechamentos}
         self._preencher_tabela()
         self._preencher_kpis()
+
+        ids = [caixa.id for caixa in fechamentos]
+        self._preencher_gaveta(self._caixas.fechamento_da_gaveta_do_periodo(ids))
+        self._preencher_atendentes(self._caixas.ranking_por_atendente(ids))
 
     def _preencher_kpis(self) -> None:
         faturamentos = [_faturamento_total(resumo) for resumo in self._resumos.values()]
@@ -368,6 +425,27 @@ class HistoricoCaixaView(QWidget):
         modal = _CancelamentosDialog(titulo, resumo, self)
         modal.exec()
 
+    def _preencher_gaveta(self, gaveta: FechamentoGaveta) -> None:
+        self._label_gaveta_identificacao.setText(gaveta.identificacao)
+        self._label_gaveta_faturado.setText(_formatar_reais(gaveta.total_faturado))
+        self._label_gaveta_saldo.setText(_formatar_reais(gaveta.saldo_apurado))
+        if gaveta.diferenca is None:
+            self._label_gaveta_diferenca.setText("—")
+        else:
+            self._label_gaveta_diferenca.setText(_formatar_reais_com_sinal(gaveta.diferenca))
+
+    def _preencher_atendentes(self, ranking: list[ItemRankingAtendente]) -> None:
+        _limpar_layout_vertical(self._layout_atendentes)
+        if not ranking:
+            vazio = QLabel("Nenhuma venda vinculada a atendente neste período.")
+            vazio.setObjectName("relatoriosFormaNome")
+            self._layout_atendentes.addWidget(vazio)
+            return
+        for item in ranking:
+            self._layout_atendentes.addLayout(
+                _criar_linha_atendente(item.atendente_nome, item.valor_total, item.percentual)
+            )
+
 
 class _CancelamentosDialog(QDialog):
     """Modal com a auditoria de itens cancelados de um fechamento passado."""
@@ -408,6 +486,60 @@ def _limpar_layout_horizontal(layout: QHBoxLayout) -> None:
         widget = item.widget()
         if widget is not None:
             widget.deleteLater()
+
+
+def _limpar_layout_vertical(layout: QVBoxLayout) -> None:
+    while layout.count():
+        item = layout.takeAt(0)
+        sub_layout = item.layout()
+        widget = item.widget()
+        if widget is not None:
+            widget.deleteLater()
+        elif sub_layout is not None:
+            _limpar_layout_vertical(sub_layout)
+            sub_layout.deleteLater()
+
+
+def _linha_rotulo_valor(rotulo: str, dono: QWidget, atributo_label_valor: str) -> QHBoxLayout:
+    """Uma linha 'RÓTULO ... VALOR', guardando o QLabel do valor em `dono`
+    (via `setattr`) para `_preencher_gaveta` atualizar depois."""
+    linha = QHBoxLayout()
+    label_rotulo = QLabel(rotulo)
+    label_rotulo.setObjectName("relatoriosRodapeRotulo")
+    linha.addWidget(label_rotulo)
+    linha.addStretch()
+    label_valor = QLabel("—")
+    label_valor.setObjectName("relatoriosFormaValor")
+    linha.addWidget(label_valor)
+    setattr(dono, atributo_label_valor, label_valor)
+    return linha
+
+
+def _criar_linha_atendente(nome: str, valor: Decimal, percentual: Decimal) -> QVBoxLayout:
+    bloco = QVBoxLayout()
+    bloco.setSpacing(4)
+
+    topo = QHBoxLayout()
+    label_nome = QLabel(nome)
+    label_nome.setObjectName("relatoriosFormaNome")
+    topo.addWidget(label_nome)
+    topo.addStretch()
+    label_valor = QLabel(_formatar_reais(valor))
+    label_valor.setObjectName("relatoriosFormaValor")
+    topo.addWidget(label_valor)
+    bloco.addLayout(topo)
+
+    barra = QProgressBar()
+    barra.setObjectName("relatoriosBarraForma")
+    barra.setRange(0, 100)
+    barra.setValue(min(100, max(0, int(percentual))))
+    barra.setTextVisible(False)
+    bloco.addWidget(barra)
+
+    label_percentual = QLabel(f"{percentual:.1f}%")
+    label_percentual.setObjectName("relatoriosFormaPercentual")
+    bloco.addWidget(label_percentual)
+    return bloco
 
 
 def _formatar_reais(valor: Decimal) -> str:

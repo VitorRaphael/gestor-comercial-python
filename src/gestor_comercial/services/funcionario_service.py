@@ -8,6 +8,7 @@ logado, mesmo padrão de `AuthService.criar_usuario`.
 
 from __future__ import annotations
 
+from gestor_comercial.domain.enums import CargoFuncionario
 from gestor_comercial.domain.funcionario import Funcionario
 from gestor_comercial.repository.unit_of_work import UnitOfWork
 from gestor_comercial.services.auth_service import AuthService
@@ -15,6 +16,8 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+
+CARGOS_VALIDOS = [cargo.value for cargo in CargoFuncionario]
 
 
 class FuncionarioService:
@@ -27,10 +30,11 @@ class FuncionarioService:
     def criar(self, nome: str, cargo: str | None = None, telefone: str | None = None) -> Funcionario:
         self.auth.exigir_gerente()
         nome_limpo = self._validar_nome(nome)
+        cargo_valido = self._validar_cargo(cargo)
 
         funcionario = Funcionario(
             nome=nome_limpo,
-            cargo=self._limpar_texto(cargo),
+            cargo=cargo_valido,
             telefone=self._limpar_texto(telefone),
             ativo=True,
         )
@@ -49,7 +53,7 @@ class FuncionarioService:
         funcionario = self.buscar(funcionario_id)
 
         funcionario.nome = self._validar_nome(nome)
-        funcionario.cargo = self._limpar_texto(cargo)
+        funcionario.cargo = self._validar_cargo(cargo)
         funcionario.telefone = self._limpar_texto(telefone)
         self.uow.funcionarios.salvar(funcionario)
         self.uow.commit()
@@ -114,6 +118,19 @@ class FuncionarioService:
         if not nome_limpo:
             raise RegraDeNegocioError("Informe o nome do funcionário.")
         return nome_limpo
+
+    @staticmethod
+    def _validar_cargo(cargo: str | None) -> str | None:
+        """Cargo é opcional (compatibilidade com cadastros antigos sem
+        função definida), mas se informado tem que ser uma das opções fixas
+        do dropdown (§3.13) — não é mais texto livre."""
+        cargo_limpo = FuncionarioService._limpar_texto(cargo)
+        if cargo_limpo is None:
+            return None
+        if cargo_limpo not in CARGOS_VALIDOS:
+            opcoes = ", ".join(CARGOS_VALIDOS)
+            raise RegraDeNegocioError(f"Cargo inválido. Escolha uma das opções: {opcoes}.")
+        return cargo_limpo
 
     @staticmethod
     def _limpar_texto(texto: str | None) -> str | None:

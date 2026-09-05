@@ -26,3 +26,8 @@ class NaoAutorizadoError(GestorComercialError):
 
 class AcessoNegadoError(GestorComercialError):
     """Funcionário existe e o PIN confere, mas o perfil não permite a ação."""
+
+
+class TurnoAnteriorPendenteError(RegraDeNegocioError):
+    """Existe um caixa ABERTO de um turno anterior — abrir outro exige
+    fechamento cego (Senha Master ou Operacional) antes (§3.1)."""

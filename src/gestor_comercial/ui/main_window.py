@@ -153,7 +153,7 @@ class MainWindow(QMainWindow):
         self._caixa_view = CaixaView(caixa_service, self._impressao)
         self._cardapio_view = CardapioView(cardapio_service)
         self._estoque_view = EstoqueView()
-        self._funcionarios_view = FuncionariosView(self._funcionarios, self._pagamentos)
+        self._funcionarios_view = FuncionariosView(self._funcionarios, self._pagamentos, auth_service)
         self._impressoras_view = ImpressorasView(cardapio_service, self._impressao)
         self._relatorios_view = RelatoriosView(caixa_service, auth_service, self._impressao)
         self._configuracoes_view = ConfiguracoesView()

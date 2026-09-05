@@ -670,8 +670,8 @@ def construir_qss_app(t: dict[str, str]) -> str:
       border: 1px solid {t['acento']};
     }}
     QLabel[variante="loja-hub-icone"] {{
-      background: {t['acento']};
-      color: {t['acento_texto']};
+      background: {t['superficie_2']};
+      color: {t['acento']};
       border-radius: 10px;
       font-size: 18px;
       font-weight: 800;
@@ -974,4 +974,137 @@ def construir_qss_app(t: dict[str, str]) -> str:
       min-height: 4px;
     }}
     QProgressBar#relatoriosBarraRanking::chunk {{ background: {t['ciano_metrica']}; border-radius: 2px; }}
+
+    /* ---------- Tela de Funcionários (redesign "Concreto", §3.14) ---------- */
+
+    /* Ciano exato do mockup (#22D3EE) para "Dar baixa" no painel de detalhe —
+       diferente do variante="ciano" já existente (#0891b2, usado no Cardápio),
+       de propósito: são dois tons de ciano coexistindo em telas diferentes. */
+    QPushButton[variante="pilula-ciano"] {{
+      background: {t['ciano_metrica']};
+      color: #072228;
+      border: none;
+      border-radius: 18px;
+      padding: 7px 20px;
+      font-size: 13px;
+      font-weight: 700;
+    }}
+    QPushButton[variante="pilula-ciano"]:hover {{ background: #67e8f9; }}
+    QPushButton[variante="pilula-ciano"]:disabled {{ background: {t['borda']}; color: {t['texto_fraquissimo']}; }}
+
+    QFrame#funcionariosPainel {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 14px;
+    }}
+
+    QFrame#funcionariosKpiCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 14px;
+    }}
+    QLabel#funcionariosKpiIcone {{ font-size: 18px; background: transparent; }}
+    QLabel#funcionariosKpiRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+    QLabel#funcionariosKpiValor {{ color: {t['texto']}; font-size: 24px; font-weight: 800; background: transparent; }}
+
+    QLineEdit#funcionariosBusca {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 10px;
+      padding: 7px 12px;
+      color: {t['texto']};
+      font-size: 12px;
+    }}
+
+    QListWidget#funcionariosLista {{
+      background: transparent;
+      border: none;
+    }}
+    QListWidget#funcionariosLista::item {{
+      border: none;
+      padding: 0;
+      margin-bottom: 6px;
+    }}
+    QListWidget#funcionariosLista::item:selected {{ background: transparent; }}
+
+    QFrame#funcionariosLinha {{
+      background: transparent;
+      border: 1px solid transparent;
+      border-left: 3px solid transparent;
+      border-radius: 10px;
+    }}
+    QFrame#funcionariosLinha:hover {{ background: {t['superficie_2']}; }}
+    QFrame#funcionariosLinha[selecionado="true"] {{
+      background: {t['superficie_2']};
+      border-left: 3px solid {t['acento']};
+    }}
+
+    QLabel#funcionariosAvatar {{
+      background: {t['bg_terminal']};
+      color: {t['texto']};
+      border-radius: 19px;
+      font-size: 13px;
+      font-weight: 800;
+    }}
+    QLabel#funcionariosLinhaNome {{ color: {t['texto']}; font-size: 13px; font-weight: 700; background: transparent; }}
+    QLabel#funcionariosLinhaCargo {{
+      color: {t['texto_fraco']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      background: transparent;
+    }}
+    QLabel#funcionariosLinhaConsumoValor {{ color: {t['texto']}; font-size: 13px; font-weight: 700; background: transparent; }}
+    QLabel#funcionariosLinhaConsumoRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      background: transparent;
+    }}
+
+    QLabel#funcionariosAvatarGrande {{
+      background: {t['bg_terminal']};
+      color: {t['texto']};
+      border-radius: 32px;
+      font-size: 22px;
+      font-weight: 800;
+    }}
+    QLabel#funcionariosDetalheNome {{ color: {t['texto']}; font-size: 16px; font-weight: 800; background: transparent; }}
+    QLabel#funcionariosDetalheCargo {{
+      color: {t['texto_fraco']};
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+
+    QFrame#funcionariosCardConsumo {{
+      background: {t['superficie_2']};
+      border-radius: 12px;
+    }}
+    QLabel#funcionariosCardConsumoRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    QLabel#funcionariosCardConsumoValor {{ color: {t['texto']}; font-size: 26px; font-weight: 800; background: transparent; }}
+    QLabel#funcionariosCardConsumoNota {{ color: {t['texto_fraquissimo']}; font-size: 10px; background: transparent; }}
+
+    QLabel#funcionariosMetaRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    QLabel#funcionariosMetaValor {{ color: {t['texto']}; font-size: 12px; font-weight: 700; background: transparent; }}
     """

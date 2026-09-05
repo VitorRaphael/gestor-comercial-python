@@ -23,6 +23,11 @@ from gestor_comercial.services.exceptions import (
     NaoAutorizadoError,
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
+    TurnoAnteriorPendenteError,
+)
+from gestor_comercial.services.loja_config_service import (
+    SENHA_MASTER_PADRAO,
+    SENHA_OPERACIONAL_PADRAO,
 )
 from tests.conftest import PIN_ATENDENTE
 
@@ -121,6 +126,56 @@ def test_abrir_aceita_gaveta_zerada(caixas, gerente):
 def test_abrir_bloqueia_se_ja_existe_caixa_aberto(caixas, gerente, caixa_aberto):
     with pytest.raises(RegraDeNegocioError):
         caixas.abrir(Decimal("100.00"))
+
+
+def test_abrir_bloqueia_com_erro_especifico_de_turno_pendente(caixas, gerente, caixa_aberto):
+    with pytest.raises(TurnoAnteriorPendenteError):
+        caixas.abrir(Decimal("100.00"))
+
+
+def test_abrir_recusa_fechamento_cego_com_senha_errada(caixas, gerente, caixa_aberto):
+    with pytest.raises(RegraDeNegocioError):
+        caixas.abrir(Decimal("100.00"), senha_fechamento_cego="000000")
+    assert uow_caixa_ainda_aberto(caixas, caixa_aberto)
+
+
+def test_abrir_com_senha_operacional_fecha_as_ciegas_e_abre_novo_turno(uow, caixas, gerente, caixa_aberto):
+    novo = caixas.abrir(Decimal("100.00"), senha_fechamento_cego=SENHA_OPERACIONAL_PADRAO)
+
+    anterior = uow.caixas.buscar_por_id(caixa_aberto.id)
+    assert anterior.status is StatusCaixa.FECHADO
+    assert anterior.valor_contado_dinheiro == Decimal("0.00")
+    assert "cego" in anterior.observacao_fechamento.lower()
+
+    assert novo.status is StatusCaixa.ABERTO
+    assert uow.caixas.buscar_aberto().id == novo.id
+
+
+def test_abrir_com_senha_master_tambem_autoriza_fechamento_cego(uow, caixas, gerente, caixa_aberto):
+    novo = caixas.abrir(Decimal("100.00"), senha_fechamento_cego=SENHA_MASTER_PADRAO)
+    assert novo.status is StatusCaixa.ABERTO
+
+
+def test_abrir_com_fechamento_cego_ignora_comanda_aberta_esquecida(
+    uow, caixas, gerente, caixa_aberto, produto
+):
+    comanda = _nova_comanda(uow, caixa_aberto, gerente)
+    uow.itens.salvar(
+        ItemComanda(
+            comanda_id=comanda.id,
+            produto_id=produto.id,
+            quantidade=1,
+            preco_unit_congelado=dinheiro("10.00"),
+        )
+    )
+    uow.commit()
+
+    novo = caixas.abrir(Decimal("100.00"), senha_fechamento_cego=SENHA_OPERACIONAL_PADRAO)
+    assert novo.status is StatusCaixa.ABERTO
+
+
+def uow_caixa_ainda_aberto(caixas, caixa) -> bool:
+    return caixas.uow.caixas.buscar_por_id(caixa.id).status is StatusCaixa.ABERTO
 
 
 def test_abrir_recusa_valor_negativo_e_nao_grava(uow, caixas, gerente):
@@ -1091,3 +1146,78 @@ def test_resumo_mensal_soma_cancelamentos_entre_turnos(uow, caixas, gerente, pro
 
     assert resumo.cancelamentos_quantidade == 1
     assert resumo.cancelamentos_valor == produto.preco
+
+
+# ----------------------------------------------------------------------
+# fechamento_da_gaveta / ranking_por_atendente (§3.14)
+# ----------------------------------------------------------------------
+
+
+def test_fechamento_da_gaveta_identifica_turno_e_soma_saldo_apurado(uow, caixas, gerente, produto):
+    caixa = _caixa_fechado(uow, valor_abertura="50.00", fechado_em=datetime(2026, 8, 5, 22, 0))
+    caixa.numero_sequencial_dia = 1
+    comanda = _nova_comanda(uow, caixa, gerente, status=StatusComanda.FECHADA)
+    _novo_pagamento(uow, comanda, FormaPagamento.DINHEIRO, "30.00")
+    uow.commit()
+
+    gaveta = caixas.fechamento_da_gaveta(caixa.id)
+
+    assert "T1" in gaveta.identificacao
+    assert gaveta.total_faturado == dinheiro("30.00")
+    assert gaveta.saldo_apurado == dinheiro("50.00")  # valor_contado_dinheiro do fixture + 0 maquininha
+    assert gaveta.diferenca is not None
+
+
+def test_ranking_por_atendente_agrupa_por_vendedor_e_calcula_percentual(uow, caixas, gerente, funcionarios):
+    caixa = _caixa_fechado(uow, fechado_em=datetime(2026, 8, 5, 22, 0))
+    ana = funcionarios.criar("Ana Beatriz", "Garçom")
+    lucas = funcionarios.criar("Lucas Prado", "Garçom")
+
+    comanda_ana = _nova_comanda(uow, caixa, gerente, status=StatusComanda.FECHADA)
+    comanda_ana.atendente_id = ana.id
+    _novo_pagamento(uow, comanda_ana, FormaPagamento.DINHEIRO, "60.00")
+
+    comanda_lucas = _nova_comanda(uow, caixa, gerente, status=StatusComanda.FECHADA)
+    comanda_lucas.atendente_id = lucas.id
+    _novo_pagamento(uow, comanda_lucas, FormaPagamento.PIX, "20.00")
+
+    comanda_balcao = _nova_comanda(uow, caixa, gerente, status=StatusComanda.FECHADA)
+    _novo_pagamento(uow, comanda_balcao, FormaPagamento.DEBITO, "20.00")
+    uow.commit()
+
+    ranking = caixas.ranking_por_atendente([caixa.id])
+
+    por_nome = {item.atendente_nome: item for item in ranking}
+    assert por_nome["Ana Beatriz"].valor_total == dinheiro("60.00")
+    assert por_nome["Ana Beatriz"].percentual == dinheiro("60.00")
+    assert por_nome["Lucas Prado"].valor_total == dinheiro("20.00")
+    assert por_nome["Balcão"].valor_total == dinheiro("20.00")
+    # Ordenado do maior faturamento pro menor.
+    assert ranking[0].atendente_nome == "Ana Beatriz"
+
+
+def test_ranking_por_atendente_sem_vendas_no_periodo_devolve_lista_vazia(caixas, caixa_aberto):
+    assert caixas.ranking_por_atendente([caixa_aberto.id]) == []
+
+
+def test_fechamento_da_gaveta_do_periodo_agrega_varios_turnos(uow, caixas, gerente):
+    caixa1 = _caixa_fechado(uow, valor_abertura="50.00", fechado_em=datetime(2026, 8, 5, 22, 0))
+    comanda1 = _nova_comanda(uow, caixa1, gerente, status=StatusComanda.FECHADA)
+    _novo_pagamento(uow, comanda1, FormaPagamento.DINHEIRO, "30.00")
+
+    caixa2 = _caixa_fechado(uow, valor_abertura="20.00", fechado_em=datetime(2026, 8, 6, 22, 0))
+    comanda2 = _nova_comanda(uow, caixa2, gerente, status=StatusComanda.FECHADA)
+    _novo_pagamento(uow, comanda2, FormaPagamento.PIX, "10.00")
+    uow.commit()
+
+    gaveta = caixas.fechamento_da_gaveta_do_periodo([caixa1.id, caixa2.id])
+
+    assert "2 turnos" in gaveta.identificacao
+    assert gaveta.total_faturado == dinheiro("40.00")
+
+
+def test_fechamento_da_gaveta_do_periodo_sem_turnos(caixas):
+    gaveta = caixas.fechamento_da_gaveta_do_periodo([])
+    assert gaveta.total_faturado == dinheiro("0.00")
+    assert gaveta.diferenca is None
+    assert "Nenhum" in gaveta.identificacao
