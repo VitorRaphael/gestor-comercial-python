@@ -5,9 +5,13 @@ automaticamente pelo service assim que ganha o primeiro componente (ver
 `CardapioService.associar_componente`). Aqui só exibimos a badge "COMBO" e
 damos o botão "Gerenciar combo" pra abrir esse cadastro de componentes.
 
-A barra de ações (Novo/Editar/Ativar-Desativar/Excluir) é única para a tela
-inteira e age por contexto: o alvo é a categoria ou o produto que estiver
-com foco no momento (`_contexto`), evitando dois jogos de botões repetidos.
+Cabeçalho traz 4 KPIs (categorias, produtos, margem média, preço médio) e as
+duas ações de topo (Gerenciar combo / Novo item). Editar/Ativar-Desativar/
+Excluir de produto moraram pro rodapé do próprio painel de produtos; os
+mesmos três em categoria saem por menu de contexto (botão direito na lista) —
+a categoria não tem uma barra própria no design, só o "+ Nova categoria".
+Os atalhos de teclado (Ctrl+N/F2/Delete) continuam despachando pelo
+`_contexto` (qual lado está com foco), sem precisar de botões visíveis.
 Associação de impressora não mora aqui — isso é responsabilidade exclusiva
 da tela "Impressoras".
 """
@@ -54,12 +58,15 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
 
-_COLUNAS_PRODUTOS = ["Produto", "Tipo", "Preço", "Custo", "Status"]
+_COLUNAS_PRODUTOS = ["Produto", "Tipo", "Preço", "Custo", "Margem", "Status"]
 _COLUNAS_COMPONENTES = ["Componente", "Quantidade"]
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
 _ID_CATEGORIA = Qt.ItemDataRole.UserRole
+
+_COR_MARGEM_TRILHO = "rgba(255, 255, 255, 0.08)"
+_COR_MARGEM_PREENCHIDA = "#22c55e"
 
 
 def _por_nome(itens: list) -> list:
@@ -67,19 +74,28 @@ def _por_nome(itens: list) -> list:
     return sorted(itens, key=lambda item: item.nome.lower())
 
 
-class CardapioView(QWidget):
-    """Cardápio unificado: categorias à esquerda, produtos da categoria à direita.
+def _margem_percentual(produto: Produto) -> float:
+    if produto.preco is None or produto.preco <= 0:
+        return 0.0
+    return float((produto.preco - produto.custo) / produto.preco * 100)
 
-    Uma única barra de ações contextual serve os dois painéis — o alvo da
-    ação (categoria ou produto) é definido por qual lado está com foco.
-    """
+
+class CardapioView(QWidget):
+    """Cardápio unificado: KPIs no topo, categorias à esquerda, produtos à direita."""
 
     def __init__(self, cardapio_service: CardapioService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._service = cardapio_service
-        self._contexto = "categoria"  # "categoria" | "produto" — quem recebe Editar/Ativar-Desativar/Excluir
+        self._contexto = "categoria"  # "categoria" | "produto" — quem recebe os atalhos F2/Delete
+
+        self._painel_categorias = _CategoriasPainel(self._service, self._mostrar_erro)
+        self._painel_produtos = _ProdutosPainel(self._service, self._mostrar_erro)
 
         layout = QVBoxLayout(self)
+        layout.setSpacing(16)
+
+        layout.addLayout(self._criar_cabecalho())
+        layout.addLayout(self._criar_grade_kpis())
 
         self._label_erro = QLabel("")
         self._label_erro.setStyleSheet("color: #f43f5e; font-size: 12px;")
@@ -87,24 +103,19 @@ class CardapioView(QWidget):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
-        layout.addWidget(splitter, stretch=1)
-
-        self._painel_categorias = _CategoriasPainel(self._service, self._mostrar_erro)
-        self._painel_produtos = _ProdutosPainel(self._service, self._mostrar_erro)
         splitter.addWidget(self._painel_categorias)
         splitter.addWidget(self._painel_produtos)
-        splitter.setStretchFactor(0, 35)
-        splitter.setStretchFactor(1, 65)
-
-        layout.addLayout(self._criar_barra_acoes())
+        splitter.setStretchFactor(0, 30)
+        splitter.setStretchFactor(1, 70)
+        layout.addWidget(splitter, stretch=1)
 
         self._painel_categorias.categoria_selecionada.connect(self._painel_produtos.exibir_categoria)
         self._painel_categorias.categoria_selecionada.connect(self._ao_mudar_selecao_categoria)
-        self._painel_categorias.alterado.connect(self._painel_produtos.atualizar)
-        self._painel_produtos.alterado.connect(self._painel_categorias.atualizar_mantendo_selecao)
+        self._painel_categorias.alterado.connect(self._ao_alterar_categoria)
+        self._painel_produtos.alterado.connect(self._ao_alterar_produto)
         self._painel_produtos.produto_selecionado.connect(self._ao_mudar_selecao_produto)
 
-        # Detecta em qual lado está o foco pra saber quem é o alvo de Editar/Ativar-Desativar/Excluir.
+        # Detecta em qual lado está o foco pra saber quem recebe F2/Delete/Ctrl+N.
         self._painel_categorias.lista.installEventFilter(self)
         self._painel_produtos.tabela.installEventFilter(self)
 
@@ -114,73 +125,72 @@ class CardapioView(QWidget):
 
         self.atualizar()
 
-    def _criar_barra_acoes(self) -> QHBoxLayout:
-        barra = QHBoxLayout()
-        barra.setSpacing(8)
+    def _criar_cabecalho(self) -> QHBoxLayout:
+        cabecalho = QHBoxLayout()
+        cabecalho.setSpacing(12)
 
-        self._botao_novo = QPushButton("Novo ▾")
-        self._botao_novo.setProperty("variante", "primario")
-        menu_novo = QMenu(self)
-        menu_novo.addAction("Novo Produto", self._painel_produtos.criar)
-        menu_novo.addAction("Nova Categoria", self._painel_categorias.criar)
-        self._botao_novo.setMenu(menu_novo)
-        barra.addWidget(self._botao_novo)
-
-        self._botao_editar = QPushButton("Editar")
-        self._botao_editar.setProperty("variante", "neutro")
-        self._botao_editar.clicked.connect(self._editar)
-        barra.addWidget(self._botao_editar)
-
-        self._botao_status = QPushButton("Desativar")
-        self._botao_status.setProperty("variante", "perigo")
-        self._botao_status.clicked.connect(self._alternar_status)
-        barra.addWidget(self._botao_status)
-
-        self._botao_excluir = QPushButton("Excluir")
-        self._botao_excluir.setProperty("variante", "perigo")
-        self._botao_excluir.clicked.connect(self._excluir)
-        barra.addWidget(self._botao_excluir)
-
-        barra.addStretch()
+        coluna_titulo = QVBoxLayout()
+        coluna_titulo.setSpacing(2)
+        titulo = QLabel("Cardápio")
+        titulo.setStyleSheet("font-size: 22px; font-weight: 700;")
+        coluna_titulo.addWidget(titulo)
+        subtitulo = QLabel("Categorias, produtos, preços e margens da operação")
+        subtitulo.setProperty("variante", "fraco")
+        coluna_titulo.addWidget(subtitulo)
+        cabecalho.addLayout(coluna_titulo)
+        cabecalho.addStretch()
 
         self._botao_combo = QPushButton("Gerenciar combo")
         self._botao_combo.setProperty("variante", "neutro")
+        self._botao_combo.setEnabled(False)
         self._botao_combo.clicked.connect(self._painel_produtos.gerenciar_combo)
-        barra.addWidget(self._botao_combo)
+        cabecalho.addWidget(self._botao_combo)
 
-        return barra
+        botao_novo_item = QPushButton("Novo item")
+        botao_novo_item.setProperty("variante", "primario")
+        botao_novo_item.clicked.connect(self._painel_produtos.criar)
+        cabecalho.addWidget(botao_novo_item)
+
+        return cabecalho
+
+    def _criar_grade_kpis(self) -> QHBoxLayout:
+        grade = QHBoxLayout()
+        grade.setSpacing(12)
+
+        self._kpi_categorias = _CardKpi("🗂️", "Categorias")
+        self._kpi_produtos = _CardKpi("📦", "Produtos")
+        self._kpi_margem_media = _CardKpi("%", "Margem média")
+        self._kpi_preco_medio = _CardKpi("📈", "Preço médio")
+        for card in (
+            self._kpi_categorias,
+            self._kpi_produtos,
+            self._kpi_margem_media,
+            self._kpi_preco_medio,
+        ):
+            grade.addWidget(card)
+        return grade
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802 - override Qt
         if event.type() == QEvent.Type.FocusIn:
             if obj is self._painel_categorias.lista:
                 self._contexto = "categoria"
-                self._atualizar_barra_acoes()
             elif obj is self._painel_produtos.tabela:
                 self._contexto = "produto"
-                self._atualizar_barra_acoes()
         return super().eventFilter(obj, event)
 
     def _ao_mudar_selecao_categoria(self, _categoria: Categoria | None) -> None:
-        if self._contexto == "categoria":
-            self._atualizar_barra_acoes()
+        pass
 
-    def _ao_mudar_selecao_produto(self, _produto: Produto | None) -> None:
-        if self._contexto == "produto":
-            self._atualizar_barra_acoes()
-        self._botao_combo.setEnabled(_produto is not None)
+    def _ao_mudar_selecao_produto(self, produto: Produto | None) -> None:
+        self._botao_combo.setEnabled(produto is not None)
 
-    def _atualizar_barra_acoes(self) -> None:
-        if self._contexto == "categoria":
-            alvo = self._painel_categorias.categoria_atual()
-            ativo = alvo.ativo if alvo is not None else None
-        else:
-            alvo = self._painel_produtos.produto_atual()
-            ativo = alvo.ativo if alvo is not None else None
+    def _ao_alterar_categoria(self) -> None:
+        self._painel_produtos.atualizar()
+        self._atualizar_kpis()
 
-        self._botao_editar.setEnabled(alvo is not None)
-        self._botao_status.setEnabled(alvo is not None)
-        self._botao_status.setText("Ativar" if ativo is False else "Desativar")
-        self._botao_excluir.setEnabled(alvo is not None)
+    def _ao_alterar_produto(self) -> None:
+        self._painel_categorias.atualizar_mantendo_selecao()
+        self._atualizar_kpis()
 
     def _novo_padrao(self) -> None:
         """Ctrl+N segue o contexto atual: categoria selecionada cria produto, senão categoria."""
@@ -195,12 +205,6 @@ class CardapioView(QWidget):
         else:
             self._painel_produtos.editar()
 
-    def _alternar_status(self) -> None:
-        if self._contexto == "categoria":
-            self._painel_categorias.alternar_status()
-        else:
-            self._painel_produtos.alternar_status()
-
     def _excluir(self) -> None:
         if self._contexto == "categoria":
             self._painel_categorias.excluir()
@@ -210,14 +214,97 @@ class CardapioView(QWidget):
     def atualizar(self) -> None:
         self._label_erro.setText("")
         self._painel_categorias.atualizar()
-        self._atualizar_barra_acoes()
+        self._atualizar_kpis()
+
+    def _atualizar_kpis(self) -> None:
+        categorias = self._service.listar_categorias()
+        produtos = self._service.listar_produtos()
+
+        self._kpi_categorias.definir_valor(str(len(categorias)))
+        self._kpi_produtos.definir_valor(str(len(produtos)))
+
+        produtos_precificados = [p for p in produtos if p.preco and p.preco > 0]
+        if produtos_precificados:
+            margem_media = sum(_margem_percentual(p) for p in produtos_precificados) / len(
+                produtos_precificados
+            )
+            preco_medio = sum((p.preco for p in produtos_precificados), Decimal("0")) / len(
+                produtos_precificados
+            )
+        else:
+            margem_media = 0.0
+            preco_medio = Decimal("0")
+
+        self._kpi_margem_media.definir_valor(f"{margem_media:.0f}%")
+        self._kpi_preco_medio.definir_valor(_formatar_reais(preco_medio))
 
     def _mostrar_erro(self, mensagem: str) -> None:
         self._label_erro.setText(mensagem)
 
 
+class _CardKpi(QFrame):
+    """Card de métrica: ícone em selo quadrado, rótulo em caixa alta e valor grande."""
+
+    def __init__(self, icone: str, titulo: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setProperty("variante", "cartao")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        selo_icone = QLabel(icone)
+        selo_icone.setFixedSize(36, 36)
+        selo_icone.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        selo_icone.setStyleSheet(
+            "background-color: rgba(229, 169, 60, 0.14);"
+            "border-radius: 8px;"
+            "font-size: 16px;"
+        )
+        layout.addWidget(selo_icone)
+
+        rotulo = QLabel(titulo.upper())
+        rotulo.setProperty("variante", "fraco")
+        rotulo.setStyleSheet("font-size: 11px; font-weight: 600; letter-spacing: 1px;")
+        layout.addWidget(rotulo)
+
+        self._label_valor = QLabel("—")
+        self._label_valor.setStyleSheet("font-weight: 700; font-size: 24px;")
+        layout.addWidget(self._label_valor)
+
+    def definir_valor(self, texto: str) -> None:
+        self._label_valor.setText(texto)
+
+
+class _BarraMargem(QWidget):
+    """Barra fina de margem: trilho + preenchimento verde proporcional ao percentual."""
+
+    _ALTURA = 6
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(self._ALTURA)
+        self._trilho = QFrame(self)
+        self._trilho.setStyleSheet(f"background: {_COR_MARGEM_TRILHO}; border-radius: 3px;")
+        self._preenchida = QFrame(self)
+        self._preenchida.setStyleSheet(f"background: {_COR_MARGEM_PREENCHIDA}; border-radius: 3px;")
+        self._percentual = 0.0
+
+    def definir_percentual(self, percentual: float) -> None:
+        self._percentual = max(0.0, min(100.0, percentual))
+        self._reposicionar()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (override Qt)
+        super().resizeEvent(event)
+        self._reposicionar()
+
+    def _reposicionar(self) -> None:
+        self._trilho.setGeometry(0, 0, self.width(), self._ALTURA)
+        largura = round(self.width() * self._percentual / 100)
+        self._preenchida.setGeometry(0, 0, largura, self._ALTURA)
+
+
 class _CategoriasPainel(QFrame):
-    """Bloco da esquerda: lista de categorias em ordem alfabética."""
+    """Bloco da esquerda: busca + lista de categorias em ordem alfabética."""
 
     categoria_selecionada = Signal(object)  # Categoria | None
     alterado = Signal()
@@ -230,12 +317,35 @@ class _CategoriasPainel(QFrame):
         self._categorias: list[Categoria] = []
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("<b>Categorias</b>"))
+        layout.setSpacing(10)
+
+        cabecalho = QHBoxLayout()
+        rotulo = QLabel("CATEGORIAS")
+        rotulo.setStyleSheet("font-size: 11px; font-weight: 700; letter-spacing: 1px;")
+        rotulo.setProperty("variante", "fraco")
+        cabecalho.addWidget(rotulo)
+        cabecalho.addStretch()
+        self._label_contador = QLabel("0")
+        self._label_contador.setProperty("variante", "fraco")
+        cabecalho.addWidget(self._label_contador)
+        layout.addLayout(cabecalho)
+
+        self._campo_busca = QLineEdit()
+        self._campo_busca.setPlaceholderText("🔎  Buscar categoria")
+        self._campo_busca.textChanged.connect(self._filtrar)
+        layout.addWidget(self._campo_busca)
 
         self.lista = QListWidget()
         self.lista.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.lista.currentRowChanged.connect(self._emitir_selecao)
+        self.lista.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.lista.customContextMenuRequested.connect(self._menu_contexto)
         layout.addWidget(self.lista, stretch=1)
+
+        botao_nova = QPushButton("+ Nova categoria")
+        botao_nova.setProperty("variante", "tracejado")
+        botao_nova.clicked.connect(self.criar)
+        layout.addWidget(botao_nova)
 
     def atualizar(self) -> None:
         self._atualizar(manter_selecao=False)
@@ -246,6 +356,9 @@ class _CategoriasPainel(QFrame):
     def _atualizar(self, *, manter_selecao: bool) -> None:
         categoria_id_atual = self.categoria_selecionada_id() if manter_selecao else None
         self._categorias = _por_nome(self._service.listar_categorias())
+        contagem = self._contagem_produtos_por_categoria()
+
+        self._label_contador.setText(str(len(self._categorias)))
 
         self.lista.blockSignals(True)
         self.lista.clear()
@@ -253,8 +366,11 @@ class _CategoriasPainel(QFrame):
             item = QListWidgetItem()
             item.setData(_ID_CATEGORIA, categoria.id)
             self.lista.addItem(item)
-            self.lista.setItemWidget(item, _criar_linha_categoria(categoria))
+            self.lista.setItemWidget(
+                item, _criar_linha_categoria(categoria, contagem.get(categoria.id, 0))
+            )
         self.lista.blockSignals(False)
+        self._filtrar(self._campo_busca.text())
 
         indice = 0
         if categoria_id_atual is not None:
@@ -266,6 +382,19 @@ class _CategoriasPainel(QFrame):
             self.lista.setCurrentRow(indice)
         else:
             self._emitir_selecao(-1)
+
+    def _contagem_produtos_por_categoria(self) -> dict[int, int]:
+        contagem: dict[int, int] = {}
+        for produto in self._service.listar_produtos():
+            contagem[produto.categoria_id] = contagem.get(produto.categoria_id, 0) + 1
+        return contagem
+
+    def _filtrar(self, texto: str) -> None:
+        alvo = texto.strip().casefold()
+        for linha, categoria in enumerate(self._categorias):
+            item = self.lista.item(linha)
+            if item is not None:
+                item.setHidden(bool(alvo) and alvo not in categoria.nome.casefold())
 
     def categoria_selecionada_id(self) -> int | None:
         item = self.lista.currentItem()
@@ -283,6 +412,21 @@ class _CategoriasPainel(QFrame):
     def _emitir_selecao(self, linha: int) -> None:
         categoria = self.categoria_atual() if linha >= 0 else None
         self.categoria_selecionada.emit(categoria)
+
+    def _menu_contexto(self, posicao) -> None:
+        item = self.lista.itemAt(posicao)
+        if item is None:
+            return
+        self.lista.setCurrentItem(item)
+        categoria = self.categoria_atual()
+        if categoria is None:
+            return
+
+        menu = QMenu(self)
+        menu.addAction("Editar", self.editar)
+        menu.addAction("Ativar" if not categoria.ativo else "Desativar", self.alternar_status)
+        menu.addAction("Excluir", self.excluir)
+        menu.exec(self.lista.viewport().mapToGlobal(posicao))
 
     def criar(self) -> None:
         modal = _CategoriaDialog("Nova categoria", self)
@@ -359,7 +503,8 @@ class _CategoriasPainel(QFrame):
 
 
 class _ProdutosPainel(QFrame):
-    """Bloco da direita: produtos da categoria selecionada, em ordem alfabética."""
+    """Bloco da direita: busca + tabela de produtos da categoria selecionada,
+    com barra de ações contextual (Editar/Desativar/Excluir) no rodapé."""
 
     alterado = Signal()
     produto_selecionado = Signal(object)  # Produto | None
@@ -373,9 +518,27 @@ class _ProdutosPainel(QFrame):
         self._produtos: list[Produto] = []
 
         layout = QVBoxLayout(self)
+        layout.setSpacing(10)
 
-        self._titulo = QLabel("<b>Produtos</b>")
-        layout.addWidget(self._titulo)
+        cabecalho = QHBoxLayout()
+        coluna_titulo = QVBoxLayout()
+        coluna_titulo.setSpacing(2)
+        eyebrow = QLabel("PRODUTOS")
+        eyebrow.setStyleSheet("font-size: 11px; font-weight: 700; letter-spacing: 1px;")
+        eyebrow.setProperty("variante", "fraco")
+        coluna_titulo.addWidget(eyebrow)
+        self._titulo = QLabel("Selecione uma categoria")
+        self._titulo.setStyleSheet("font-size: 16px; font-weight: 700;")
+        coluna_titulo.addWidget(self._titulo)
+        cabecalho.addLayout(coluna_titulo)
+        cabecalho.addStretch()
+
+        self._campo_busca = QLineEdit()
+        self._campo_busca.setPlaceholderText("🔎  Buscar produto")
+        self._campo_busca.setFixedWidth(220)
+        self._campo_busca.textChanged.connect(self._filtrar)
+        cabecalho.addWidget(self._campo_busca)
+        layout.addLayout(cabecalho)
 
         self.tabela = QTableWidget(0, len(_COLUNAS_PRODUTOS))
         self.tabela.setHorizontalHeaderLabels(_COLUNAS_PRODUTOS)
@@ -383,17 +546,48 @@ class _ProdutosPainel(QFrame):
         self.tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        cabecalho = self.tabela.horizontalHeader()
-        cabecalho.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for coluna in (1, 2, 3, 4):
-            cabecalho.setSectionResizeMode(coluna, QHeaderView.ResizeMode.Fixed)
+        cabecalho_tabela = self.tabela.horizontalHeader()
+        cabecalho_tabela.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for coluna in (1, 2, 3, 4, 5):
+            cabecalho_tabela.setSectionResizeMode(coluna, QHeaderView.ResizeMode.Fixed)
         self.tabela.setColumnWidth(1, 90)
         self.tabela.setColumnWidth(2, 90)
         self.tabela.setColumnWidth(3, 90)
-        self.tabela.setColumnWidth(4, 110)
+        self.tabela.setColumnWidth(4, 130)
+        self.tabela.setColumnWidth(5, 110)
         self.tabela.verticalHeader().setDefaultSectionSize(36)
         self.tabela.currentCellChanged.connect(lambda *_: self._emitir_selecao())
         layout.addWidget(self.tabela, stretch=1)
+
+        layout.addLayout(self._criar_rodape())
+
+    def _criar_rodape(self) -> QHBoxLayout:
+        rodape = QHBoxLayout()
+        self._label_dica = QLabel("SELECIONE UM PRODUTO PARA EDITAR")
+        self._label_dica.setStyleSheet("font-size: 11px; font-weight: 600; letter-spacing: 1px;")
+        self._label_dica.setProperty("variante", "fraco")
+        rodape.addWidget(self._label_dica)
+        rodape.addStretch()
+
+        self._botao_editar = QPushButton("Editar")
+        self._botao_editar.setProperty("variante", "neutro")
+        self._botao_editar.setEnabled(False)
+        self._botao_editar.clicked.connect(self.editar)
+        rodape.addWidget(self._botao_editar)
+
+        self._botao_status = QPushButton("Desativar")
+        self._botao_status.setProperty("variante", "ciano")
+        self._botao_status.setEnabled(False)
+        self._botao_status.clicked.connect(self.alternar_status)
+        rodape.addWidget(self._botao_status)
+
+        self._botao_excluir = QPushButton("Excluir")
+        self._botao_excluir.setProperty("variante", "perigo")
+        self._botao_excluir.setEnabled(False)
+        self._botao_excluir.clicked.connect(self.excluir)
+        rodape.addWidget(self._botao_excluir)
+
+        return rodape
 
     def exibir_categoria(self, categoria: Categoria | None) -> None:
         self._categoria = categoria
@@ -408,10 +602,10 @@ class _ProdutosPainel(QFrame):
             self._categoria = categoria
 
         if categoria is None:
-            self._titulo.setText("<b>Produtos</b> — selecione uma categoria")
+            self._titulo.setText("Selecione uma categoria")
             self._produtos = []
         else:
-            self._titulo.setText(f"<b>Produtos de {categoria.nome}</b>")
+            self._titulo.setText(categoria.nome)
             self._produtos = _por_nome(
                 [p for p in self._service.listar_produtos() if p.categoria_id == categoria.id]
             )
@@ -422,9 +616,16 @@ class _ProdutosPainel(QFrame):
             self.tabela.setCellWidget(linha, 1, _criar_badge_tipo(produto.is_combo))
             self.tabela.setItem(linha, 2, QTableWidgetItem(_formatar_reais(produto.preco)))
             self.tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(produto.custo)))
-            self.tabela.setCellWidget(linha, 4, _criar_badge_status(produto.ativo))
+            self.tabela.setCellWidget(linha, 4, _criar_celula_margem(_margem_percentual(produto)))
+            self.tabela.setCellWidget(linha, 5, _criar_badge_status(produto.ativo))
 
+        self._filtrar(self._campo_busca.text())
         self._emitir_selecao()
+
+    def _filtrar(self, texto: str) -> None:
+        alvo = texto.strip().casefold()
+        for linha, produto in enumerate(self._produtos):
+            self.tabela.setRowHidden(linha, bool(alvo) and alvo not in produto.nome.casefold())
 
     def produto_atual(self) -> Produto | None:
         linha = self.tabela.currentRow()
@@ -433,7 +634,18 @@ class _ProdutosPainel(QFrame):
         return self._produtos[linha]
 
     def _emitir_selecao(self) -> None:
-        self.produto_selecionado.emit(self.produto_atual())
+        produto = self.produto_atual()
+        self._atualizar_rodape(produto)
+        self.produto_selecionado.emit(produto)
+
+    def _atualizar_rodape(self, produto: Produto | None) -> None:
+        self._label_dica.setText(
+            "SELECIONE UM PRODUTO PARA EDITAR" if produto is None else produto.nome.upper()
+        )
+        self._botao_editar.setEnabled(produto is not None)
+        self._botao_status.setEnabled(produto is not None)
+        self._botao_status.setText("Ativar" if produto is not None and not produto.ativo else "Desativar")
+        self._botao_excluir.setEnabled(produto is not None)
 
     def _categorias_ativas(self) -> list[Categoria]:
         return _por_nome(self._service.listar_categorias_ativas())
@@ -526,6 +738,7 @@ class _ProdutosPainel(QFrame):
     def gerenciar_combo(self) -> None:
         produto = self.produto_atual()
         if produto is None:
+            self._mostrar_erro("Selecione um produto antes de gerenciar o combo.")
             return
         candidatos = [p for p in self._service.listar_produtos_ativos() if p.id != produto.id]
         modal = _ComboComponentesDialog(self._service, produto, candidatos, self)
@@ -856,14 +1069,45 @@ class _ComponenteDialog(QDialog):
         return self._produto_id, self._campo_quantidade.value()
 
 
-def _criar_linha_categoria(categoria: Categoria) -> QWidget:
-    """Linha da lista de categorias: nome à esquerda, badge de status à direita."""
+def _criar_linha_categoria(categoria: Categoria, quantidade_produtos: int) -> QWidget:
+    """Linha da lista de categorias: nome + subtítulo (itens/impressora) à
+    esquerda, badge de status à direita."""
     linha = QWidget()
-    layout = QHBoxLayout(linha)
-    layout.setContentsMargins(4, 0, 4, 0)
-    layout.addWidget(QLabel(categoria.nome), stretch=1)
-    layout.addWidget(_criar_badge_status(categoria.ativo))
+    layout_externo = QHBoxLayout(linha)
+    layout_externo.setContentsMargins(4, 4, 4, 4)
+
+    coluna_texto = QVBoxLayout()
+    coluna_texto.setSpacing(2)
+    coluna_texto.addWidget(QLabel(categoria.nome))
+
+    setor = categoria.impressora.nome if categoria.impressora is not None else None
+    texto_subtitulo = f"{quantidade_produtos} ITENS · {setor.upper()}" if setor else f"{quantidade_produtos} ITENS"
+    subtitulo = QLabel(texto_subtitulo)
+    subtitulo.setProperty("variante", "fraco")
+    subtitulo.setStyleSheet("font-size: 10px; letter-spacing: 0.5px;")
+    coluna_texto.addWidget(subtitulo)
+
+    layout_externo.addLayout(coluna_texto, stretch=1)
+    layout_externo.addWidget(_criar_badge_categoria(categoria, quantidade_produtos))
     return linha
+
+
+def _criar_badge_categoria(categoria: Categoria, quantidade_produtos: int) -> QWidget:
+    """VAZIO (cinza) quando não há produtos; senão ATIVO/DESATIVADO como de costume."""
+    if quantidade_produtos == 0:
+        label = QLabel("VAZIO")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet(
+            "background-color: #3f3d3a;"
+            "color: #a8a29e;"
+            "font-weight: 700;"
+            "font-size: 11px;"
+            "border-radius: 4px;"
+            "padding: 3px 10px;"
+            "margin: 0px;"
+        )
+        return _celula_centralizada(label)
+    return _criar_badge_status(categoria.ativo)
 
 
 def _celula_centralizada(widget: QWidget) -> QWidget:
@@ -919,6 +1163,25 @@ def _criar_badge_tipo(is_combo: bool) -> QWidget:
             "margin: 0px;"
         )
     return _celula_centralizada(label)
+
+
+def _criar_celula_margem(percentual: float) -> QWidget:
+    """Barra verde proporcional + percentual numérico, lado a lado."""
+    celula = QWidget()
+    celula.setStyleSheet("background: transparent;")
+    layout = QHBoxLayout(celula)
+    layout.setContentsMargins(10, 0, 10, 0)
+    layout.setSpacing(8)
+
+    barra = _BarraMargem()
+    barra.setMinimumWidth(48)
+    barra.definir_percentual(percentual)
+    layout.addWidget(barra, stretch=1)
+
+    rotulo = QLabel(f"{percentual:.0f}%")
+    rotulo.setStyleSheet("font-size: 12px; font-weight: 600;")
+    layout.addWidget(rotulo)
+    return celula
 
 
 def _formatar_reais(valor: Decimal) -> str:
