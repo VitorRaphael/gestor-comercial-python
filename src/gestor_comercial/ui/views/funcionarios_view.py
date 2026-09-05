@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 from gestor_comercial.domain.enums import CargoFuncionario
 from gestor_comercial.domain.funcionario import Funcionario
 from gestor_comercial.services.auth_service import AuthService
+from gestor_comercial.services.caixa_service import CaixaService
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
     NaoAutorizadoError,
@@ -50,6 +51,7 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.pagamento_service import PagamentoService
+from gestor_comercial.ui.rotulo_identidade import rotulo_identidade
 
 _CARGOS_SUGERIDOS = [cargo.value for cargo in CargoFuncionario]
 
@@ -77,12 +79,14 @@ class FuncionariosView(QWidget):
         funcionario_service: FuncionarioService,
         pagamento_service: PagamentoService,
         auth_service: AuthService,
+        caixa_service: CaixaService,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._funcionarios_service = funcionario_service
         self._pagamentos = pagamento_service
         self._auth = auth_service
+        self._caixa_service = caixa_service
         self._funcionarios: list[Funcionario] = []
         self._saldos: dict[int, Decimal] = {}
         self._filtro_status = _FILTRO_TODOS
@@ -207,8 +211,7 @@ class FuncionariosView(QWidget):
 
     def atualizar(self) -> None:
         self._label_erro.setText("")
-        usuario = self._auth.usuario_logado
-        self._label_eyebrow.setText(f"GERENTE · {usuario.nome.upper()}" if usuario else "GERENTE")
+        self._label_eyebrow.setText(rotulo_identidade(self._auth, self._caixa_service).upper())
 
         self._funcionarios = self._funcionarios_service.listar_todos()
         self._saldos = self._carregar_saldos()

@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
 )
 
 from gestor_comercial.domain.comanda import Comanda
-from gestor_comercial.domain.enums import PerfilUsuario
 from gestor_comercial.domain.usuario import Usuario
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.caixa_service import CaixaService
@@ -41,6 +40,7 @@ from gestor_comercial.services.exceptions import (
 from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.services.pagamento_service import PagamentoService
+from gestor_comercial.ui.rotulo_identidade import rotulo_identidade
 from gestor_comercial.ui.views.caixa_view import CaixaView
 from gestor_comercial.ui.views.cardapio_view import CardapioView
 from gestor_comercial.ui.views.comanda_view import ComandaView
@@ -73,12 +73,6 @@ _ROTULOS_LOJA = {"Loja", "Cardápio", "Estoque", "Impressoras", "Funcionários",
 # de volta visível dentro da própria tela.
 _MODULOS_HUB = (_ROTULOS_LOJA - {"Loja"}) | {"Configurações"}
 
-_ROTULOS_PERFIL = {
-    PerfilUsuario.ADMIN: "Admin",
-    PerfilUsuario.GERENTE: "Gerente",
-    PerfilUsuario.OPERADOR_CAIXA: "Operador de Caixa",
-}
-
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
 
@@ -102,6 +96,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1024, 640)
 
         self._auth = auth_service
+        self._caixa_service = caixa_service
         self._pagamentos = pagamento_service
         self._impressao = impressao_service
         self._funcionarios = funcionario_service
@@ -153,7 +148,9 @@ class MainWindow(QMainWindow):
         self._caixa_view = CaixaView(caixa_service, self._impressao)
         self._cardapio_view = CardapioView(cardapio_service)
         self._estoque_view = EstoqueView()
-        self._funcionarios_view = FuncionariosView(self._funcionarios, self._pagamentos, auth_service)
+        self._funcionarios_view = FuncionariosView(
+            self._funcionarios, self._pagamentos, auth_service, caixa_service
+        )
         self._impressoras_view = ImpressorasView(cardapio_service, self._impressao)
         self._relatorios_view = RelatoriosView(caixa_service, auth_service, self._impressao)
         self._configuracoes_view = ConfiguracoesView(auth_service)
@@ -356,6 +353,7 @@ class MainWindow(QMainWindow):
         self._caixa_desbloqueada = False
 
     def _navegar_agora(self, rotulo: str) -> None:
+        self._atualizar_rotulo_identidade()
         pagina, recarregar = self._destinos_nav[rotulo]()
         recarregar()
         self._mostrar_pagina(pagina)
@@ -436,12 +434,18 @@ class MainWindow(QMainWindow):
     # Sessão
     # ------------------------------------------------------------------
 
+    def _atualizar_rotulo_identidade(self) -> None:
+        # Recalculado a cada navegação (ver `_navegar_agora`), não só no
+        # login — abrir/fechar caixa no meio da sessão precisa refletir aqui
+        # sem exigir logout.
+        rotulo = rotulo_identidade(self._auth, self._caixa_service)
+        self._label_usuario.setText(rotulo)
+        self._loja_hub_view.definir_usuario(rotulo.upper())
+        self._impressoras_view.definir_usuario(rotulo.upper())
+        self._relatorios_view.definir_usuario(rotulo.upper())
+
     def _ao_logar(self, usuario: Usuario) -> None:
-        rotulo_perfil = _ROTULOS_PERFIL.get(usuario.perfil, usuario.perfil.value)
-        self._label_usuario.setText(f"{usuario.nome} · {rotulo_perfil}")
-        self._loja_hub_view.definir_usuario(f"{rotulo_perfil.upper()} · {usuario.nome.upper()}")
-        self._impressoras_view.definir_usuario(f"{rotulo_perfil.upper()} · {usuario.nome.upper()}")
-        self._relatorios_view.definir_usuario(f"{rotulo_perfil.upper()} · {usuario.nome.upper()}")
+        self._atualizar_rotulo_identidade()
         # Sessão nova: Loja e Caixa não herdam o desbloqueio de quem usou antes.
         self._trancar_loja()
         self._trancar_caixa()
