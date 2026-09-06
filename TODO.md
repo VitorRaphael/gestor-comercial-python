@@ -2,13 +2,14 @@
 
 > Progresso da V1. Marcar `[x]` conforme cada etapa for concluída e testada. Detalhes de regras/escopo em [`docs/arquitetura.md`](docs/arquitetura.md).
 
-> **2026-09-06 — Remasterização da V1.0 em andamento.** A faxina final antes da
+> **2026-09-06 — Remasterização da V1.0 CONCLUÍDA.** A faxina final antes da
 > produção (memória, integridade de dados, duplicação, código morto) tem plano
 > próprio em [`REMASTERIZACAO-V1.md`](REMASTERIZACAO-V1.md), com 8 fases e
-> contrato de zero-regressão. Suíte: **799 passando, 0 `xfail`, 0 falhas**.
-> **Fases 0 a 6 concluídas; falta só a Fase 7 (validação final)**, sem
-> decisão pendente bloqueando — o estado completo está no §0 do
-> [`REMASTERIZACAO-V1.md`](REMASTERIZACAO-V1.md).
+> contrato de zero-regressão. Suíte: **800 passando, 0 `xfail`, 0 falhas**.
+> **As 8 fases (0 a 7) estão fechadas** — o estado completo está no §0 do
+> [`REMASTERIZACAO-V1.md`](REMASTERIZACAO-V1.md). O que continua aberto para a
+> V1 não é da remasterização: é o `.exe` numa máquina limpa de verdade e a
+> validação com o pai do Vitor (Fase 5 abaixo).
 >
 > - **Fase 0** — a camada `ui/`, que não tinha nenhum teste, ganhou rede (`tests/ui/`).
 > - **Fase 1** — `rollback()` passou a existir em produção (`@transacional`) e
@@ -47,6 +48,22 @@
 >   capaz de estourar), virou `ResumoCaixa.diferenca_total`. As duas telas
 >   foram renderizadas antes e depois, em dois temas: **idênticas byte a byte**
 >   (`tools/comparar_telas.py`).
+> - **Fase 7** — validação final: o sistema inteiro comparado com o código de
+>   **antes da remasterização** (`b22da75`), pelos dois produtos que o pai do
+>   Vitor enxerga. As 11 telas em 24 estados (dois temas + filtro por operador)
+>   renderizadas dos dois lados: **9 idênticas byte a byte e 15 diferentes — e
+>   13 das 15 são os defeitos que a faxina matou**, aparecendo lado a lado pela
+>   primeira vez (cartão fantasma em Mesas e Caixa, célula empilhada em
+>   Cardápio e Impressoras, chip escuro no tema claro em Comanda e Dashboard).
+>   Os 6 documentos ESC/POS saíram **idênticos linha a linha**
+>   (`tools/comparar_cupons.py`). A comparação achou **uma regressão da própria
+>   remasterização**: a seção "Cópia de Segurança" (Fase 2) empurrou a tela de
+>   Configurações além da altura da página e o layout **espremeu** o conteúdo —
+>   os botões de Senhas e Acesso ficaram com 14px e sem rótulo nenhum num
+>   monitor de 768px, o da máquina do food truck. Corrigido com `QScrollArea` e
+>   travado por teste. Também ficou registrado um defeito **anterior** à faxina,
+>   que não foi mexido de propósito: o cartão "Recebimentos" da tela de Caixa
+>   corta as linhas na mesma altura de tela (§8 da remasterização).
 >
 > **A conclusão desconfortável das Fases 3 e 4:** os três achados de memória do
 > diagnóstico — o vazamento dos modais, o das tabelas e os +40 MB da linha de

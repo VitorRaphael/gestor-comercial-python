@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -59,7 +60,16 @@ class ConfiguracoesView(QWidget):
         # backup preso ao mesmo banco que a tela está usando.
         self._sessao = auth_service.uow.session
 
-        layout = QVBoxLayout(self)
+        # As três seções somam mais altura do que a área de página oferece numa
+        # tela de 768px (a classe de monitor da máquina do food truck): sem
+        # rolagem, o Qt espreme os cartões abaixo do tamanho natural deles e os
+        # botões "Alterar" de Senhas e Acesso ficam sem rótulo, ilegíveis.
+        # Mesmo padrão de `HistoricoCaixaView`/`DashboardMensalView`.
+        layout_externo = QVBoxLayout(self)
+        layout_externo.setContentsMargins(0, 0, 0, 0)
+
+        conteudo = QWidget()
+        layout = QVBoxLayout(conteudo)
         layout.setContentsMargins(0, 12, 0, 0)
         layout.setSpacing(4)
 
@@ -88,6 +98,14 @@ class ConfiguracoesView(QWidget):
         layout.addWidget(self._montar_card_backup())
 
         layout.addStretch()
+
+        rolagem = QScrollArea()
+        rolagem.setObjectName("configRolagem")
+        rolagem.setWidget(conteudo)
+        rolagem.setWidgetResizable(True)
+        rolagem.setFrameShape(QFrame.Shape.NoFrame)
+        rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        layout_externo.addWidget(rolagem, 1)
 
     # ------------------------------------------------------------------
     # Seção "Selecionar Tema"

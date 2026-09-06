@@ -20,8 +20,8 @@
 
 ## 0. Onde paramos — 2026-09-06
 
-**Fases 0 a 6 concluídas. Falta só a Fase 7 (validação final).**
-Suíte: **799 passando, 0 `xfail`, 0 falhas** — de 775 ao fim da Fase 5.
+**Remasterização concluída. As 8 fases (0 a 7) estão fechadas.**
+Suíte: **800 passando, 0 `xfail`, 0 falhas** — de 620/621 (1 falha) no começo.
 
 | Fase | Estado |
 |---|---|
@@ -31,47 +31,57 @@ Suíte: **799 passando, 0 `xfail`, 0 falhas** — de 775 ao fim da Fase 5.
 | 3 — Utilitários compartilhados | ✅ concluída |
 | 4 — Ciclo de vida da UI (escopo enxuto) | ✅ concluída |
 | 5 — Higiene da UI | ✅ concluída — 9 de 9 itens |
-| 6 — Arquitetura da UI | ✅ **concluída — só a duplicação real** |
-| **7 — Validação final** | ⏸️ **próxima**, sem decisão pendente bloqueando |
+| 6 — Arquitetura da UI | ✅ concluída — só a duplicação real |
+| **7 — Validação final** | ✅ **concluída** |
 
-### O que a Fase 6 fechou
+### O que a Fase 7 fechou
 
-A fase começou como "quebrar as 5 views gigantes" e a medição mudou o alvo. Uma
-varredura de **corpo de função** (pelo `ast.dump`, então o nome não conta) na
-camada de UI inteira acusou **8 cópias** — e as 8 estavam entre as duas telas de
-Relatórios. Nas cinco views gigantes: **nenhuma**.
+A validação comparou o sistema inteiro com o código de **antes da
+remasterização** (`b22da75`), pelos dois produtos que o pai do Vitor enxerga: a
+tela e o papel.
 
-| Item | O que entrou | Prova |
-|---|---|---|
-| Painéis do rodapé | `PainelGaveta` e `PainelAtendentes` em `ui/widgets/paineis_relatorio.py` | Teste de adoção nas 2 telas reais: cópia local de volta reprova |
-| Linha com barra | `linha_barra_proporcao` — existia 2x com 2 nomes (`_criar_linha_forma`/`_criar_linha_atendente`) | 3 testes, incluindo a saturação em 0–100 |
-| Barra de filtro | `FiltroPeriodoOperador` — dona do estado que as 2 telas duplicavam em 3 atributos cada | 5 testes: mês vigente primeiro, pílula sem destaque antes do 1º clique, volta pra "Todos" quando o operador some |
-| Campo editável | `formatar_para_campo()` — as 2 cópias de `_formatar_campo` | Passa por `dinheiro()`, como manda o §3.8 |
-| Diferença do turno | `ResumoCaixa.diferenca_total` — **3 regras divergentes** viraram 1 | Teste de premissa: as 2 contagens sempre viajam juntas |
-| Catraca | Varredura que reprova quando um corpo de função é recolado entre arquivos da UI | Testada com uma cópia injetada; e com teste de premissa contra varredor cego |
-| Bancada | `tools/comparar_telas.py` — paridade visual em PNG | 6 renderizações idênticas byte a byte ao código de antes |
+| Frente | Resultado |
+|---|---|
+| Suíte | 800 verdes, sem teste apagado, enfraquecido ou `skip` |
+| Telas | 11 telas × 2 temas + 2 estados de filtro = **24 renderizações** comparadas pixel a pixel |
+| Impressão | os 6 documentos ESC/POS, **idênticos linha a linha** (só o relógio normalizado) |
+| Bancadas | `tools/comparar_telas.py` passou a montar a `MainWindow` real e cobrir as 10 telas; `tools/comparar_cupons.py` nasceu para o papel |
 
-### 🔴 O que a Fase 6 encontrou: a mesma conta com três regras
+Das 24 renderizações, **9 são byte a byte idênticas** e **15 diferem** — cada
+diferença rastreada até a fase que a causou e conferida uma a uma:
 
-"Diferença total do turno" era calculada em três lugares, com três critérios
-diferentes para o caso de faltar uma das duas contagens — e um deles somava
-`Decimal + None`, que estoura. Não dá para escrever um teste que pegue isso:
-as duas contagens sempre viajam juntas, então o caminho é **inalcançável
-hoje** (pôr a regra antiga de volta deixa a suíte inteira verde). Virou uma
-regra só em `ResumoCaixa.diferenca_total`, com um teste que trava a premissa e
-avisa se o fechamento parcial um dia existir. Detalhe no §6, Fase 6.
+- **13** são os defeitos que a remasterização **consertou**, agora visíveis
+  lado a lado: widget fantasma sobrando na grade de Mesas e no cartão de
+  fechamento do Caixa (§3.7), célula empilhada por cima da anterior em Cardápio
+  e Impressoras (§3.3), cor escura congelada no tema claro e inicial errada no
+  avatar da Comanda e do Dashboard (§3.15).
+- **2** são a tela de Configurações, que ganhou a seção "Cópia de Segurança" na
+  Fase 2 — e onde a comparação achou o único **defeito novo** da
+  remasterização.
 
-### Por que as views gigantes continuam gigantes
+### 🔴 O que a Fase 7 encontrou: a tela de Configurações espremida
 
-Porque a varredura mostrou que elas não duplicam nada — nem entre si, nem com o
-resto da UI. Quebrá-las seria mover ~4.500 linhas sem nenhum teste capaz de
-dizer se melhorou. Decisão registrada no §8, não pendência.
+A seção nova empurrou o conteúdo para além da altura da página e o
+`QVBoxLayout` sem rolagem **espreme os filhos** em vez de rolar: os quatro
+botões "Alterar"/"Cadastrar" de Senhas e Acesso caíram de 39px para **14px, sem
+rótulo nenhum**, com os textos das linhas sobrepostos. Num monitor de 768px — a
+classe de máquina do food truck — a tela ficava inutilizável.
 
-### Retomada
+Nenhum dos 799 testes pegava isso: teste de widget não mede pixel, e a suíte
+roda sem banco de fontes. Corrigido com `QScrollArea` (o mesmo padrão do
+Histórico e do Dashboard) e travado por
+`tests/ui/test_telas_cabem_na_tela.py`, que aperta a moldura pela metade do que
+a **própria tela** pede — medida relativa, para o teste também reprovar na
+máquina sem fonte instalada.
 
-Ler este bloco e a **Fase 7** no §6. Não há decisão pendente do Vitor
-bloqueando. O empacotamento continua aberto: falta testar o `.exe` numa máquina
-limpa de verdade (`docs/checklist-maquina-limpa.md`).
+### O que continua aberto (não é da remasterização)
+
+- **`.exe` em máquina limpa de verdade** — `docs/checklist-maquina-limpa.md`.
+- **Tela de Caixa a 768px**: o cartão "Recebimentos" corta as linhas no meio.
+  **Não é regressão** — o código de `b22da75` corta exatamente igual (provado
+  com a bancada rodada nos dois lados a 1366×738). É defeito anterior à
+  faxina, mesmo remédio da Configurações, e por isso ficou de fora: mexer nele
+  agora seria mudança de layout sem paridade contra a qual comparar. Ver §8.
 
 ---
 
@@ -1231,14 +1241,104 @@ na camada de UI. As duas views somadas caíram de **1.126 para 755 linhas**, com
 > ficou melhor, no exato ponto do documento em que o risco é maior e o retorno,
 > estético. Fica registrado como decisão, não como pendência.
 
-### Fase 7 — Validação final — FASE 4
+### Fase 7 — Validação final ✅ CONCLUÍDA (2026-09-06)
 
-- [ ] Suíte inteira verde
-- [ ] Paridade tela a tela: Login, Mesas, Comanda, Caixa, Histórico, Dashboard,
-      Cardápio, Funcionários, Impressoras, Configurações
-- [ ] Impressão ESC/POS byte a byte idêntica (tipo ARQUIVO, `diff` dos `.txt`)
-- [ ] Métricas do §7 preenchidas
-- [ ] `docs/arquitetura.md` e `TODO.md` atualizados
+> A pergunta da fase não é "a suíte está verde?" — ela está verde desde a Fase
+> 0. É **"o pai do Vitor vê e imprime a mesma coisa que via antes da faxina?"**.
+> Quem responde isso não é teste de widget: é comparar as telas e os cupons com
+> o código de **antes de tudo** (`b22da75`, o commit anterior à Fase 0).
+
+- [x] **Suíte inteira verde** — `800 passed`, 0 `xfail`, 0 falhas. Nenhum teste
+      apagado, enfraquecido ou marcado `skip` (§4.3)
+- [x] **Paridade tela a tela** — as 10 telas do checklist mais a Central de
+      Loja, em tema escuro e claro, mais o estado "operador filtrado" das duas
+      telas de Relatórios: **24 renderizações**, comparadas pixel a pixel com
+      `b22da75`. Resultado e leitura de cada diferença logo abaixo
+- [x] **Impressão ESC/POS idêntica** — os 6 documentos (comanda de produção, 2ª
+      via, pré-conta, recibo, fechamento da gaveta e teste de impressora),
+      impressos de verdade pelo driver de verdade em conexão ARQUIVO:
+      `balcao.txt` (130 linhas) e `cozinha.txt` (49 linhas), **idênticos**
+- [x] **Métricas do §7 preenchidas**
+- [x] **`docs/arquitetura.md`, `TODO.md` e `CONTEXT.md` atualizados**
+- [x] **Regressão encontrada e corrigida** — a tela de Configurações espremida
+      (achado abaixo), com teste próprio
+
+**Resultado:** `800 passed` — de `799`. O teste novo é
+`tests/ui/test_telas_cabem_na_tela.py`.
+
+#### O que mudou nas bancadas
+
+A bancada da Fase 6 renderizava **duas** views soltas, num banco vazio e com o
+banco de fontes do Qt vazio (na plataforma `offscreen` ele sobe assim, e todo
+texto vira quadradinho — a comparação enxergava layout, não conteúdo). Para
+responder pelas 10 telas ela mudou em três pontos:
+
+| Antes (Fase 6) | Agora (Fase 7) |
+|---|---|
+| 2 views instanciadas soltas | a **`MainWindow` de verdade**, então sidebar, barra de usuário e barra da Central de Loja entram na comparação |
+| Banco vazio | o **seed do primeiro boot** (60 mesas, 113 produtos, os 2 operadores de turno) + um dia de operação: turno fechado com venda paga, turno aberto com sangria e reforço, comanda viva na mesa 3 |
+| Sem fontes: texto = quadradinho | Segoe UI, Segoe UI Emoji e Archivo Black carregadas na mão — o texto aparece, e **conteúdo** passa a ser comparável |
+
+As datas do cenário são congeladas no dia 1 do mês vigente (`_congelar_datas`),
+senão duas execuções diferem pelo relógio e não pelo código. E o `--comparar`
+agora diz **onde** difere (quantos pixels e o retângulo que os contém), que é o
+que permite ir olhar o lugar certo em vez de caçar a olho.
+
+`tools/comparar_cupons.py` é a bancada irmã, para o papel. Reaproveita o mesmo
+cenário (`_montar_servicos` + `_povoar`) de propósito: um seed próprio ali seria
+uma segunda versão do mesmo dia de operação, livre para divergir — exatamente a
+duplicação que a Fase 6 passou o dia caçando.
+
+#### As 24 renderizações, uma a uma
+
+```
+9 idênticas   login (2), loja (2), funcionários (2), histórico claro/escuro,
+              dashboard-operador
+15 diferentes  todas explicadas abaixo
+```
+
+| Telas | Por que difere | Origem |
+|---|---|---|
+| mesas (2), caixa (2) | o **antes** deixa cartão fantasma na grade e no rodapé "Últimos fechamentos" — widget órfão que continuava pintado | §3.7, Fase 4 |
+| cardápio (2), impressoras (2), histórico-operador | o **antes** empilha a célula nova por cima da anterior: "CoCozinha", "SIM SIMONLI", e um botão "2ª via" sobrevivendo numa tabela já esvaziada | §3.3, Fase 5 |
+| comanda (2), dashboard (2) | o **antes** pinta chip escuro no tema claro (título "Mesa 3" some no branco) e mostra a inicial errada no avatar | §3.15, Fase 5 |
+| configurações (2) | seção "Cópia de Segurança" nova — e o defeito abaixo | Fase 2 / Fase 7 |
+
+Ou seja: **13 das 15 diferenças são defeitos que a remasterização matou**, e
+esta é a primeira vez que eles aparecem lado a lado em vez de só na descrição
+da fase que os corrigiu.
+
+> #### 🔴 O que esta fase descobriu: Configurações espremida até ficar ilegível
+> Com a seção "Cópia de Segurança" (Fase 2), o conteúdo da tela passou a somar
+> mais altura do que a área de página oferece. `QVBoxLayout` sem rolagem, nesse
+> caso, **não corta: espreme**. Os quatro botões "Alterar"/"Cadastrar" de
+> Senhas e Acesso foram de 39px para **14px, sem rótulo nenhum** — e os rótulos
+> das linhas ficaram sobrepostos aos valores mascarados.
+>
+> ```
+> botao Alterar   h=14  hint=39     label "Senha de Login"  h=6  hint=16
+> ```
+>
+> Por que nenhum dos 799 testes pegou: nenhum mede pixel, e a suíte roda sem
+> banco de fontes — sem fonte, o conteúdo mede menos e **cabe**, então o aperto
+> nem acontece. Foi preciso a bancada, com fonte de verdade, para o defeito
+> existir.
+>
+> A correção é a `QScrollArea` que o Histórico e o Dashboard já usam. O teste
+> (`tests/ui/test_telas_cabem_na_tela.py`) aperta a moldura pela **metade do
+> que a própria tela pede**, e não num número fixo de pixels: assim ele reprova
+> pelo aperto de verdade tanto na máquina com fonte quanto na sem. Conferido:
+> com o `configuracoes_view.py` de antes da correção, o teste reprova; com o de
+> agora, passa.
+
+> #### O que a fase NÃO consertou, e por quê
+> A mesma bancada, rodada a **1366×738** (um monitor de 768px maximizado, a
+> classe de máquina do food truck), mostra o cartão "Recebimentos" da tela de
+> **Caixa** com as linhas cortadas ao meio. Rodada nos dois lados, o corte é
+> **igual em `b22da75`**: é defeito anterior à remasterização, não regressão
+> dela. Fica registrado no §8 como o próximo item de layout — o remédio é o
+> mesmo da Configurações, mas aplicá-lo agora seria mudar uma tela no exato
+> momento em que o valor do documento é dizer o que mudou e o que não mudou.
 
 ---
 
@@ -1246,8 +1346,8 @@ na camada de UI. As duas views somadas caíram de **1.126 para 755 linhas**, com
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Testes verdes | 620/621 (1 falha) | **799, 0 xfail, 0 falhas** (Fase 6) |
-| Arquivos de teste de UI | 0 | **17** (Fase 6) |
+| Testes verdes | 620/621 (1 falha) | **800, 0 xfail, 0 falhas** (Fase 7) |
+| Arquivos de teste de UI | 0 | **18** (Fase 7) |
 | `MainWindow` coberta por teste | ❌ nenhum | ✅ **5 testes** (Fase 5) |
 | Testes marcados `xfail` | 7 (Fase 0) | ✅ **0** — reescritos (Fase 4) |
 | Caminhos de produção com `rollback()` | 0 | **todos** (Fase 1) |
@@ -1271,12 +1371,14 @@ na camada de UI. As duas views somadas caíram de **1.126 para 755 linhas**, com
 | Regras diferentes para "diferença total do turno" | 3 | ✅ **1** (Fase 6) |
 | Cópias de `_formatar_campo` | 2 | ✅ **1** (Fase 6) |
 | Linhas nas 2 telas de Relatórios | 1.126 | **755** + 317 de componente compartilhado (Fase 6) |
-| Telas com paridade visual provada pixel a pixel | 0 | **2**, em 6 estados (Fase 6) |
+| Telas com paridade visual provada pixel a pixel | 0 | **11**, em 24 estados (Fase 7) |
+| Documentos ESC/POS com paridade provada linha a linha | 0 | **6 de 6** (Fase 7) |
+| Telas que espremem o conteúdo até o rótulo sumir | 1 (Configurações, Fase 2) | ✅ **0** (Fase 7) |
 | "Constantes planas" de tema sem leitor | 14 de 22 | ✅ **bloco inteiro removido** (Fase 5) |
-| Linhas em `src/` | 17.697 | **18.596** (+899) — ver nota |
-| Linhas em `tests/` | 6.794 | **10.429** (+3.635) |
+| Linhas em `src/` | 17.697 | **18.616** (+919) — ver nota |
+| Linhas em `tests/` | 6.794 | **10.478** (+3.684) |
 
-> **Sobre `src/` ter crescido 829 linhas.** Uma faxina que aumenta o código
+> **Sobre `src/` ter crescido 919 linhas.** Uma faxina que aumenta o código
 > pede explicação. As cópias apagadas (10 de `_formatar_reais`, 4 de "limpar
 > layout") são pequenas perto do que entrou: `repository/backup.py` (o
 > `VACUUM INTO` que torna o WAL seguro, §8), o decorator `@transacional` do
@@ -1411,6 +1513,13 @@ leituras muito mais baratas.
 | 2026-09-06 | `formatar_para_campo` passa por `dinheiro()` | As duas cópias de `_formatar_campo` usavam `f"{valor:.2f}"` — meio para o par, a mesma divergência com o cupom que o §3.8 corrigiu no resto do módulo. Para valor gravado (Numeric(10,2)) o resultado é idêntico; a mudança tira a segunda política de arredondamento de dentro do módulo que existe para ter só uma |
 | 2026-09-06 | Bancada de paridade visual versionada em `tools/comparar_telas.py` | A fase mexeu na montagem de duas telas inteiras e a suíte não compara pixel. Renderizar offscreen e comparar PNG com o commit anterior provou o que teste nenhum provava — e é a ferramenta que a Fase 7 usa na paridade tela a tela. Mesmo critério do `medir_memoria.py`: sem dependência nova, fora de `src/` |
 | 2026-09-06 | Varredura de corpos duplicados virou teste, não relatório | Foi ela que redefiniu o escopo da fase; sem virar catraca, a Fase 6 valeria só no dia em que foi escrita. Compara o `ast.dump` do corpo (nome não conta — era assim que `_criar_linha_forma`/`_criar_linha_atendente` passavam) e ignora funções com menos de 4 comandos, para não acusar delegação de uma linha |
+| 2026-09-06 | **Fase 7 compara com `b22da75`, o commit anterior à Fase 0** | Comparar com o commit anterior (Fase 6) provaria só a última fase. O que interessa antes da produção é o efeito das 8 fases somadas sobre o que o pai do Vitor vê — e é essa comparação que transforma 13 correções descritas em prova visível lado a lado |
+| 2026-09-06 | A bancada de telas passou a montar a **`MainWindow` real**, com seed e fontes | Três limitações da versão da Fase 6 escondiam defeito: view solta não compara a sidebar nem as barras do shell; banco vazio não enche tabela nenhuma (e é dentro de tabela que moravam as células empilhadas); e a plataforma `offscreen` sobe **sem banco de fontes**, então todo texto virava quadradinho e a comparação enxergava layout, não conteúdo |
+| 2026-09-06 | Cupons: **hora normalizada**, datas do banco **congeladas** | São dois problemas diferentes. A data gravada no dado é congelada no seed (`_congelar_datas`), mas a hora de impressão vem de um `datetime.now()` dentro do serviço, que nenhum dado alcança — normalizar `HH:MM:SS` no `diff` é o que permite exigir igualdade em todo o resto do cupom |
+| 2026-09-06 | `comparar_cupons.py` reaproveita o cenário de `comparar_telas.py` | Um seed próprio seria uma segunda versão do mesmo dia de operação, livre para divergir daquele — a duplicação que a Fase 6 passou a fase inteira caçando. As duas bancadas comparam o mesmo sistema no mesmo estado |
+| 2026-09-06 | **Configurações ganhou `QScrollArea`** (regressão da Fase 2, achada na Fase 7) | A seção "Cópia de Segurança" empurrou o conteúdo além da altura da página, e `QVBoxLayout` sem rolagem espreme em vez de cortar: os botões de Senhas e Acesso foram a 14px sem rótulo. É correção de regressão da própria remasterização, então entra dentro dela |
+| 2026-09-06 | O teste do aperto mede em **fração do que a tela pede**, não em pixels fixos | A suíte roda em `offscreen`, sem fonte: com um número absoluto o conteúdo caberia, o aperto não aconteceria e o teste passaria com o bug de pé. Metade do `sizeHint` da própria tela reprova em qualquer máquina |
+| 2026-09-06 | **Cartão "Recebimentos" da tela de Caixa a 768px fica de fora** | A bancada a 1366×738 mostra as linhas cortadas ao meio — e mostra **igual em `b22da75`**: é defeito anterior à faxina, não regressão. O remédio é o mesmo da Configurações, mas aplicá-lo aqui seria mudar uma tela justamente no documento cujo valor é separar o que mudou do que não mudou. Fica como primeiro item de layout depois da remasterização |
 
 ### Decisões pendentes do Vitor
 

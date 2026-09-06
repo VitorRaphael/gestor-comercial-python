@@ -783,6 +783,8 @@ def construir_qss_app(t: dict[str, str]) -> str:
       border: 1px solid {t['borda']};
       border-radius: 14px;
     }}
+    QScrollArea#configRolagem {{ background: transparent; border: none; }}
+    QScrollArea#configRolagem > QWidget > QWidget {{ background: transparent; }}
 
     /* ---------- Modais ---------- */
 

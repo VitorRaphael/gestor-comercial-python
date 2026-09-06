@@ -174,89 +174,71 @@ PySide6 (UI)  →  Camada de Serviços (regras de negócio)  →  SQLAlchemy (OR
 
 ### Árvore de pastas
 
+> Atualizada na Fase 7 da remasterização (2026-09-06) contra a árvore real —
+> a versão anterior era o desenho aprovado em 2026-08-20 e já não descrevia o
+> projeto (prometia um `config/settings.py` que nunca existiu e ignorava
+> `theme/`, `widgets/`, `tools/` e a pasta `tests/ui/`).
+
 ```
 gestor-comercial-python/
 ├── pyproject.toml
 ├── alembic.ini
-├── .gitignore
-├── README.md
+├── README.md · TODO.md · CONTEXT.md · REMASTERIZACAO-V1.md
 │
-├── migrations/
-│   └── versions/
+├── migrations/versions/
 │
 ├── resources/
-│   ├── qss/
-│   │   ├── base.qss
-│   │   ├── mesas.qss
-│   │   └── comandas.qss
-│   ├── icons/
-│   └── fonts/
+│   ├── qss/ · icons/app.ico · fonts/ArchivoBlack-Regular.ttf
 │
-├── src/
-│   └── gestor_comercial/
-│       ├── __init__.py
-│       ├── main.py
-│       │
-│       ├── domain/                # Model — entidades SQLAlchemy puras
-│       │   ├── funcionario.py
-│       │   ├── mesa.py
-│       │   ├── comanda.py
-│       │   ├── item_comanda.py
-│       │   ├── produto.py
-│       │   ├── categoria.py
-│       │   ├── combo_item.py
-│       │   ├── pagamento.py
-│       │   ├── caixa.py
-│       │   ├── movimento_caixa.py
-│       │   ├── quitacao_consumo.py
-│       │   ├── impressora.py
-│       │   └── enums.py
-│       │
-│       ├── repository/            # Repository/DAO — único lugar com Session SQLAlchemy
-│       │   ├── base.py
-│       │   ├── backup.py           # VACUUM INTO + wal_checkpoint (ver §8, 2026-09-06)
-│       │   ├── comanda_repository.py
-│       │   ├── caixa_repository.py
-│       │   ├── produto_repository.py
-│       │   └── funcionario_repository.py
-│       │
-│       ├── services/              # Service — regras de negócio
-│       │   ├── auth_service.py
-│       │   ├── comanda_service.py
-│       │   ├── pagamento_service.py
-│       │   ├── caixa_service.py
-│       │   ├── cardapio_service.py
-│       │   ├── impressao_service.py
-│       │   └── formatador_cupom.py   # funções puras: centralizar, alinhar preço, quebrar na largura
-│       │
-│       ├── hardware/              # isolamento de periféricos físicos
-│       │   └── impressora_escpos.py  # 5 tipos de conexão + BlocoTexto/Documento
-│       │
-│       ├── ui/                    # Controller/View — PySide6, zero SQL
-│       │   ├── main_window.py
-│       │   ├── views/
-│       │   │   ├── login_view.py
-│       │   │   ├── mesas_view.py
-│       │   │   ├── comanda_view.py
-│       │   │   ├── pagamento_dialog.py
-│       │   │   ├── caixa_view.py
-│       │   │   ├── cardapio_view.py
-│       │   │   ├── funcionarios_view.py
-│       │   │   └── impressoras_view.py
-│       │   └── widgets/
-│       │       ├── mesa_card.py
-│       │       └── pin_dialog.py
-│       │
-│       └── config/
-│           └── settings.py
+├── src/gestor_comercial/
+│   ├── main.py                    # migrations + seed + tema + MainWindow
+│   │
+│   ├── domain/                    # Model — entidades SQLAlchemy puras
+│   │   ├── usuario.py · funcionario.py · loja_config.py
+│   │   ├── mesa.py · comanda.py · item_comanda.py
+│   │   ├── categoria.py · produto.py · combo_item.py
+│   │   ├── pagamento.py · quitacao_consumo.py
+│   │   ├── caixa.py · movimento_caixa.py · impressora.py
+│   │   └── enums.py               # máquinas de estado congeladas (§4.1 da remasterização)
+│   │
+│   ├── repository/                # único lugar com Session SQLAlchemy
+│   │   ├── base.py · unit_of_work.py · seed.py
+│   │   ├── backup.py              # VACUUM INTO + wal_checkpoint (§8, 2026-09-06)
+│   │   └── 13 repositories, um por entidade
+│   │
+│   ├── services/                  # regras de negócio
+│   │   ├── auth_service.py · loja_config_service.py   # cascata de 3 níveis de PIN (§3.13)
+│   │   ├── comanda_service.py · pagamento_service.py · caixa_service.py
+│   │   ├── cardapio_service.py · funcionario_service.py
+│   │   ├── impressao_service.py · formatador_cupom.py · comprovante_fechamento.py
+│   │   ├── dinheiro.py            # 2 casas, ROUND_HALF_UP — a única política de arredondamento
+│   │   ├── transacao.py           # @transacional: commit/rollback na fronteira do service
+│   │   ├── imagem_service.py · exceptions.py
+│   │
+│   ├── hardware/impressora_escpos.py   # 5 tipos de conexão + BlocoTexto/Documento
+│   │
+│   └── ui/                        # PySide6, zero SQL
+│       ├── main_window.py         # login → shell (sidebar + páginas), navegação e PINs
+│       ├── formatacao.py          # R$ 1.234,50 em todas as telas (§3.8 da remasterização)
+│       ├── rotulo_identidade.py
+│       ├── theme/                 # controller.py (singleton) · tokens.py · qss_app.py
+│       ├── views/                 # 13 telas e diálogos de tela cheia
+│       └── widgets/               # peças compartilhadas entre telas
+│           ├── modais.py · tabelas.py · layout_utils.py · estilo.py
+│           ├── paineis_relatorio.py · filtro_periodo_operador.py
+│           ├── kpi_card.py · busca_produto.py · thumbnail_cache.py · flow_layout.py
+│           └── gerente_pin_dialog.py · loja_pin_dialog.py · comprovante_dialog.py ...
 │
 ├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── conftest.py
+│   ├── unit/ · integration/
+│   └── ui/                        # rede da camada de UI, criada na Fase 0 da remasterização
 │
-└── packaging/
-    └── build.spec
+├── tools/                         # bancadas — fora de src/, não entram no .exe
+│   ├── medir_memoria.py           # RSS por estágio, com --roteiro-antigo
+│   ├── comparar_telas.py          # paridade visual das telas, em PNG
+│   └── comparar_cupons.py         # paridade da impressão ESC/POS, em .txt
+│
+└── packaging/                     # build.spec (PyInstaller) · instalador.iss (Inno Setup)
 ```
 
 ### Responsabilidade das camadas
@@ -325,3 +307,13 @@ gestor-comercial-python/
   - **Fim dos N+1** (`selectinload` + consultas agregadas): Dashboard Mensal caiu de **2.502 para 217 consultas** (960 → 108 ms) num banco de 3 meses de operação; a grade de mesas parou de carregar todo o histórico de cada mesa para achar a comanda aberta. Todos os valores conferidos contra um recálculo independente — **nenhum número mudou**.
   - **Correção de schema:** `quitacoes_consumo.autorizado_por_id` apontava para `funcionarios` no banco migrado e para `usuarios` no `domain/`. Dormia desde `d23a4f888a77`, que a documentou como inofensiva porque "o app nunca liga `PRAGMA foreign_keys`" — premissa que a Fase 1 invalidou. Corrigida em `c8e3f6a2b910`; `alembic check` fica limpo pela primeira vez.
   Suíte em **658 testes + 7 `xfail`, 100% verde**.
+
+
+- 2026-09-06 — **Remasterização V1 concluída (Fases 3 a 7).** Plano e prova de cada fase em [`REMASTERIZACAO-V1.md`](../REMASTERIZACAO-V1.md); o que ficou valendo para quem lê este documento:
+  - **Uma política por regra.** `services/dinheiro.py` é a única política de arredondamento (a tela passa por ela antes de formatar, senão a tela arredondaria meio-para-o-par e o cupom meio-para-cima); `ui/formatacao.py` é o único formatador de dinheiro das 10 telas (**`R$ 1.234,50`**, decisão do Vitor); `ResumoCaixa.diferenca_total` é a única regra da "diferença do turno" — existia em três lugares com três critérios diferentes para o caso de faltar uma das contagens, e um deles somava `Decimal + None`.
+  - **Camada `ui/widgets/` como lugar do que é compartilhado**: `modais.py` (abertura de modal), `tabelas.py` (repopulação sem célula empilhada, com a seleção preservada), `layout_utils.py` (limpar layout **com** `setParent(None)` — sem isso o widget órfão continua pintado na tela), `estilo.py`, `paineis_relatorio.py` e `filtro_periodo_operador.py`.
+  - **Tema alcança a tela inteira**: 20 cores que ficavam congeladas no tema do boot saíram do `setStyleSheet` e foram para o QSS global (`ui/theme/qss_app.py`), que é a única fonte de cor.
+  - **`tests/ui/`**: a camada de UI, que não tinha nenhum teste, passou a ter 18 arquivos — incluindo a `MainWindow`, que compõe todas as outras telas.
+  - **Telas que rolam em vez de espremer**: `configuracoes_view.py` ganhou `QScrollArea` (Fase 7). Um `QVBoxLayout` sem rolagem, quando o conteúdo passa da altura da página, encolhe os filhos abaixo do tamanho natural — na tela de 768px da máquina do food truck os botões de Senhas e Acesso ficavam sem rótulo. Travado por `tests/ui/test_telas_cabem_na_tela.py`.
+  - **Bancadas em `tools/`** (sem dependência nova, fora de `src/`, não entram no `.exe`): `medir_memoria.py`, `comparar_telas.py` (paridade visual, 11 telas × 24 estados) e `comparar_cupons.py` (paridade da impressão ESC/POS, 6 documentos). Foi a paridade visual contra o código de antes da remasterização que provou que as 13 correções de UI chegaram à tela — e que achou a única regressão da faxina.
+  Suíte em **800 testes, 0 `xfail`, 100% verde**.
