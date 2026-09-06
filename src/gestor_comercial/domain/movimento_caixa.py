@@ -16,8 +16,8 @@ class MovimentoCaixa(Base):
     valor: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     descricao: Mapped[str | None] = mapped_column(String(500))
     registrado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    caixa_id: Mapped[int] = mapped_column(ForeignKey("caixas.id"), nullable=False)
-    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False)
+    caixa_id: Mapped[int] = mapped_column(ForeignKey("caixas.id"), nullable=False, index=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False, index=True)
 
     caixa: Mapped["Caixa"] = relationship(back_populates="movimentos")
     usuario: Mapped["Usuario"] = relationship(back_populates="movimentos_caixa")

@@ -21,9 +21,9 @@ class ItemComanda(Base):
     # acréscimo (§3.12), que imprime só o que é novo, da 2ª via, que repete
     # a comanda inteira e não mexe nesta coluna.
     impresso_em: Mapped[datetime | None] = mapped_column(DateTime)
-    comanda_id: Mapped[int] = mapped_column(ForeignKey("comandas.id"), nullable=False)
-    produto_id: Mapped[int] = mapped_column(ForeignKey("produtos.id"), nullable=False)
-    cancelado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+    comanda_id: Mapped[int] = mapped_column(ForeignKey("comandas.id"), nullable=False, index=True)
+    produto_id: Mapped[int] = mapped_column(ForeignKey("produtos.id"), nullable=False, index=True)
+    cancelado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"), index=True)
 
     comanda: Mapped["Comanda"] = relationship(back_populates="itens")
     produto: Mapped["Produto"] = relationship(back_populates="itens_comanda")

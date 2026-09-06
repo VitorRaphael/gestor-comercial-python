@@ -25,11 +25,11 @@ class Comanda(Base):
     fechada_em: Mapped[datetime | None] = mapped_column(DateTime)
     cancelada_em: Mapped[datetime | None] = mapped_column(DateTime)
     motivo_cancelamento: Mapped[str | None] = mapped_column(String(500))
-    mesa_id: Mapped[int | None] = mapped_column(ForeignKey("mesas.id"))
-    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False)
-    cancelado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
-    atendente_id: Mapped[int | None] = mapped_column(ForeignKey("funcionarios.id"))
-    caixa_id: Mapped[int] = mapped_column(ForeignKey("caixas.id"), nullable=False)
+    mesa_id: Mapped[int | None] = mapped_column(ForeignKey("mesas.id"), index=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), nullable=False, index=True)
+    cancelado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"), index=True)
+    atendente_id: Mapped[int | None] = mapped_column(ForeignKey("funcionarios.id"), index=True)
+    caixa_id: Mapped[int] = mapped_column(ForeignKey("caixas.id"), nullable=False, index=True)
 
     mesa: Mapped["Mesa | None"] = relationship(back_populates="comandas")
     usuario: Mapped["Usuario"] = relationship(

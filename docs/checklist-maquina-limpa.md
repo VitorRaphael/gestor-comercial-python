@@ -35,6 +35,10 @@
 - [ ] Fechar o app
 - [ ] Abrir `%USERPROFILE%\.gestor_comercial\` no Explorer
 - [ ] Confirmar que existe `gestor_comercial.db` e que o tamanho é > 0 KB
+- [ ] Confirmar que `gestor_comercial.db-wal` **não existe ou está com 0 KB**
+      com o app fechado — é o `wal_checkpoint(TRUNCATE)` do encerramento
+      fazendo o trabalho dele (ver `repository/backup.py`). Se estiver com
+      tamanho depois de fechar o app, o checkpoint não rodou: anotar
 - [ ] (opcional) Reabrir o `.exe` uma segunda vez — deve subir mais rápido
       (não recria nada) e sem erro de "migration já aplicada"
 
@@ -45,6 +49,11 @@
 - [ ] Fechar a comanda com um pagamento (dinheiro, com troco)
 - [ ] Registrar uma sangria/reforço no Caixa
 - [ ] Fechar o Caixa no fim
+- [ ] Conferir que apareceu um arquivo em
+      `%USERPROFILE%\.gestor_comercial\backups\gestor_backup_*.db` — o backup
+      automático do fechamento
+- [ ] Em **Configurações → Cópia de Segurança**, clicar em "Gerar cópia agora"
+      e conferir que o caminho aparece na tela (é o backup que vai pro pendrive)
 - [ ] Testar 1 impressão com impressora tipo **ARQUIVO** (ver
       `docs/arquitetura.md` — o cupom deve virar um `.txt` legível)
 

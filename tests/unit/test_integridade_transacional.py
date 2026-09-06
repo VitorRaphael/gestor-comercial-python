@@ -115,7 +115,7 @@ def test_app_segue_utilizavel_apos_falha_de_regra_sem_rollback_manual(uow, carda
 
 
 def test_chave_estrangeira_e_aplicada_pelo_banco(uow):
-    """As 38 `ForeignKey` do `domain/` precisam valer de verdade — §3.5.
+    """As 20 `ForeignKey` do `domain/` precisam valer de verdade — §3.5.
 
     O SQLite nasce com `PRAGMA foreign_keys` **desligado**, e a configuração
     vale por conexão (não fica gravada no arquivo). Sem o listener de

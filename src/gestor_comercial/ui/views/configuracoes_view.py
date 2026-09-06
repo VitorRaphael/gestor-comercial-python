@@ -1,6 +1,6 @@
-"""Tela de Configurações: preferências gerais do app + Senhas e Acesso.
+"""Tela de Configurações: preferências gerais do app, Senhas e Acesso, backup.
 
-Hoje tem duas seções: "Selecionar Tema" (claro/escuro, que antes vivia
+Hoje tem três seções: "Selecionar Tema" (claro/escuro, que antes vivia
 duplicado na tela de Login e no rodapé da sidebar — ver `ThemeController`) e
 "Senhas e Acesso" (§3.13), o módulo de segredos operacionais da loja — cascata
 de 3 níveis (Senha de Login, Senha Operacional/Caixa, Senha Master/Dono) e
@@ -10,6 +10,11 @@ aceita duas credenciais alternativas (Nível 2 OU Nível 3): por isso
 `_alterar_senha_login` não passa um rótulo fixo de credencial, e sim chama
 `LojaConfigService.alterar_senha_login`, que já faz essa checagem "ou" —
 `_AlterarSegredoDialog` só coleta os dois valores, sem saber qual regra vale.
+
+A terceira é "Cópia de Segurança": gera um backup do banco sob demanda, além
+do automático que roda a cada fechamento de caixa. Existe porque, com
+`journal_mode=WAL`, copiar o arquivo do banco à mão com o programa aberto deixa
+as últimas vendas para trás — ver `repository/backup.py`.
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gestor_comercial.repository import backup
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
@@ -48,6 +54,9 @@ class ConfiguracoesView(QWidget):
     def __init__(self, auth_service: AuthService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._loja_config: LojaConfigService = auth_service.loja_config
+        # A Session do app, e não o engine global do módulo `base`: mantém o
+        # backup preso ao mesmo banco que a tela está usando.
+        self._sessao = auth_service.uow.session
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 12, 0, 0)
@@ -76,6 +85,8 @@ class ConfiguracoesView(QWidget):
         layout.addWidget(self._montar_card_tema())
         layout.addSpacing(20)
         layout.addWidget(self._montar_card_senhas())
+        layout.addSpacing(20)
+        layout.addWidget(self._montar_card_backup())
 
         layout.addStretch()
 
@@ -132,6 +143,85 @@ class ConfiguracoesView(QWidget):
         cartao_layout.addWidget(pilula)
         bloco_layout.addWidget(cartao)
         return bloco
+
+    # ------------------------------------------------------------------
+    # Seção "Cópia de Segurança"
+    # ------------------------------------------------------------------
+
+    def _montar_card_backup(self) -> QWidget:
+        """Backup sob demanda, além do automático de cada fechamento de caixa.
+
+        O texto da tela diz explicitamente para NÃO copiar o arquivo do banco
+        com o programa aberto: com `journal_mode=WAL` isso deixa as últimas
+        vendas para trás, e é o tipo de erro que só aparece no dia em que o
+        backup for necessário. O botão existe para haver um caminho certo,
+        óbvio, na tela — ver `repository/backup.py`.
+        """
+        bloco = QWidget()
+        bloco_layout = QVBoxLayout(bloco)
+        bloco_layout.setContentsMargins(0, 0, 0, 0)
+        bloco_layout.setSpacing(10)
+
+        secao_titulo = QLabel("CÓPIA DE SEGURANÇA")
+        secao_titulo.setObjectName("configSecaoTitulo")
+        bloco_layout.addWidget(secao_titulo)
+
+        cartao = QFrame()
+        cartao.setObjectName("configCard")
+        cartao_layout = QVBoxLayout(cartao)
+        cartao_layout.setContentsMargins(20, 20, 20, 20)
+        cartao_layout.setSpacing(4)
+
+        descricao = QLabel(
+            "O sistema já guarda uma cópia sozinho a cada fechamento de caixa. "
+            "Use o botão para gerar uma agora — antes de mexer no cardápio, ou "
+            "para levar num pendrive.\n\n"
+            "Copie sempre o arquivo gerado aqui, nunca o banco direto da pasta "
+            "com o programa aberto: só a cópia gerada aqui vem completa."
+        )
+        descricao.setProperty("variante", "fraco")
+        descricao.setWordWrap(True)
+        cartao_layout.addWidget(descricao)
+        cartao_layout.addSpacing(12)
+
+        linha = QHBoxLayout()
+        linha.setSpacing(10)
+        coluna_texto = QVBoxLayout()
+        coluna_texto.setSpacing(2)
+        coluna_texto.addWidget(QLabel("Última cópia gerada"))
+        self._valor_backup = QLabel("—")
+        self._valor_backup.setProperty("variante", "fraco")
+        self._valor_backup.setWordWrap(True)
+        coluna_texto.addWidget(self._valor_backup)
+        linha.addLayout(coluna_texto)
+        linha.addStretch()
+
+        self._botao_backup = QPushButton("Gerar cópia agora")
+        self._botao_backup.setProperty("variante", "secundario")
+        self._botao_backup.clicked.connect(self._gerar_backup)
+        linha.addWidget(self._botao_backup, alignment=Qt.AlignmentFlag.AlignVCenter)
+        cartao_layout.addLayout(linha)
+
+        bloco_layout.addWidget(cartao)
+        return bloco
+
+    def _gerar_backup(self) -> None:
+        self._label_erro.setText("")
+        try:
+            backup.consolidar_wal(self._sessao)
+            destino = backup.fazer_backup(origem=self._sessao)
+        except Exception as erro:
+            # Disco cheio, pasta sem permissão, pendrive removido: a mensagem
+            # tem que dizer que a cópia NÃO foi feita, senão o dono sai
+            # achando que tem backup e não tem.
+            self._valor_backup.setText("—")
+            self._label_erro.setText(f"Não foi possível gerar a cópia: {erro}")
+            return
+        if destino is None:
+            self._label_erro.setText("Este banco não tem arquivo em disco para copiar.")
+            return
+        backup.limpar_backups_antigos(origem=self._sessao)
+        self._valor_backup.setText(str(destino))
 
     # ------------------------------------------------------------------
     # Seção "Senhas e Acesso" (§3.13)

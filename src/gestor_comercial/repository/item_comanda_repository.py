@@ -1,4 +1,7 @@
+from collections.abc import Iterable
+
 from sqlalchemy import exists, select
+from sqlalchemy.orm import selectinload
 
 from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.item_comanda import ItemComanda
@@ -14,11 +17,44 @@ class ItemComandaRepository(Repository[ItemComanda]):
         Usado pela auditoria de cancelamentos do fechamento (§3.9.2): junta com
         `Comanda` porque `ItemComanda` não guarda `caixa_id` diretamente — quem
         pertence a um caixa é a comanda, o item só herda isso por tabela.
+
+        Traz produto, comanda (com a mesa) e quem autorizou já carregados
+        (§3.6): o único consumidor, `CaixaService.resumo_cancelamentos`, lê
+        exatamente esses quatro campos de cada item para montar o relatório. Sem
+        isto era 1 consulta por campo por item — num mês de Dashboard, centenas.
         """
         stmt = (
             select(ItemComanda)
             .join(Comanda, ItemComanda.comanda_id == Comanda.id)
             .where(Comanda.caixa_id == caixa_id, ItemComanda.cancelado.is_(True))
+            .order_by(ItemComanda.cancelado_em)
+            .options(
+                selectinload(ItemComanda.produto),
+                selectinload(ItemComanda.comanda).selectinload(Comanda.mesa),
+                selectinload(ItemComanda.cancelado_por),
+            )
+        )
+        return list(self.session.scalars(stmt))
+
+    def listar_cancelados_por_caixas(self, caixa_ids: Iterable[int]) -> list[ItemComanda]:
+        """Itens cancelados de VÁRIOS caixas de uma vez, sem carregar relação nenhuma.
+
+        Serve o Dashboard Mensal, que dos cancelamentos só quer dois números do
+        mês: quantos itens e quanto valor. Chamar `listar_cancelados_por_caixa`
+        turno a turno para isso montava o relatório detalhado inteiro — com
+        produto, comanda, mesa e autorizador de cada item — e jogava tudo fora
+        (§3.6). Aqui é uma consulta para o período, e nada além das colunas do
+        próprio item é lido.
+
+        Período sem fechamento nenhum devolve lista vazia sem tocar no banco.
+        """
+        ids = list(caixa_ids)
+        if not ids:
+            return []
+        stmt = (
+            select(ItemComanda)
+            .join(Comanda, ItemComanda.comanda_id == Comanda.id)
+            .where(Comanda.caixa_id.in_(ids), ItemComanda.cancelado.is_(True))
             .order_by(ItemComanda.cancelado_em)
         )
         return list(self.session.scalars(stmt))

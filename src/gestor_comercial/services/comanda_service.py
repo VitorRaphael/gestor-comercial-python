@@ -136,6 +136,19 @@ class ComandaService:
         """Mesas cadastradas, na ordem do número — usado pelo grid da tela inicial."""
         return self.uow.mesas.listar_todos()
 
+    def comandas_em_uso_por_mesa(self) -> dict[int, Comanda]:
+        """A comanda em uso de cada mesa ocupada, indexada por `mesa_id`.
+
+        Companheiro de `listar_mesas` para a grade da tela inicial: com os dois,
+        a tela monta o salão inteiro em duas consultas. Antes ela procurava a
+        comanda aberta dentro de `mesa.comandas`, o que arrasta todo o histórico
+        da mesa do banco para a memória — um custo que cresce a cada semana de
+        operação, na tela mais usada do PDV (`REMASTERIZACAO-V1.md` §3.6).
+
+        Mesa sem comanda em uso simplesmente não aparece no dicionário.
+        """
+        return self.uow.comandas.listar_abertas_por_mesa()
+
     @staticmethod
     def hora_primeiro_envio(itens: list[ItemComanda]) -> datetime | None:
         """Instante em que a cozinha viu o primeiro item da comanda.

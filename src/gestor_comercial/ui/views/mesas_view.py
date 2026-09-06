@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.enums import StatusComanda, StatusMesa
 from gestor_comercial.domain.mesa import Mesa
 from gestor_comercial.services.comanda_service import ComandaService
@@ -358,20 +359,24 @@ class MesasView(QWidget):
     # ------------------------------------------------------------------
 
     def carregar_mesas(self) -> None:
-        self._resumos = [self._montar_resumo(mesa) for mesa in self._comanda_service.listar_mesas()]
+        # As comandas em uso vêm de uma consulta só, para a grade inteira
+        # (§3.6). Procurar a comanda aberta dentro de `mesa.comandas`, mesa a
+        # mesa, arrastava todo o histórico de cada mesa para a memória — numa
+        # tela que recarrega a cada ida e volta da navegação.
+        em_uso = self._comanda_service.comandas_em_uso_por_mesa()
+        self._resumos = [
+            self._montar_resumo(mesa, em_uso.get(mesa.id))
+            for mesa in self._comanda_service.listar_mesas()
+        ]
         self._atualizar_legenda()
         self._atualizar_filtros()
         self._atualizar_painel_direito()
         self._reorganizar_grade()
 
-    def _montar_resumo(self, mesa: Mesa) -> _ResumoMesa:
+    def _montar_resumo(self, mesa: Mesa, comanda_aberta: Comanda | None) -> _ResumoMesa:
         if mesa.status is not StatusMesa.OCUPADA:
             return _ResumoMesa(mesa=mesa, status="livre", valor=Decimal("0"), atendente=None)
 
-        comanda_aberta = next(
-            (c for c in mesa.comandas if c.status in (StatusComanda.ABERTA, StatusComanda.EM_CONFERENCIA)),
-            None,
-        )
         if comanda_aberta is None:
             # Mesa marcada ocupada sem comanda em aberto não deveria acontecer
             # em operação normal, mas não é motivo pra grade quebrar.

@@ -5,9 +5,17 @@
 > **2026-09-06 — Remasterização da V1.0 em andamento.** A faxina final antes da
 > produção (memória, integridade de dados, duplicação, código morto) tem plano
 > próprio em [`REMASTERIZACAO-V1.md`](REMASTERIZACAO-V1.md), com 8 fases e
-> contrato de zero-regressão. **Fase 0 concluída**: a camada `ui/`, que não
-> tinha nenhum teste, agora tem rede (`tests/ui/`). Suíte: 626 passando + 7
-> `xfail` que travam os vazamentos até a Fase 4 corrigi-los.
+> contrato de zero-regressão. Suíte: **658 passando + 7 `xfail`** que travam os
+> vazamentos de memória até a Fase 4 corrigi-los.
+>
+> - **Fase 0** — a camada `ui/`, que não tinha nenhum teste, ganhou rede (`tests/ui/`).
+> - **Fase 1** — `rollback()` passou a existir em produção (`@transacional`) e
+>   `PRAGMA foreign_keys` foi ligado.
+> - **Fase 2** — índices nas 20 FKs, `journal_mode = WAL` + rotina de backup
+>   (`VACUUM INTO` no fechamento de caixa e sob demanda em Configurações), e a
+>   eliminação dos N+1: **Dashboard Mensal caiu de 2.502 para 217 consultas**.
+>   Também consertou uma FK apontando para a tabela errada que só existia no
+>   banco migrado — invisível para a suíte, quebra em produção.
 
 > **2026-08-28 — Refatoração Usuario/Funcionario:** `Funcionario` (Fases 1-3 abaixo)
 > foi cindida em `Usuario` (login/PIN, tela de login) e `Funcionario` (atendimento,
@@ -39,7 +47,7 @@
 - [x] `pagamento_service.py` — registrar pagamento parcial/múltiplo, calcular troco, consumo interno, fechamento automático
 - [x] `caixa_service.py` — abrir/fechar, sangria/reforço/despesa, saldo esperado, total maquininha
 - [x] Testes unitários de cada service (casos de sucesso + regras de bloqueio) — 319 testes, ver `docs/arquitetura.md` §8 para o resumo da revisão adversarial que corrigiu 9 problemas antes de fechar a fase
-- [x] Controle de Turnos: `caixas.numero_sequencial_dia` (indexado por `fechado_em`, virada de madrugada), `aberto_por_id`/`fechado_por_id`, `titulo_fechamento`, `listar_historico`, `totais_por_forma` — 2026-08-26, migration `c3f9a7d21b6e`
+- [x] Controle de Turnos: `caixas.numero_sequencial_dia` (numerado pelo eixo `fechado_em`, não por `aberto_em` — é a regra da virada de madrugada, não um índice de banco), `aberto_por_id`/`fechado_por_id`, `titulo_fechamento`, `listar_historico`, `totais_por_forma` — 2026-08-26, migration `c3f9a7d21b6e`
 
 ## Fase 3 — Interface PySide6 (Views)
 - [x] Extrair paleta de cores/CSS do front-end web (`GESTOR COMERCIAL/.../desktop/style.css`) para `resources/qss/`

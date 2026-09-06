@@ -25,8 +25,8 @@ class Caixa(Base):
     # e nunca muda depois — fechar de novo o mesmo caixa já é bloqueado, então
     # este número é imutável assim que gravado (§ histórico auditável).
     numero_sequencial_dia: Mapped[int | None] = mapped_column(Integer)
-    aberto_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
-    fechado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+    aberto_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"), index=True)
+    fechado_por_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"), index=True)
     # Snapshot do mix de vendas do turno, congelado em `CaixaService.fechar` a
     # partir de `resumo_vendas` — JSON de {produto_nome, quantidade,
     # valor_unitario, valor_total}. Existe para o Dashboard Mensal poder somar

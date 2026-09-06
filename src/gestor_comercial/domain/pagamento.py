@@ -17,8 +17,8 @@ class Pagamento(Base):
     troco: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     valor_quitado: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0, nullable=False)
     registrado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    comanda_id: Mapped[int] = mapped_column(ForeignKey("comandas.id"), nullable=False)
-    funcionario_consumo_id: Mapped[int | None] = mapped_column(ForeignKey("funcionarios.id"))
+    comanda_id: Mapped[int] = mapped_column(ForeignKey("comandas.id"), nullable=False, index=True)
+    funcionario_consumo_id: Mapped[int | None] = mapped_column(ForeignKey("funcionarios.id"), index=True)
 
     comanda: Mapped["Comanda"] = relationship(back_populates="pagamentos")
     funcionario_consumo: Mapped["Funcionario | None"] = relationship(back_populates="pagamentos_consumo")

@@ -2,13 +2,20 @@
 
 Simula o cenário derrubando um processo real com `SIGKILL`/`TerminateProcess`
 no meio de uma escrita — o mais perto que dá de uma queda de energia sem
-literalmente desligar a máquina. O SQLite guarda o estado anterior num
-rollback journal enquanto a transação não é commitada; ao reabrir o arquivo
-numa conexão nova, ele detecta o journal "quente" e desfaz sozinho a escrita
-incompleta. É essa recuperação automática que estes testes provam, não
-alguma lógica nossa — o app não faz nada de especial para ela acontecer,
-só precisa não desligar o `synchronous`/`journal_mode` padrão do SQLite
-nem commitar cedo demais (ver `repository/base.py` e `UnitOfWork.commit`).
+literalmente desligar a máquina. O SQLite guarda o estado anterior num journal
+enquanto a transação não é commitada; ao reabrir o arquivo numa conexão nova,
+ele detecta o journal "quente" e desfaz sozinho a escrita incompleta. É essa
+recuperação automática que estes testes provam, não alguma lógica nossa.
+
+**O que o app precisa fazer para isso continuar valendo:** não commitar cedo
+demais (ver `UnitOfWork.commit`) e **não baixar o `synchronous`**. Desde a
+Fase 2 da Remasterização o `journal_mode` é `WAL` e não mais o `delete` padrão
+(§8) — a recuperação é a mesma, agora a partir do arquivo `-wal`, e estes dois
+testes rodam sob WAL justamente para provar isso. O que **não** pode mudar é o
+`synchronous`: todo guia de WAL sugere baixá-lo para `NORMAL`, e `NORMAL`
+protege contra o app morrer mas **não** contra a energia cair no meio do
+commit — que é exatamente o cenário destes testes e o do food truck. Ver
+`repository/base.py`.
 """
 
 from __future__ import annotations

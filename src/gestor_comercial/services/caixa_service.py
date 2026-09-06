@@ -110,6 +110,19 @@ class ResumoCancelamentos:
 
 
 @dataclass(frozen=True)
+class TotaisCancelamento:
+    """Só os dois números de cancelamento de um período — quantos itens e quanto valor.
+
+    O Dashboard Mensal não mostra o detalhe dos cancelamentos, mostra o
+    totalizador. Existe separado de `ResumoCancelamentos` para o mês poder ser
+    somado sem montar o relatório detalhado de cada turno (§3.6).
+    """
+
+    quantidade: int
+    valor: Decimal
+
+
+@dataclass(frozen=True)
 class LinhaConferenciaPagamento:
     """Uma linha do 'Cabeçalho Financeiro' do comprovante de fechamento.
 
@@ -337,7 +350,37 @@ class CaixaService:
         caixa.resumo_produtos_json = resumo_produtos_json
         self.uow.caixas.salvar(caixa)
         self.uow.commit()
+        self._proteger_o_turno_fechado()
         return caixa
+
+    def _proteger_o_turno_fechado(self) -> None:
+        """Consolida o WAL e guarda uma cópia do banco — DEPOIS do commit.
+
+        O fechamento de caixa é o marco natural do dia: é quando o turno vira
+        histórico e passa a ser a base de todo relatório. Se o banco se perder
+        depois disso, o que volta é o backup daqui.
+
+        Depende de `journal_mode=WAL` (§8): o backup usa `VACUUM INTO`, que
+        grava um `.db` único já consolidado, em vez de uma cópia de arquivo que
+        deixaria o `-wal` para trás. Ver `repository/backup.py`.
+
+        Nada aqui pode derrubar o fechamento — a venda já está commitada e o
+        gerente já contou a gaveta. Disco cheio, pendrive removido ou pasta sem
+        permissão viram silêncio, não uma exceção que faria o `@transacional`
+        desfazer o que já foi gravado.
+
+        Trabalha sobre o banco da PRÓPRIA Session, não sobre o engine global:
+        é o que faz a suíte (banco de memória) não escrever backup nenhum na
+        pasta de dados de verdade.
+        """
+        from gestor_comercial.repository import backup
+
+        backup.consolidar_wal(self.uow.session)
+        try:
+            backup.fazer_backup(origem=self.uow.session)
+            backup.limpar_backups_antigos(origem=self.uow.session)
+        except Exception:
+            return
 
     # ------------------------------------------------------------------
     # Consultas
@@ -395,11 +438,17 @@ class CaixaService:
         return f"{caixa.numero_sequencial_dia}º Fechamento do dia {caixa.fechado_em:%d/%m/%Y}"
 
     def totais_por_forma(self, caixa_id: int) -> dict[FormaPagamento, Decimal]:
-        """Quanto entrou em cada forma de pagamento — só as que tiveram venda."""
+        """Quanto entrou em cada forma de pagamento — só as que tiveram venda.
+
+        Uma consulta só, separada por forma em memória: eram 5 idas ao banco
+        (uma por forma) para ler as mesmas linhas (§3.6). A ordem das chaves
+        continua sendo a de `FormaPagamento`, que é o que o comprovante imprime.
+        """
         self.buscar(caixa_id)
+        pagamentos = self.uow.pagamentos.listar_por_caixa(caixa_id)
         totais: dict[FormaPagamento, Decimal] = {}
         for forma in FormaPagamento:
-            total = self._somar(self._pagamentos(caixa_id, forma))
+            total = self._somar(self._da_forma(pagamentos, forma))
             if total > ZERO:
                 totais[forma] = total
         return totais
@@ -525,9 +574,27 @@ class CaixaService:
     def calcular_saldo_esperado(self, caixa_id: int) -> Decimal:
         """Quanto tem que estar dentro da gaveta agora (§3.9)."""
         caixa = self.buscar(caixa_id)
-        saldo = dinheiro(caixa.valor_abertura)
+        return self._saldo_esperado(
+            caixa,
+            self.uow.movimentos.listar_por_caixa(caixa_id),
+            self._pagamentos(caixa_id, FormaPagamento.DINHEIRO),
+        )
 
-        for movimento in self.uow.movimentos.listar_por_caixa(caixa_id):
+    def _saldo_esperado(
+        self,
+        caixa: Caixa,
+        movimentos: list[MovimentoCaixa],
+        pagamentos_em_dinheiro: list[Pagamento],
+    ) -> Decimal:
+        """A conta da gaveta em cima de listas JÁ carregadas.
+
+        Separado de `calcular_saldo_esperado` só para `resumo` poder reaproveitar
+        os movimentos e os pagamentos que ele mesmo acabou de ler, em vez de
+        buscar tudo de novo (§3.6). A regra é a mesma; quem muda é só a origem
+        dos dados.
+        """
+        saldo = dinheiro(caixa.valor_abertura)
+        for movimento in movimentos:
             if movimento.tipo is TipoMovimento.REFORCO:
                 saldo += dinheiro(movimento.valor)
             elif movimento.tipo in TIPOS_QUE_SAEM_DA_GAVETA:
@@ -540,7 +607,7 @@ class CaixaService:
         # `Pagamento.valor` é o que foi lançado na conta, já líquido: numa conta
         # de 36 paga com nota de 50, valor=36 e troco=14. A gaveta recebeu 50 e
         # devolveu 14, ou seja, +36 — descontar o troco aqui tiraria ele duas vezes.
-        saldo += self._somar(self._pagamentos(caixa_id, FormaPagamento.DINHEIRO))
+        saldo += self._somar(pagamentos_em_dinheiro)
         return dinheiro(saldo)
 
     def calcular_vendas_maquininha(self, caixa_id: int) -> Decimal:
@@ -550,8 +617,15 @@ class CaixaService:
     def resumo(self, caixa_id: int) -> ResumoCaixa:
         caixa = self.buscar(caixa_id)
 
+        # Movimentos e pagamentos do turno lidos UMA vez e separados aqui
+        # (§3.6). Antes, cada linha do resumo abria a sua própria consulta —
+        # movimentos duas vezes, pagamentos em dinheiro duas vezes — e o
+        # Dashboard Mensal repetia isso para cada turno do mês.
+        movimentos = self.uow.movimentos.listar_por_caixa(caixa_id)
+        pagamentos = self.uow.pagamentos.listar_por_caixa(caixa_id)
+
         reforcos = sangrias = despesas = ZERO
-        for movimento in self.uow.movimentos.listar_por_caixa(caixa_id):
+        for movimento in movimentos:
             if movimento.tipo is TipoMovimento.REFORCO:
                 reforcos += dinheiro(movimento.valor)
             elif movimento.tipo is TipoMovimento.SANGRIA:
@@ -559,6 +633,7 @@ class CaixaService:
             elif movimento.tipo is TipoMovimento.DESPESA:
                 despesas += dinheiro(movimento.valor)
 
+        em_dinheiro = self._da_forma(pagamentos, FormaPagamento.DINHEIRO)
         valor_contado_dinheiro = (
             None if caixa.valor_contado_dinheiro is None else dinheiro(caixa.valor_contado_dinheiro)
         )
@@ -567,19 +642,19 @@ class CaixaService:
             if caixa.valor_contado_maquininha is None
             else dinheiro(caixa.valor_contado_maquininha)
         )
-        saldo_esperado = self.calcular_saldo_esperado(caixa_id)
-        total_maquininha = self._somar(self._pagamentos(caixa_id, *FORMAS_MAQUININHA))
+        saldo_esperado = self._saldo_esperado(caixa, movimentos, em_dinheiro)
+        total_maquininha = self._somar(self._da_forma(pagamentos, *FORMAS_MAQUININHA))
 
         return ResumoCaixa(
             caixa_id=caixa.id,
             valor_abertura=dinheiro(caixa.valor_abertura),
-            total_dinheiro=self._somar(self._pagamentos(caixa_id, FormaPagamento.DINHEIRO)),
+            total_dinheiro=self._somar(em_dinheiro),
             total_maquininha=total_maquininha,
             # Consumo interno é venda que nunca virou dinheiro na gaveta: fica em
             # linha própria pra explicar a diferença entre o que foi vendido e o
             # que dá pra contar na hora do fechamento.
             total_consumo_interno=self._somar(
-                self._pagamentos(caixa_id, FormaPagamento.CONSUMO_INTERNO)
+                self._da_forma(pagamentos, FormaPagamento.CONSUMO_INTERNO)
             ),
             reforcos=reforcos,
             sangrias=sangrias,
@@ -601,10 +676,8 @@ class CaixaService:
             # que o dashboard financeiro mostra como "COMANDAS" ao lado do
             # saldo esperado. Comandas ainda abertas/em conferência não contam
             # porque não representam venda concluída.
-            quantidade_comandas=sum(
-                1
-                for comanda in self.uow.comandas.listar_por_caixa(caixa_id)
-                if comanda.status is StatusComanda.FECHADA
+            quantidade_comandas=self.uow.comandas.contar_por_caixa_e_status(
+                caixa_id, StatusComanda.FECHADA
             ),
         )
 
@@ -753,6 +826,22 @@ class CaixaService:
             detalhado=detalhado,
         )
 
+    def totais_de_cancelamento(self, caixa_ids: Iterable[int]) -> TotaisCancelamento:
+        """Quantos itens e quanto valor foram cancelados no conjunto de turnos.
+
+        Mesma conta que `resumo_cancelamentos` faz para o totalizador, só que
+        para vários caixas de uma vez e sem montar as listas por produto e
+        detalhada — que o Dashboard Mensal não usa (§3.6). Os valores batem
+        exatamente: cada item é arredondado individualmente, como lá, e somar
+        parcelas já com 2 casas não introduz arredondamento nenhum.
+        """
+        quantidade = 0
+        valor = ZERO
+        for item in self.uow.itens.listar_cancelados_por_caixas(caixa_ids):
+            quantidade += item.quantidade
+            valor += dinheiro(dinheiro(item.preco_unit_congelado) * item.quantidade)
+        return TotaisCancelamento(quantidade=quantidade, valor=dinheiro(valor))
+
     # ------------------------------------------------------------------
     # Dashboard Consolidado Mensal
     # ------------------------------------------------------------------
@@ -762,7 +851,7 @@ class CaixaService:
         fechamentos já registrados.
 
         Financeiro e cancelamentos vêm de `resumo`/`totais_por_forma` (tabelas
-        `Caixa`/`Pagamento`/`MovimentoCaixa`) e `resumo_cancelamentos`. O
+        `Caixa`/`Pagamento`/`MovimentoCaixa`) e `totais_de_cancelamento`. O
         ranking de produtos é o único que tocaria `item_comanda` — e por isso
         lê exclusivamente `Caixa.resumo_produtos_json`, o snapshot congelado
         por `fechar()`: nunca reabre a tabela de itens vendidos aqui. Um
@@ -778,8 +867,8 @@ class CaixaService:
         # `totais_por_forma` (usado no comprovante de um único caixa), que
         # omite de propósito as formas sem movimento.
         por_forma: dict[FormaPagamento, Decimal] = {forma: ZERO for forma in FormaPagamento}
-        cancelamentos_qtd = 0
-        cancelamentos_valor = ZERO
+        # Cancelamentos do mês inteiro numa consulta só, fora do laço (§3.6).
+        cancelamentos = self.totais_de_cancelamento(caixa.id for caixa in caixas)
         ranking: dict[str, ItemRankingMensal] = {}
         comandas_pagas = 0
 
@@ -789,10 +878,6 @@ class CaixaService:
 
             for forma, valor in self.totais_por_forma(caixa.id).items():
                 por_forma[forma] = por_forma.get(forma, ZERO) + valor
-
-            cancelamentos = self.resumo_cancelamentos(caixa.id)
-            cancelamentos_qtd += cancelamentos.quantidade_total
-            cancelamentos_valor += cancelamentos.valor_total
 
             for vendido in _desserializar_resumo_produtos(caixa.resumo_produtos_json):
                 atual = ranking.get(vendido.produto_nome)
@@ -805,11 +890,9 @@ class CaixaService:
                         valor_total=dinheiro(atual.valor_total + vendido.valor_total),
                     )
 
-            comandas_pagas += sum(
-                1
-                for comanda in self.uow.comandas.listar_por_caixa(caixa.id)
-                if comanda.status is StatusComanda.FECHADA
-            )
+            # `resumo` já contou as comandas fechadas do turno; contar de novo
+            # aqui era uma consulta idêntica por turno do mês (§3.6).
+            comandas_pagas += resumo.quantidade_comandas
 
         faturamento = dinheiro(faturamento)
         formas_pagamento = [
@@ -831,8 +914,8 @@ class CaixaService:
             formas_pagamento=formas_pagamento,
             turnos_fechados=len(caixas),
             ticket_medio=ticket_medio,
-            cancelamentos_quantidade=cancelamentos_qtd,
-            cancelamentos_valor=dinheiro(cancelamentos_valor),
+            cancelamentos_quantidade=cancelamentos.quantidade,
+            cancelamentos_valor=cancelamentos.valor,
             ranking_produtos=ranking_produtos,
         )
 
@@ -923,8 +1006,8 @@ class CaixaService:
         diferenca_acumulada = ZERO
         diferenca_valida = bool(ids)
 
-        for caixa_id in ids:
-            gaveta = self.fechamento_da_gaveta(caixa_id)
+        gavetas = [self.fechamento_da_gaveta(caixa_id) for caixa_id in ids]
+        for gaveta in gavetas:
             total_faturado += gaveta.total_faturado
             saldo_apurado += gaveta.saldo_apurado
             if gaveta.diferenca is None:
@@ -935,7 +1018,9 @@ class CaixaService:
         if not ids:
             identificacao = "Nenhum turno fechado no período"
         elif len(ids) == 1:
-            identificacao = self.fechamento_da_gaveta(ids[0]).identificacao
+            # Reaproveita a gaveta que o laço acabou de montar: recalculá-la
+            # aqui refazia o `resumo()` inteiro do turno de graça (§3.6).
+            identificacao = gavetas[0].identificacao
         else:
             identificacao = f"{len(ids)} turnos fechados no período"
 
@@ -959,11 +1044,14 @@ class CaixaService:
         "faturado" usada em `resumo`/`_faturamento_total_de`.
         """
         totais: dict[str, Decimal] = {}
-        for caixa_id in caixa_ids:
-            for pagamento in self.uow.pagamentos.listar_por_caixa(caixa_id):
-                atendente = pagamento.comanda.atendente
-                nome = atendente.nome if atendente is not None else "Balcão"
-                totais[nome] = totais.get(nome, ZERO) + dinheiro(pagamento.valor)
+        # Uma consulta para o período inteiro, com comanda e atendente já
+        # carregados (§3.6). Antes era um turno por vez, e o ORM ia buscar a
+        # comanda de cada pagamento sob demanda: só esta seção respondia por
+        # mais de mil consultas num mês cheio.
+        for pagamento in self.uow.pagamentos.listar_por_caixas_com_atendente(caixa_ids):
+            atendente = pagamento.comanda.atendente
+            nome = atendente.nome if atendente is not None else "Balcão"
+            totais[nome] = totais.get(nome, ZERO) + dinheiro(pagamento.valor)
 
         faturamento_total = dinheiro(sum(totais.values(), ZERO))
         itens = [
@@ -990,6 +1078,17 @@ class CaixaService:
 
     def _pagamentos(self, caixa_id: int, *formas: FormaPagamento) -> list[Pagamento]:
         return self.uow.pagamentos.listar_por_caixa(caixa_id, formas=list(formas))
+
+    @staticmethod
+    def _da_forma(pagamentos: list[Pagamento], *formas: FormaPagamento) -> list[Pagamento]:
+        """Filtra em memória a mesma lista que `_pagamentos` filtraria no banco.
+
+        Para quem já tem os pagamentos do turno na mão, separar por forma aqui
+        custa nada e economiza uma ida ao banco por forma (§3.6). A ordem é a
+        mesma da consulta original (`Pagamento.id`), porque a lista de entrada
+        já vem ordenada assim.
+        """
+        return [pagamento for pagamento in pagamentos if pagamento.forma in formas]
 
     @staticmethod
     def _somar(pagamentos: Iterable[Pagamento]) -> Decimal:

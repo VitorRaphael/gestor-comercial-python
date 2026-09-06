@@ -1,7 +1,7 @@
 ---
 project: gestor-comercial-python
 domain: PDV desktop offline (food truck do pai do Vitor)
-status: Fase 5 em andamento (Empacotamento PyInstaller) — build.spec validado localmente + resiliência a queda de energia automatizada, 489 testes verdes; falta testar em máquina limpa de verdade
+status: Remasterização da V1 em andamento (Fases 0-2 concluídas em 2026-09-06) — plano em REMASTERIZACAO-V1.md; 658 testes verdes + 7 xfail que travam vazamentos de memória até a Fase 4. Fase 5 (Empacotamento) permanece aberta: falta testar o .exe em máquina limpa de verdade
 local: C:\Vitor Raphael\Códigos\Gestor Comercial Python
 repo: https://github.com/VitorRaphael/gestor-comercial-python
 ---

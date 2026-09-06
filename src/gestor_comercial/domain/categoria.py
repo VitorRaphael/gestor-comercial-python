@@ -10,7 +10,7 @@ class Categoria(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     nome: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    impressora_id: Mapped[int | None] = mapped_column(ForeignKey("impressoras.id"))
+    impressora_id: Mapped[int | None] = mapped_column(ForeignKey("impressoras.id"), index=True)
 
     impressora: Mapped["Impressora | None"] = relationship(back_populates="categorias")
     produtos: Mapped[list["Produto"]] = relationship(back_populates="categoria")

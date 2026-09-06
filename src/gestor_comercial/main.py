@@ -121,7 +121,18 @@ def main() -> int:
         )
         janela.showMaximized()
 
-        return app.exec()
+        codigo = app.exec()
+
+        # Com `journal_mode=WAL` (§8) as últimas transações ficam num arquivo
+        # `-wal` ao lado do banco. O checkpoint aqui empurra tudo para dentro do
+        # `.db` antes de o processo morrer, para o arquivo principal estar
+        # sempre completo com o programa fechado. Depois disto, copiar o `.db`
+        # é seguro. Ver `repository/backup.py`.
+        from gestor_comercial.repository.backup import consolidar_wal
+
+        consolidar_wal(uow.session)
+
+        return codigo
 
 
 if __name__ == "__main__":

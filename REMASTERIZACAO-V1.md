@@ -83,7 +83,7 @@ e o vazamento que o briefing suspeitava **existe mesmo**, só que noutro lugar.
 
 | | |
 |---|---|
-| `PRAGMA foreign_keys` | ✅ **0 — desligado.** As 38 FKs do schema não são aplicadas |
+| `PRAGMA foreign_keys` | ✅ **0 — desligado.** As 20 FKs do schema não são aplicadas |
 | `PRAGMA journal_mode` | ✅ `delete` (não WAL) |
 | Índices declarados | ✅ **zero** — nenhum `index=True`, `Index()`, `__table_args__` ou `create_index` em toda a base |
 | Identity map da Session eterna | ✅ **não cresce** — SQLAlchemy usa referências fracas. *Hipótese inicial refutada por medição* |
@@ -250,7 +250,7 @@ morre (§3.2), cada abertura do "+ Item" deixa presa uma referência forte a N
 **Correção de raiz é o §3.2.** Defesa em profundidade opcional: um
 `@dataclass(frozen=True) ItemBusca` com os 5 campos que a UI realmente usa.
 
-### 3.5 🔴 Zero índices contra 38 chaves estrangeiras
+### 3.5 🔴 Zero índices contra as chaves estrangeiras
 
 **Severidade: ALTA.** ✅ **provado.** É a causa raiz da degradação com o tempo
 — o problema que o briefing chama de "operar semanas sem degradar".
@@ -262,6 +262,20 @@ create_index nas migrations ... 0
 ForeignKey declaradas ......... 38
 ```
 
+> #### ⚠️ Correção de contagem (Fase 2): são **20** FKs, não 38
+> O número 38 veio de contar linhas de `grep -rn "ForeignKey" domain/`, que
+> inclui os `import` e as declarações de `relationship`. A fonte de verdade é o
+> schema: `PRAGMA foreign_key_list` em cada tabela do banco real soma **20**.
+>
+> ```
+> caixas 2 · categorias 1 · comandas 5 · combo_itens 2 · itens_comanda 3
+> movimentos_caixa 2 · pagamentos 2 · produtos 1 · quitacoes_consumo 2
+> ```
+>
+> O achado continua inteiro — **zero índices** era o número que importava, e
+> esse estava certo. Só a contagem de FKs foi corrigida, aqui e nos comentários
+> do código que a repetiam.
+
 O SQLite cria índice sozinho para PK e UNIQUE, **nunca para FK**. Então toda
 consulta quente (`comanda.itens`, `listar_por_caixa`, `pagamento.comanda`,
 `mesa.comandas`) é **varredura de tabela inteira**. Hoje, com o banco pequeno,
@@ -270,6 +284,37 @@ linearmente — e elas rodam dentro de laços N+1 (§3.6).
 
 > Nota: `TODO.md` afirma que `caixas.numero_sequencial_dia` é "indexado por
 > `fechado_em`". **Não é** — não existe índice nenhum no projeto. Corrigir a doc.
+
+> #### 🔴 Descoberto na Fase 2: a Fase 1 ativou uma FK que aponta para a tabela errada
+> ✅ **provado.** `alembic check`, rodado para conferir se a migration de
+> índices batia com o `domain/`, expôs outra coisa: no banco **migrado** —
+> o do food truck — `quitacoes_consumo.autorizado_por_id` referencia
+> `funcionarios`, enquanto o modelo declara `usuarios`. O service grava ali o
+> `id` do **gerente logado**, que é um `Usuario`.
+>
+> A migration `d23a4f888a77` conhecia a anomalia e a documentou como aceitável,
+> com uma justificativa explícita: *"o app nunca liga `PRAGMA foreign_keys` —
+> não há enforcement para corrigir (...) só cosmética de metadado"*. **A Fase 1
+> desta remasterização invalidou essa premissa** ao ligar o pragma. Virou
+> defeito de produção, com duas caras, as duas reproduzidas num banco migrado:
+>
+> - **Quebra.** Gerente com `usuarios.id` maior que o maior `funcionarios.id`
+>   (o caso comum — a loja tem mais logins de turno do que garçons): dar baixa
+>   em consumo interno estoura `IntegrityError: FOREIGN KEY constraint failed`.
+> - **Corrompe em silêncio.** Quando o id existe dos dois lados por
+>   coincidência, grava apontando para o funcionário errado: o código quis
+>   dizer o `Usuario` 2, o banco lê o `Funcionario` 2.
+>
+> E **nada disso aparecia na suíte**: os testes montam o schema com
+> `Base.metadata.create_all`, que segue o `domain/` e já criava a FK certa. Só
+> o banco vindo das migrations tinha a FK errada — exatamente o da máquina do
+> food truck. É o pior tipo de defeito: verde em desenvolvimento, vermelho em
+> produção.
+>
+> Corrigido na migration `c8e3f6a2b910`, que reconstrói a tabela com a FK certa
+> e dá nome às duas (as anônimas do schema inicial eram o que impedia consertar
+> sem reconstruir). Depois dela, `alembic check` fica limpo pela primeira vez no
+> projeto: as 20 FKs do banco migrado e as do `domain/` batem uma a uma.
 
 ### 3.6 🟠 N+1 sistemático nos relatórios e na tela principal
 
@@ -657,21 +702,61 @@ zero regressão. `main()` validado ponta a ponta headless: migrations, seed de
 > O que ficou: `@transacional` em 8 linhas, uma por classe. O diff em `src/` da
 > fase inteira é de **16 linhas de service + 1 módulo novo + 2 blocos**.
 
-### Fase 2 — Núcleo de dados e performance
+### Fase 2 — Núcleo de dados e performance ✅ CONCLUÍDA (2026-09-06)
 
-- [ ] Índices nas 38 FKs, via migration Alembic (§3.5)
-- [ ] **Decidir sobre `journal_mode = WAL`** — medido na Fase 1: `delete`
-      (atual) gasta **1,17 ms** por ação gravada, WAL gasta **0,11 ms** (10x).
-      O ganho relativo é grande, mas 1 ms por lançamento de item é
-      imperceptível para o operador. Contra: o WAL guarda transações recentes
-      num arquivo `-wal` separado, então **copiar só o `.db` para um pendrive
-      com o app aberto perde as últimas vendas** — armadilha real para um dono
-      não-técnico. Depende de como o backup vai ser feito no food truck
-- [ ] Corrigir `TODO.md`, que afirma um índice que não existe
-- [ ] `selectinload`/`joinedload` nos N+1 do §3.6, começando por
-      `mesas_view.py:371` (tela principal) e `caixa_service.resumo_mensal`
-- [ ] Medir queries antes/depois de cada correção e registrar no §7
-- [ ] Suíte verde, **contrato do §4 conferido**
+- [x] **Índices nas 20 FKs** (não 38 — ver correção no §3.5), via `index=True`
+      no `domain/` **e** migration `b4d7e2c91a08`: banco novo (`create_all`, os
+      testes) e banco antigo (migrations, o food truck) convergem para o mesmo
+      schema
+- [x] **`quitacoes_consumo.autorizado_por_id` corrigida** (migration
+      `c8e3f6a2b910`) — a FK que a Fase 1 ativou apontando para a tabela errada,
+      achada por `alembic check`. Ver o quadro no §3.5
+- [x] **`journal_mode = WAL` adotado** — decisão do Vitor, 2026-09-06, ver §8
+- [x] **Rotina de backup** (`repository/backup.py`): `VACUUM INTO` no fechamento
+      de caixa e sob demanda na tela de Configurações, `wal_checkpoint(TRUNCATE)`
+      ao fechar o caixa e ao encerrar o app
+- [x] Corrigir `TODO.md`, que afirmava um índice que não existe
+- [x] `selectinload` + consultas agregadas nos N+1 do §3.6 — grade de mesas,
+      `resumo`, `totais_por_forma`, `resumo_cancelamentos`,
+      `ranking_por_atendente`, `resumo_mensal`, `fechamento_da_gaveta_do_periodo`
+- [x] Medido antes/depois num banco de **3 meses de operação** (3.522 comandas,
+      14.039 itens, 3.510 pagamentos) — números no §7
+- [x] `tests/unit/test_custo_das_consultas.py` (10 testes) +
+      `tests/integration/test_backup.py` (12) + `tests/ui/test_backup_na_tela.py` (3)
+- [x] Suíte verde, **contrato do §4 conferido** — `enums.py`, `dinheiro.py`,
+      `auth_service.py`, `impressao_service.py`, `hardware/` e `pyproject.toml`
+      não têm uma linha alterada
+
+**Resultado:** `658 passed, 7 xfailed` — de `633 passed, 7 xfailed`.
+Dashboard Mensal: **2.502 → 217 consultas** e **960 → 108 ms**.
+
+> #### A prova de que nenhum número mudou
+> Otimização de relatório financeiro que altera um centavo é pior que
+> lentidão. Antes de fechar a fase, cada valor foi recalculado por um caminho
+> **independente** — o jeito antigo, uma consulta por forma de pagamento, item
+> a item — sobre os 3 meses do banco de medição, e comparado com o que os
+> métodos novos devolvem: saldo esperado, totais por forma, contagem de
+> comandas, cancelamentos e ranking por atendente de cada um dos 26 turnos.
+> **Todos idênticos.** O `dinheiro()` permite isso porque somar parcelas já
+> arredondadas a 2 casas não introduz arredondamento novo — foi o que deixou
+> `totais_de_cancelamento` somar o mês inteiro de uma vez sem divergir da
+> auditoria turno a turno.
+
+> #### Testes de custo: por que medem o dobro do volume, e não um número fixo
+> N+1 é um defeito que **volta sozinho**. Basta alguém, meses adiante, ler
+> `pagamento.comanda` dentro de um laço: nada quebra, nenhum teste fica
+> vermelho, o número sobe de novo e só aparece como "o sistema ficou lento"
+> depois de meses de vendas acumuladas.
+>
+> Por isso nenhum dos testes de `test_custo_das_consultas.py` afirma um número
+> mágico de consultas — cada um roda a **mesma operação com o dobro (ou 10x) do
+> volume** e exige que a conta não mude. É a propriedade que interessa: o custo
+> da tela é função do que ela mostra, não de quanto o food truck já vendeu. Um
+> teto fixo envelheceria mal e ninguém saberia se ainda faz sentido.
+>
+> Conferidos contra o código antigo, como manda a lição da Fase 0: **8 dos 10
+> ficam vermelhos** sem as correções desta fase. Os 2 que passam nos dois lados
+> são de conteúdo — travam o que a otimização não podia mudar.
 
 ### Fase 3 — Utilitários compartilhados
 
@@ -726,10 +811,14 @@ zero regressão. `main()` validado ponta a ponta headless: migrations, seed de
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Testes verdes | 620/621 (1 falha) | **633 + 7 xfail, 0 falhas** (Fase 1) |
-| Arquivos de teste de UI | 0 | **3** (Fase 0) |
+| Testes verdes | 620/621 (1 falha) | **658 + 7 xfail, 0 falhas** (Fase 2) |
+| Arquivos de teste de UI | 0 | **4** (Fase 2) |
 | Caminhos de produção com `rollback()` | 0 | **todos** (Fase 1) |
-| `PRAGMA foreign_keys` no app real | 0 | **1** (Fase 1) |
+| `PRAGMA foreign_keys` no app real | 0 | ✅ **1** (Fase 1) |
+| Índices em FK | 0 de 20 | ✅ **20 de 20** (Fase 2) |
+| Desvios entre schema migrado e `domain/` | 1 (`alembic check` falhava) | ✅ **0** (Fase 2) |
+| `journal_mode` | `delete` | ✅ **WAL** (Fase 2) |
+| `synchronous` (resiliência a queda de energia) | `FULL` | ✅ **`FULL`, intocado** |
 | Widgets na tabela do Cardápio após 20 recargas | 138 → **1.338** | _a preencher (Fase 4)_ |
 | RSS do shell montado | 154,5 MB | _a preencher_ |
 | RSS após 300 modais | 195,3 MB (+40,8) | _a preencher_ |
@@ -738,9 +827,33 @@ zero regressão. `main()` validado ponta a ponta headless: migrations, seed de
 | Linhas em `src/` | 17.697 | _a preencher_ |
 | Cópias de `_formatar_reais` | 10 (+2 com sinal) | 1 (+1) (meta) |
 | Cópias de "limpar layout" | 4–6 | 1 (meta) |
-| Índices em FK | 0 de 38 | _a definir_ |
-| `PRAGMA foreign_keys` | 0 | ✅ 1 (Fase 1) |
-| Caminhos com `rollback()` | **0** | ✅ todos (Fase 1) |
+
+### 7.1 Consultas por tela — Fase 2
+
+Medido num banco com **3 meses de operação real** (3.522 comandas, 14.039
+itens, 3.510 pagamentos, 79 turnos), Session nova a cada medição para o cache
+não mascarar nada — é o estado de quem acabou de abrir a tela.
+
+| Tela | Consultas antes | Depois | Tempo antes | Depois |
+|---|---|---|---|---|
+| **Dashboard Mensal** (mês inteiro) | 2.502 | **217** (−91%) | 960 ms | **108 ms** (−89%) |
+| Histórico do mês (lista + gavetas) | 183 | **79** | 127 ms | **28 ms** |
+| **Tela de Mesas** (grade principal) | 26 | **16** | 22 ms | **4 ms** (−81%) |
+| Cancelamentos de 1 turno | 26 | **7** | 8,0 ms | **3,4 ms** |
+| Resumo de 1 turno | 15 | **7** | 9,1 ms | **2,2 ms** |
+
+O pior ofensor isolado era `ranking_por_atendente`: **1.326 consultas** para
+um mês, porque buscava a comanda de cada pagamento sob demanda. Passou a **6**.
+
+**Escrita** (o outro lado da balança — índice custa no INSERT, WAL devolve):
+
+| | `delete` + sem índice | `delete` + 20 índices | **WAL + 20 índices** |
+|---|---|---|---|
+| Por item lançado no balcão | 1,17 ms | 3,35 ms | **1,11 ms** |
+
+Ou seja: os índices **triplicaram** o custo de gravação, e o WAL devolveu tudo.
+A combinação final grava mais rápido que o ponto de partida, com todas as
+leituras muito mais baratas.
 
 ---
 
@@ -758,6 +871,13 @@ zero regressão. `main()` validado ponta a ponta headless: migrations, seed de
 | 2026-09-06 | Rollback via `@transacional`, disparado **só se houver alteração pendente** | Rollback em qualquer exceção quebraria a cascata de PIN e a blindagem da impressão, que usam exceção como fluxo normal (§6, Fase 1) |
 | 2026-09-06 | `inspect.getsource` para decorar só métodos que comitam — **descartado** | PyInstaller empacota `.pyc` sem `.py`: funcionaria em dev e falharia no `.exe` |
 | 2026-09-06 | `journal_mode = WAL` adiado para a Fase 2 | 10x mais rápido, mas o ganho absoluto (1 ms por ação) é imperceptível, e WAL cria risco de backup incompleto. Não é correção de integridade |
+| 2026-09-06 | **`journal_mode = WAL` adotado** (Fase 2) — decisão do Vitor, contra a recomendação registrada acima | O argumento decisivo não é velocidade, é **concorrência**: em WAL leitura e escrita deixam de se bloquear, e é isso que o **App Mobile do Atendente** do backlog vai exigir — com journal `delete`, um segundo cliente lendo o banco trava a gravação da venda. Escolher agora evita migrar o banco do food truck em produção depois |
+| 2026-09-06 | Backup por **`VACUUM INTO`**, nunca por cópia de arquivo | É a mitigação que torna o WAL seguro (item acima). O comando grava um `.db` único, completo e desfragmentado a partir do estado consistente (arquivo + WAL) — **não existe `-wal` do backup para esquecer de copiar junto**. Cópia crua do `.db` com o app aberto perde as últimas vendas, e foi reproduzido em teste (`test_backup_leva_a_venda_que_ainda_esta_no_wal`) |
+| 2026-09-06 | `wal_checkpoint(TRUNCATE)` no fechamento de caixa e no encerramento do app | Mantém o `.db` sempre completo no disco com o programa fechado. Verificado ponta a ponta: o `-wal` fica com **0 bytes** depois que o app encerra |
+| 2026-09-06 | **`synchronous` NÃO baixado para `NORMAL`** | Toda documentação de WAL sugere isso, e é armadilha aqui: `NORMAL` protege contra o app morrer, **não** contra a energia cair no meio do commit — que é o cenário do food truck e o que `test_resiliencia_queda_energia.py` prova. Fica em `FULL`, e há um teste travando isso |
+| 2026-09-06 | Rotina de backup entra apesar da regra "nenhuma funcionalidade nova" | Exceção deliberada, pedida pelo Vitor: é ela que torna segura a decisão do WAL, tomada dentro desta remasterização. Sem ela, a fase entregaria um risco novo de perda de dados em vez de remover um |
+| 2026-09-06 | FK de `quitacoes_consumo` corrigida na Fase 2, fora do escopo original | A Fase 1 ligou o `PRAGMA foreign_keys` e com isso **ativou** um desvio de schema que dormia desde `d23a4f888a77`. Fechar a fase sabendo disso seria entregar uma quebra de produção invisível para a suíte (§3.5) |
+| 2026-09-06 | Contagem de FKs corrigida de 38 para 20 | `PRAGMA foreign_key_list` sobre o schema real, em vez de contar linhas de `grep`. O achado ("zero índices") continua inteiro; só o denominador estava errado |
 | 2026-09-06 | 5 `.md` de refatoração → `docs/historico/` com README de aviso | Documentação que contradiz o código convida a uma "limpeza" que quebra o app; arquivar preserva o porquê das decisões sem poluir a raiz (§3.12) |
 
 ### Decisões pendentes do Vitor
@@ -767,3 +887,6 @@ zero regressão. `main()` validado ponta a ponta headless: migrations, seed de
    aparência de 9 telas.
 2. **`EstoqueView`** (§3.11) — *bloqueia a Fase 5*: remover até a fase de
    Estoque começar, ou manter como placeholder consciente e documentado?
+
+~~3. `journal_mode = WAL`~~ — **decidido em 2026-09-06**: adotado, com backup
+por `VACUUM INTO` e checkpoint no fechamento. Ver §8.

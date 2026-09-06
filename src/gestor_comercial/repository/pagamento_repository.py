@@ -1,6 +1,7 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.enums import FormaPagamento
@@ -48,3 +49,27 @@ class PagamentoRepository(Repository[Pagamento]):
         if formas is not None:
             stmt = stmt.where(Pagamento.forma.in_(list(formas)))
         return list(self.session.scalars(stmt.order_by(Pagamento.id)))
+
+    def listar_por_caixas_com_atendente(self, caixa_ids: Iterable[int]) -> list[Pagamento]:
+        """Pagamentos de VÁRIOS caixas de uma vez, com comanda e atendente carregados.
+
+        Existe para a "Performance por Atendente" do Dashboard Mensal, que
+        agrupa por `pagamento.comanda.atendente`. Percorrendo caixa a caixa e
+        deixando o ORM buscar a comanda de cada pagamento sob demanda, um mês
+        virava mais de mil consultas (§3.6). Aqui é uma consulta para todos os
+        turnos do período, mais o `selectinload` das comandas e dos atendentes.
+
+        Lista vazia de caixas devolve lista vazia sem tocar no banco — um mês
+        sem nenhum fechamento é normal, não é caso de erro.
+        """
+        ids = list(caixa_ids)
+        if not ids:
+            return []
+        stmt = (
+            select(Pagamento)
+            .join(Comanda, Pagamento.comanda_id == Comanda.id)
+            .where(Comanda.caixa_id.in_(ids))
+            .order_by(Pagamento.id)
+            .options(selectinload(Pagamento.comanda).selectinload(Comanda.atendente))
+        )
+        return list(self.session.scalars(stmt))
