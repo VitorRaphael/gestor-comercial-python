@@ -18,10 +18,12 @@ da tela "Impressoras".
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from decimal import Decimal, InvalidOperation
 
-from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtGui import QKeySequence, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -61,6 +63,9 @@ from gestor_comercial.services.imagem_service import processar_imagem_produto, r
 from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
+from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
+from gestor_comercial.ui.widgets.modais import descartar_modal, executar_modal
+from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
 from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
 
 _COLUNAS_PRODUTOS = ["Produto", "Tipo", "Preço", "Custo", "Margem", "Status"]
@@ -69,13 +74,6 @@ _COLUNAS_COMPONENTES = ["Componente", "Quantidade"]
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
 _ID_CATEGORIA = Qt.ItemDataRole.UserRole
-
-_COR_MARGEM_TRILHO = "rgba(255, 255, 255, 0.08)"
-
-
-def _cor_margem_preenchida() -> str:
-    return ThemeController.instancia().tokens_atuais["sucesso"]
-
 
 def _por_nome(itens: list) -> list:
     """Ordem alfabética (A-Z) case-insensitive, como pedido na tela."""
@@ -106,9 +104,7 @@ class CardapioView(QWidget):
         layout.addLayout(self._criar_grade_kpis())
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet(
-            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
-        )
+        self._label_erro.setObjectName("labelErro")
         layout.addWidget(self._label_erro)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -180,7 +176,7 @@ class CardapioView(QWidget):
             grade.addWidget(card)
         return grade
 
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802 - override Qt
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802 - override Qt
         if event.type() == QEvent.Type.FocusIn:
             if obj is self._painel_categorias.lista:
                 self._contexto = "categoria"
@@ -294,16 +290,16 @@ class _BarraMargem(QWidget):
         super().__init__(parent)
         self.setFixedHeight(self._ALTURA)
         self._trilho = QFrame(self)
-        self._trilho.setStyleSheet(f"background: {_COR_MARGEM_TRILHO}; border-radius: 3px;")
+        self._trilho.setObjectName("margemTrilho")
         self._preenchida = QFrame(self)
-        self._preenchida.setStyleSheet(f"background: {_cor_margem_preenchida()}; border-radius: 3px;")
+        self._preenchida.setObjectName("margemPreenchida")
         self._percentual = 0.0
 
     def definir_percentual(self, percentual: float) -> None:
         self._percentual = max(0.0, min(100.0, percentual))
         self._reposicionar()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802 (override Qt)
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (override Qt)
         super().resizeEvent(event)
         self._reposicionar()
 
@@ -319,7 +315,12 @@ class _CategoriasPainel(QFrame):
     categoria_selecionada = Signal(object)  # Categoria | None
     alterado = Signal()
 
-    def __init__(self, service: CardapioService, mostrar_erro, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        service: CardapioService,
+        mostrar_erro: Callable[[str], None],
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self._service = service
@@ -440,7 +441,7 @@ class _CategoriasPainel(QFrame):
 
     def criar(self) -> None:
         modal = _CategoriaDialog("Nova categoria", self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         self._mostrar_erro("")
         try:
@@ -456,7 +457,7 @@ class _CategoriasPainel(QFrame):
         if categoria is None:
             return
         modal = _CategoriaDialog("Editar categoria", self, nome_inicial=categoria.nome)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         self._mostrar_erro("")
         try:
@@ -499,7 +500,7 @@ class _CategoriasPainel(QFrame):
         botao_confirmar.setProperty("variante", "perigo")
         caixa.setDefaultButton(botao_cancelar)
         caixa.setEscapeButton(botao_cancelar)
-        caixa.exec()
+        executar_modal(caixa)
         if caixa.clickedButton() is not botao_confirmar:
             return
         self._mostrar_erro("")
@@ -519,7 +520,12 @@ class _ProdutosPainel(QFrame):
     alterado = Signal()
     produto_selecionado = Signal(object)  # Produto | None
 
-    def __init__(self, service: CardapioService, mostrar_erro, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        service: CardapioService,
+        mostrar_erro: Callable[[str], None],
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self._service = service
@@ -620,14 +626,16 @@ class _ProdutosPainel(QFrame):
                 [p for p in self._service.listar_produtos() if p.categoria_id == categoria.id]
             )
 
-        self.tabela.setRowCount(len(self._produtos))
+        limpar_tabela(self.tabela, linhas=len(self._produtos), preservar_selecao=True)
         for linha, produto in enumerate(self._produtos):
-            self.tabela.setCellWidget(linha, 0, _criar_celula_produto(produto))
-            self.tabela.setCellWidget(linha, 1, _criar_badge_tipo(produto.is_combo))
+            definir_celula(self.tabela, linha, 0, _criar_celula_produto(produto))
+            definir_celula(self.tabela, linha, 1, _criar_badge_tipo(produto.is_combo))
             self.tabela.setItem(linha, 2, QTableWidgetItem(formatar_reais(produto.preco)))
             self.tabela.setItem(linha, 3, QTableWidgetItem(formatar_reais(produto.custo)))
-            self.tabela.setCellWidget(linha, 4, _criar_celula_margem(_margem_percentual(produto)))
-            self.tabela.setCellWidget(linha, 5, _criar_badge_status(produto.ativo))
+            definir_celula(
+                self.tabela, linha, 4, _criar_celula_margem(_margem_percentual(produto))
+            )
+            definir_celula(self.tabela, linha, 5, _criar_badge_status(produto.ativo))
 
         self._filtrar(self._campo_busca.text())
         self._emitir_selecao()
@@ -668,21 +676,24 @@ class _ProdutosPainel(QFrame):
         categoria_inicial_id = self._categoria.id if self._categoria else None
         modal = _ProdutoDialog("Novo produto", categorias, self, categoria_id_inicial=categoria_inicial_id)
         self._mostrar_erro("")
-        while modal.exec() == QDialog.DialogCode.Accepted:
-            nome, preco, custo, categoria_id, descricao, imagem_path = modal.resultado()
-            if self._produto_duplicado(nome) and not self._confirmar_duplicidade(nome):
-                continue
-            try:
-                self._service.criar_produto(
-                    nome, preco, categoria_id, custo, descricao, imagem_path=imagem_path
-                )
-            except _ERROS_SERVICE as erro:
-                modal.mostrar_erro_servico(str(erro))
-                continue
-            modal.confirmar_remocao_de_imagem_trocada()
-            self.atualizar()
-            self.alterado.emit()
-            return
+        try:
+            while modal.exec() == QDialog.DialogCode.Accepted:
+                nome, preco, custo, categoria_id, descricao, imagem_path = modal.resultado()
+                if self._produto_duplicado(nome) and not self._confirmar_duplicidade(nome):
+                    continue
+                try:
+                    self._service.criar_produto(
+                        nome, preco, categoria_id, custo, descricao, imagem_path=imagem_path
+                    )
+                except _ERROS_SERVICE as erro:
+                    modal.mostrar_erro_servico(str(erro))
+                    continue
+                modal.confirmar_remocao_de_imagem_trocada()
+                self.atualizar()
+                self.alterado.emit()
+                return
+        finally:
+            descartar_modal(modal)
 
     def editar(self) -> None:
         produto = self.produto_atual()
@@ -702,21 +713,24 @@ class _ProdutosPainel(QFrame):
             nome_produto_inicial=produto.nome,
         )
         self._mostrar_erro("")
-        while modal.exec() == QDialog.DialogCode.Accepted:
-            nome, preco, custo, categoria_id, descricao, imagem_path = modal.resultado()
-            if self._produto_duplicado(nome, ignorar_id=produto.id) and not self._confirmar_duplicidade(nome):
-                continue
-            try:
-                self._service.atualizar_produto(
-                    produto.id, nome, preco, custo, categoria_id, descricao, imagem_path=imagem_path
-                )
-            except _ERROS_SERVICE as erro:
-                modal.mostrar_erro_servico(str(erro))
-                continue
-            modal.confirmar_remocao_de_imagem_trocada()
-            self.atualizar()
-            self.alterado.emit()
-            return
+        try:
+            while modal.exec() == QDialog.DialogCode.Accepted:
+                nome, preco, custo, categoria_id, descricao, imagem_path = modal.resultado()
+                if self._produto_duplicado(nome, ignorar_id=produto.id) and not self._confirmar_duplicidade(nome):
+                    continue
+                try:
+                    self._service.atualizar_produto(
+                        produto.id, nome, preco, custo, categoria_id, descricao, imagem_path=imagem_path
+                    )
+                except _ERROS_SERVICE as erro:
+                    modal.mostrar_erro_servico(str(erro))
+                    continue
+                modal.confirmar_remocao_de_imagem_trocada()
+                self.atualizar()
+                self.alterado.emit()
+                return
+        finally:
+            descartar_modal(modal)
 
     def _produto_duplicado(self, nome: str, *, ignorar_id: int | None = None) -> bool:
         """Compara nomes ignorando maiúsculas/minúsculas e espaços nas pontas.
@@ -750,7 +764,7 @@ class _ProdutosPainel(QFrame):
         # Enter confirma o caminho seguro; só um clique deliberado força a duplicidade.
         caixa.setDefaultButton(botao_voltar)
         caixa.setEscapeButton(botao_voltar)
-        caixa.exec()
+        executar_modal(caixa)
         return caixa.clickedButton() is botao_forcar
 
     def gerenciar_combo(self) -> None:
@@ -760,7 +774,7 @@ class _ProdutosPainel(QFrame):
             return
         candidatos = [p for p in self._service.listar_produtos_ativos() if p.id != produto.id]
         modal = _ComboComponentesDialog(self._service, produto, candidatos, self)
-        modal.exec()
+        executar_modal(modal)
         self._mostrar_erro("")
         self.atualizar()
         self.alterado.emit()
@@ -824,9 +838,7 @@ class _ComboComponentesDialog(QDialog):
         layout = QVBoxLayout(self)
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet(
-            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
-        )
+        self._label_erro.setObjectName("labelErro")
         layout.addWidget(self._label_erro)
 
         self._tabela = QTableWidget(0, len(_COLUNAS_COMPONENTES))
@@ -865,7 +877,7 @@ class _ComboComponentesDialog(QDialog):
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             self._componentes = []
-        self._tabela.setRowCount(len(self._componentes))
+        limpar_tabela(self._tabela, linhas=len(self._componentes), preservar_selecao=True)
         for linha, item in enumerate(self._componentes):
             self._tabela.setItem(linha, 0, QTableWidgetItem(item.produto.nome))
             self._tabela.setItem(linha, 1, QTableWidgetItem(str(item.quantidade)))
@@ -876,7 +888,7 @@ class _ComboComponentesDialog(QDialog):
             self._label_erro.setText("Não há outro produto disponível para virar componente.")
             return
         modal = _ComponenteDialog(candidatos, self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         produto_id, quantidade = modal.resultado()
 
@@ -1282,16 +1294,7 @@ def _criar_badge_tipo(is_combo: bool) -> QWidget:
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     label.setStyleSheet("background: transparent;")
     if is_combo:
-        t = ThemeController.instancia().tokens_atuais
-        label.setStyleSheet(
-            f"background-color: {t['badge_combo_bg']};"
-            f"color: {t['badge_combo_texto']};"
-            "font-weight: 700;"
-            "font-size: 11px;"
-            "border-radius: 4px;"
-            "padding: 3px 10px;"
-            "margin: 0px;"
-        )
+        label.setObjectName("badgeCombo")
     return _celula_centralizada(label)
 
 
@@ -1322,19 +1325,18 @@ def _formatar_campo(valor: Decimal | None) -> str:
 
 def _criar_rotulo_erro() -> QLabel:
     rotulo = QLabel()
-    rotulo.setStyleSheet(f"color: {ThemeController.instancia().tokens_atuais['campo_erro_texto']}; font-size: 11px;")
+    rotulo.setObjectName("campoErroRotulo")
     rotulo.setWordWrap(True)
     rotulo.setVisible(False)
     return rotulo
 
 
 def _marcar_erro(campo: QLineEdit, rotulo: QLabel, mensagem: str) -> None:
-    t = ThemeController.instancia().tokens_atuais
-    campo.setStyleSheet(f"border: 1px solid {t['campo_erro_texto']}; background-color: {t['campo_erro_bg']};")
+    aplicar_propriedade(campo, "erro", True)
     rotulo.setText(mensagem)
     rotulo.setVisible(True)
 
 
 def _limpar_erro(campo: QLineEdit, rotulo: QLabel) -> None:
-    campo.setStyleSheet("")
+    aplicar_propriedade(campo, "erro", False)
     rotulo.setVisible(False)

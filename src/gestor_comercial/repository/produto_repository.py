@@ -15,10 +15,6 @@ class ProdutoRepository(Repository[Produto]):
         stmt = select(Produto).where(Produto.ativo.is_(True)).order_by(Produto.nome)
         return list(self.session.scalars(stmt))
 
-    def listar_por_categoria(self, categoria_id: int) -> list[Produto]:
-        stmt = select(Produto).where(Produto.categoria_id == categoria_id).order_by(Produto.nome)
-        return list(self.session.scalars(stmt))
-
     def existe_com_categoria(self, categoria_id: int) -> bool:
         return bool(self.session.scalar(select(exists().where(Produto.categoria_id == categoria_id))))
 

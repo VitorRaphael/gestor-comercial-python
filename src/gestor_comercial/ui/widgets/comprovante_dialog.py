@@ -8,8 +8,11 @@ manda para `comprovante_fechamento.montar_documento`.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -23,8 +26,8 @@ from PySide6.QtWidgets import (
 )
 
 from gestor_comercial.domain.caixa import Caixa
+from gestor_comercial.services.caixa_service import CaixaService
 from gestor_comercial.services import comprovante_fechamento
-from gestor_comercial.ui.theme import tokens
 
 # Courier New é a fonte monoespaçada padrão do Windows — mesma escolha do
 # `_DriverArquivo` (que só simula em texto puro). Consolas como alternativa
@@ -41,7 +44,7 @@ class ComprovanteFechamentoDialog(QDialog):
         self._texto = texto
         self.setWindowTitle(f"Comprovante — Caixa {caixa.id}")
         self.resize(520, 720)
-        self.setStyleSheet(f"QDialog {{ background: {tokens.SUPERFICIE}; }}")
+        self.setObjectName("comprovanteDialog")
 
         layout = QVBoxLayout(self)
 
@@ -57,23 +60,12 @@ class ComprovanteFechamentoDialog(QDialog):
         fonte.setPointSize(10)
         self._papel.setFont(fonte)
         self._papel.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self._papel.setStyleSheet(
-            f"""
-            QPlainTextEdit {{
-                background: {tokens.BG_ELEVADO};
-                color: {tokens.TEXTO};
-                border: 1px solid {tokens.BORDA};
-                border-radius: {tokens.RAIO}px;
-                padding: 16px;
-                selection-background-color: {tokens.ACENTO};
-            }}
-            """
-        )
+        self._papel.setObjectName("comprovantePapel")
         layout.addWidget(self._papel, 1)
 
         rodape = QHBoxLayout()
         self._label_status = QLabel("")
-        self._label_status.setStyleSheet(f"color: {tokens.TEXTO_FRACO}; font-size: 12px;")
+        self._label_status.setObjectName("comprovanteStatus")
         rodape.addWidget(self._label_status)
         rodape.addStretch()
 
@@ -95,8 +87,6 @@ class ComprovanteFechamentoDialog(QDialog):
         layout.addWidget(botoes)
 
     def _copiar(self) -> None:
-        from PySide6.QtWidgets import QApplication
-
         QApplication.clipboard().setText(self._texto)
         self._label_status.setText("Copiado para a área de transferência.")
 
@@ -116,15 +106,13 @@ class ComprovanteFechamentoDialog(QDialog):
         self._label_status.setText(f"Exportado para {caminho}")
 
 
-def montar_texto_comprovante(caixa_service, caixa: Caixa) -> str:
+def montar_texto_comprovante(caixa_service: CaixaService, caixa: Caixa) -> str:
     """Monta o texto do comprovante de `caixa` a partir do `CaixaService`.
 
     Isolado da classe do modal para poder ser testado (e reaproveitado, se
     algum dia a exportação em lote precisar do mesmo texto) sem instanciar
     um `QDialog`.
     """
-    from datetime import datetime
-
     titulo = None
     if caixa.numero_sequencial_dia is not None and caixa.fechado_em is not None:
         titulo = caixa_service.titulo_fechamento(caixa.id)

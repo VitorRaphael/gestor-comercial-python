@@ -30,6 +30,7 @@ from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.views.dashboard_mensal_view import DashboardMensalView
 from gestor_comercial.ui.views.historico_caixa_view import HistoricoCaixaView
+from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 
 _ABA_HISTORICO = 0
 _ABA_DASHBOARD = 1
@@ -144,11 +145,8 @@ class RelatoriosView(QWidget):
 
     def _selecionar_aba(self, indice: int) -> None:
         self._pilha.setCurrentIndex(indice)
-        self._botao_aba_historico.setProperty("ativo", indice == _ABA_HISTORICO)
-        self._botao_aba_dashboard.setProperty("ativo", indice == _ABA_DASHBOARD)
-        for botao in (self._botao_aba_historico, self._botao_aba_dashboard):
-            botao.style().unpolish(botao)
-            botao.style().polish(botao)
+        aplicar_propriedade(self._botao_aba_historico, "ativo", indice == _ABA_HISTORICO)
+        aplicar_propriedade(self._botao_aba_dashboard, "ativo", indice == _ABA_DASHBOARD)
 
         self._label_titulo.setText(_TITULOS_ABA[indice])
         no_historico = indice == _ABA_HISTORICO

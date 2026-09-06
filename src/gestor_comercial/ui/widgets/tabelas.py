@@ -25,7 +25,9 @@ from __future__ import annotations
 from PySide6.QtWidgets import QTableWidget, QWidget
 
 
-def limpar_tabela(tabela: QTableWidget, *, linhas: int = 0) -> None:
+def limpar_tabela(
+    tabela: QTableWidget, *, linhas: int = 0, preservar_selecao: bool = False
+) -> None:
     """Esvazia a tabela destruindo os widgets de célula e deixa `linhas` linhas.
 
     Substitui o par `setRowCount(0)` / `setRowCount(len(dados))` que as views
@@ -38,7 +40,42 @@ def limpar_tabela(tabela: QTableWidget, *, linhas: int = 0) -> None:
     O `setRowCount(0)` intermediário não é decoração: é ele que descarta os
     `QTableWidgetItem` (esses o Qt destrói sozinho) antes de a tabela voltar ao
     tamanho pedido.
+
+    `preservar_selecao` devolve a linha corrente ao lugar depois de repopular.
+    Não é enfeite: as views chamavam `setRowCount(len(dados))` **sem** zerar
+    antes, e nesse caminho o Qt mantém a linha corrente quando a contagem não
+    encolhe. Passar pelo zero a perderia — e `cardapio_view`/`impressoras_view`
+    leem `currentRow()` logo depois de repopular para decidir quais botões
+    ficam habilitados e qual impressora aparece no painel lateral. Sem esta
+    opção, editar um produto apagaria a seleção dele.
     """
+    if not preservar_selecao:
+        _esvaziar(tabela, linhas)
+        return
+
+    linha_selecionada = tabela.currentRow()
+    coluna_selecionada = max(tabela.currentColumn(), 0)
+
+    # A ida ao zero e a volta emitiriam `itemSelectionChanged`/
+    # `currentCellChanged` no meio do refresh, e os assinantes reagiriam a uma
+    # seleção vazia que nunca existiu para o usuário — `cardapio_view` chegaria
+    # a emitir `produto_selecionado(None)` e a desabilitar os botões do rodapé
+    # antes de repovoar. Bloquear a tabela pelo trecho inteiro deixa o
+    # observável idêntico ao `setRowCount(len(dados))` que havia antes: nenhum
+    # sinal, porque do lado de fora nada mudou. O bloqueio é dos sinais da
+    # tabela; as conexões internas view↔modelo do Qt não passam por ele.
+    bloqueado = tabela.blockSignals(True)
+    try:
+        _esvaziar(tabela, linhas)
+        if linha_selecionada >= 0 and linhas:
+            # Encolheu abaixo da linha selecionada: o `setRowCount(n)` sozinho
+            # grudava na última linha existente em vez de largar a seleção.
+            tabela.setCurrentCell(min(linha_selecionada, linhas - 1), coluna_selecionada)
+    finally:
+        tabela.blockSignals(bloqueado)
+
+
+def _esvaziar(tabela: QTableWidget, linhas: int) -> None:
     for linha in range(tabela.rowCount()):
         for coluna in range(tabela.columnCount()):
             _descartar_celula(tabela, linha, coluna)

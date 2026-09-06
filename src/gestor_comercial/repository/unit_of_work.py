@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import TracebackType
+
 from sqlalchemy.orm import Session
 
 from gestor_comercial.repository.base import SessionLocal
@@ -64,7 +66,12 @@ class UnitOfWork:
     def __enter__(self) -> UnitOfWork:
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         if exc_type is not None:
             self.rollback()
         self.fechar()

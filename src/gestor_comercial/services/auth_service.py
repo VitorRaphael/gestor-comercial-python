@@ -35,7 +35,6 @@ from gestor_comercial.services.exceptions import (
 from gestor_comercial.services.transacao import transacional
 
 TAMANHO_SALT_BYTES = 16
-PIN_MIN_DIGITOS = 4
 PIN_MAX_DIGITOS = 8
 
 # Perfis que passam em `exigir_gerente()`: ADMIN é superset de GERENTE.
@@ -49,8 +48,12 @@ class AuthService:
     def __init__(self, uow: UnitOfWork) -> None:
         self.uow = uow
         self._usuario_logado: Usuario | None = None
-        # Import tardio pra evitar ciclo (loja_config_service não importa
-        # auth_service no nível de módulo, só usa os métodos estáticos).
+        # Import tardio, e é obrigatório: `loja_config_service` importa
+        # `AuthService` NO NÍVEL DE MÓDULO (linha 29 de lá, para os métodos
+        # estáticos de hash), então subir este import para o topo fecha o ciclo
+        # e o app não abre — `ImportError: cannot import name 'AuthService'
+        # from partially initialized module`. Já houve aqui um comentário
+        # dizendo o contrário; ele convidava exatamente a essa "limpeza" (§3.12).
         from gestor_comercial.services.loja_config_service import LojaConfigService
 
         self.loja_config = LojaConfigService(uow)

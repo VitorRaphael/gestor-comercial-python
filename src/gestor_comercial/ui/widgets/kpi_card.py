@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
+from gestor_comercial.ui.widgets.estilo import repolir
+
 _OBJETO_VALOR = {
     "neutro": "relatoriosKpiValor",
     "positivo": "relatoriosKpiValorPositivo",
@@ -42,8 +44,7 @@ class CardKpi(QFrame):
         self._label_valor.setObjectName(_OBJETO_VALOR.get(tom, _OBJETO_VALOR["neutro"]))
         # Reaplica a folha de estilo ao trocar o objectName em runtime — QSS
         # só é reavaliado por seletor de #id na próxima polish/unpolish.
-        self._label_valor.style().unpolish(self._label_valor)
-        self._label_valor.style().polish(self._label_valor)
+        repolir(self._label_valor)
 
     def definir_sub_rotulo(self, texto: str | None) -> None:
         if texto:

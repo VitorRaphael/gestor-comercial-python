@@ -132,3 +132,82 @@ def test_limpar_tabela_vazia_nao_faz_nada(qapp):
     limpar_tabela(tabela)
 
     assert tabela.rowCount() == 0
+
+
+# ----------------------------------------------------------------------------
+# `preservar_selecao` — Fase 5, item 3
+#
+# As views não zeravam a tabela antes de repopular: chamavam
+# `setRowCount(len(dados))` direto, e nesse caminho o Qt **mantém** a linha
+# corrente quando a contagem não encolhe. Passar a limpar de verdade perderia
+# essa seleção, e `cardapio_view`/`impressoras_view` leem `currentRow()` logo
+# depois de repopular. Os testes abaixo trancam a compatibilidade.
+# ----------------------------------------------------------------------------
+
+
+def test_sem_preservar_selecao_a_linha_corrente_se_perde(qapp):
+    """O comportamento padrão, e o motivo de a opção existir."""
+    tabela = _tabela_preenchida(3)
+    tabela.selectRow(1)
+
+    limpar_tabela(tabela, linhas=3)
+
+    assert tabela.currentRow() == -1
+
+
+def test_preservar_selecao_devolve_a_linha_corrente(qapp):
+    tabela = _tabela_preenchida(3)
+    tabela.selectRow(1)
+
+    limpar_tabela(tabela, linhas=3, preservar_selecao=True)
+
+    assert tabela.currentRow() == 1
+
+
+def test_preservar_selecao_gruda_na_ultima_linha_quando_a_tabela_encolhe(qapp):
+    """Mesma conta que o `setRowCount(n)` sozinho fazia: com a linha 1
+    selecionada e a tabela caindo para uma linha só, o Qt movia a corrente para
+    a linha 0 em vez de largar a seleção."""
+    tabela = _tabela_preenchida(3)
+    tabela.selectRow(1)
+
+    limpar_tabela(tabela, linhas=1, preservar_selecao=True)
+
+    assert tabela.currentRow() == 0
+
+
+def test_preservar_selecao_nao_dispara_sinal_de_selecao(qapp):
+    """A ida e a volta pelo zero emitiriam a mudança duas vezes, e os
+    assinantes reagiriam a uma seleção vazia que nunca existiu para o usuário —
+    `cardapio_view` chegaria a emitir `produto_selecionado(None)` no meio do
+    próprio refresh. Do lado de fora, tem que ser indistinguível do
+    `setRowCount(len(dados))` de antes: nenhum sinal."""
+    tabela = _tabela_preenchida(3)
+    tabela.selectRow(1)
+    disparos: list[int] = []
+    tabela.itemSelectionChanged.connect(lambda: disparos.append(tabela.currentRow()))
+    tabela.currentCellChanged.connect(lambda *_: disparos.append(tabela.currentRow()))
+
+    limpar_tabela(tabela, linhas=3, preservar_selecao=True)
+
+    assert disparos == [], f"a limpeza emitiu {len(disparos)} mudança(s) de seleção: {disparos}"
+
+
+def test_preservar_selecao_em_tabela_sem_selecao_nao_inventa_uma(qapp):
+    tabela = _tabela_preenchida(3)
+
+    limpar_tabela(tabela, linhas=3, preservar_selecao=True)
+
+    assert tabela.currentRow() == -1
+
+
+def test_preservar_selecao_ao_esvaziar_de_vez_nao_estoura(qapp):
+    """Categoria sem produto nenhum: repopular com zero linha não pode tentar
+    devolver uma seleção que não tem mais onde pousar."""
+    tabela = _tabela_preenchida(3)
+    tabela.selectRow(2)
+
+    limpar_tabela(tabela, preservar_selecao=True)  # não pode levantar
+
+    assert tabela.rowCount() == 0
+    assert tabela.currentRow() == -1

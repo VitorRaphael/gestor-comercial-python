@@ -149,8 +149,6 @@ TEMA_ESCURO: dict[str, str] = {
     "barra_total_texto_forte": "#0E0B05",
     "combo_atendente_borda": "#A8A29E",
     "combo_atendente_bg": "#1C1B19",
-    "pilula_ciano": "#38bdf8",
-    "pilula_ciano_hover": "#60cbfa",
     "ranking_barra_bg": "#1C1C1A",
     "ranking_barra_acento": "#22D3EE",
     "ciano_acao": "#0891b2",
@@ -176,7 +174,6 @@ TEMA_ESCURO: dict[str, str] = {
     "tabela_comanda_borda": "#242220",
     "tabela_comanda_texto": "#FFFFFF",
     "tabela_comanda_selecionado_bg": "#1E1D1B",
-    "pilula_ciano_texto": "#04222E",
     "pilula_ciano2_texto": "#072228",
     "pilula_ciano2_hover": "#67e8f9",
     "badge_vazio_bg": "#3f3d3a",
@@ -250,8 +247,6 @@ TEMA_CLARO: dict[str, str] = {
     "barra_total_texto_forte": "#451A03",
     "combo_atendente_borda": "#CBD5C0",
     "combo_atendente_bg": "#FFFFFF",
-    "pilula_ciano": "#0369A1",
-    "pilula_ciano_hover": "#0284C7",
     "ranking_barra_bg": "#E9E8E2",
     "ranking_barra_acento": "#0891B2",
     "ciano_acao": "#0891B2",
@@ -277,7 +272,6 @@ TEMA_CLARO: dict[str, str] = {
     "tabela_comanda_borda": "#E2E1D9",
     "tabela_comanda_texto": "#09090B",
     "tabela_comanda_selecionado_bg": "#E9E8E2",
-    "pilula_ciano_texto": "#FFFFFF",
     "pilula_ciano2_texto": "#FFFFFF",
     "pilula_ciano2_hover": "#0891B2",
     "badge_vazio_bg": "#E9E8E2",
@@ -291,37 +285,3 @@ TEMA_CLARO: dict[str, str] = {
     "campo_erro_texto": "#DC2626",
     "campo_erro_bg": "#FEE2E2",
 }
-
-# ----------------------------------------------------------------------
-# Constantes planas (tema escuro) -- usadas por widgets que ainda não
-# reagem à troca de tema (diálogos pontuais como `comprovante_dialog.py`).
-# Ao tornar um widget reativo, prefira ler de `TEMA_ESCURO`/`TEMA_CLARO`
-# via `ThemeController` em vez de importar estas constantes.
-# ----------------------------------------------------------------------
-
-BG = TEMA_ESCURO["bg_marca"]
-BG_ELEVADO = TEMA_ESCURO["bg_terminal"]
-SUPERFICIE = TEMA_ESCURO["superficie"]
-SUPERFICIE_2 = TEMA_ESCURO["superficie_2"]
-SUPERFICIE_3 = TEMA_ESCURO["borda"]
-BORDA = TEMA_ESCURO["borda"]
-
-TEXTO = TEMA_ESCURO["texto"]
-TEXTO_FRACO = TEMA_ESCURO["texto_fraco"]
-TEXTO_FRAQUISSIMO = TEMA_ESCURO["texto_fraquissimo"]
-
-ACENTO = TEMA_ESCURO["acento"]
-ACENTO_TEXTO = TEMA_ESCURO["acento_texto"]
-ROSA = TEMA_ESCURO["rosa"]
-AZUL = "#3b82f6"
-
-SUCESSO = TEMA_ESCURO["sucesso"]
-PERIGO = TEMA_ESCURO["perigo"]
-PERIGO_HOVER = TEMA_ESCURO["perigo_hover"]
-AVISO = TEMA_ESCURO["aviso"]
-INFO = AZUL
-CIANO_METRICA = TEMA_ESCURO["ciano_metrica"]
-
-RAIO_SM = 8
-RAIO = 14
-RAIO_LG = 20

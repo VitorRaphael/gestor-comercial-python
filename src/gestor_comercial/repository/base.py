@@ -63,7 +63,7 @@ class Base(DeclarativeBase):
     pass
 
 
-def get_engine(db_path: Path = DB_PATH):
+def get_engine(db_path: Path = DB_PATH) -> Engine:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return create_engine(f"sqlite:///{db_path}")
 
@@ -96,11 +96,6 @@ class Repository(Generic[T]):
         self.session.add(entidade)
         self.session.flush()
         return entidade
-
-    def salvar_todos(self, entidades: list[T]) -> list[T]:
-        self.session.add_all(entidades)
-        self.session.flush()
-        return entidades
 
     def buscar_por_id(self, entidade_id: int) -> T | None:
         return self.session.get(self.modelo, entidade_id)

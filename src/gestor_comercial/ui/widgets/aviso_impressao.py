@@ -6,8 +6,11 @@ mesmo RNF inegociável: falha de impressora é AVISO, nunca exceção, e nunca
 aborta a venda. Concentrar aqui o texto, a cor e o cursor de espera evita que
 um dos quatro esqueça a regra.
 
-As cores estão duplicadas de `ui/theme/tokens.py`, como o resto das views já
-faz — QSS não tem `var()` e o valor precisa ser literal no `setStyleSheet`.
+As três cores (apagado, verde, âmbar) moram no QSS global, em
+`QLabel#avisoImpressao[tom=...]`. Aqui só se troca o `tom`. É o que o §3.15
+pediu: com `setStyleSheet` inline, a cor era resolvida na construção e o widget
+ficava com a paleta do boot para sempre, porque stylesheet por widget vence o
+QSS global — alternar Claro/Escuro repintava o app menos esta linha.
 """
 
 from __future__ import annotations
@@ -19,19 +22,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from gestor_comercial.services.impressao_service import GRUPO_SEM_IMPRESSORA, ResultadoImpressao
-from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 
-
-def _cor_sucesso() -> str:
-    return ThemeController.instancia().tokens_atuais["sucesso"]
-
-
-def _cor_aviso() -> str:
-    return ThemeController.instancia().tokens_atuais["aviso"]
-
-
-def _cor_fraco() -> str:
-    return ThemeController.instancia().tokens_atuais["texto_fraco"]
 
 T = TypeVar("T")
 
@@ -70,22 +62,23 @@ class AvisoDeImpressao(QLabel):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("", parent)
+        self.setObjectName("avisoImpressao")
         self.setWordWrap(True)
         self.limpar()
 
     def limpar(self) -> None:
-        self._pintar(_cor_fraco())
+        self._pintar("")
         self.setText("")
 
     def mostrar(self, resultados: Sequence[ResultadoImpressao], *, vazio: str = "") -> None:
         """Mostra um cupom por linha; `vazio` é o texto de 'não havia o que imprimir'."""
         if not resultados:
-            self._pintar(_cor_fraco())
+            self._pintar("")
             self.setText(vazio)
             return
 
         houve_falha = any(not resultado.sucesso for resultado in resultados)
-        self._pintar(_cor_aviso() if houve_falha else _cor_sucesso())
+        self._pintar("aviso" if houve_falha else "sucesso")
         self.setText("\n".join(_mensagem(resultado) for resultado in resultados))
 
     def mostrar_um(self, resultado: ResultadoImpressao, *, contexto: str = "") -> None:
@@ -96,7 +89,7 @@ class AvisoDeImpressao(QLabel):
         linha "Balcão: cupom enviado" não conta qual papel acabou de sair.
         """
         mensagem = _mensagem(resultado)
-        self._pintar(_cor_sucesso() if resultado.sucesso else _cor_aviso())
+        self._pintar("sucesso" if resultado.sucesso else "aviso")
         self.setText(f"{contexto} — {mensagem}" if contexto else mensagem)
 
     def mostrar_falha(self, mensagem: str) -> None:
@@ -106,11 +99,12 @@ class AvisoDeImpressao(QLabel):
         então nem uma exceção de negócio pode virar caixa de erro na cara do
         operador — vira esta linha âmbar e a vida continua.
         """
-        self._pintar(_cor_aviso())
+        self._pintar("aviso")
         self.setText(mensagem)
 
-    def _pintar(self, cor: str) -> None:
-        self.setStyleSheet(f"color: {cor}; font-size: 12px;")
+    def _pintar(self, tom: str) -> None:
+        """`""` (apagado), `"sucesso"` (verde) ou `"aviso"` (âmbar) — ver o QSS."""
+        aplicar_propriedade(self, "tom", tom)
 
 
 def _mensagem(resultado: ResultadoImpressao) -> str:

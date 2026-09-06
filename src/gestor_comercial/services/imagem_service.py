@@ -23,7 +23,6 @@ from PySide6.QtGui import QImage
 from gestor_comercial.repository.base import DB_PATH
 
 TAMANHO_MAXIMO_PX = 120
-QUALIDADE_INICIAL = 72
 # Degrau de qualidade tentado em ordem até o arquivo caber no teto de tamanho,
 # ou até acabarem as opções (aí fica com o menor arquivo que conseguiu gerar).
 _DEGRAUS_QUALIDADE = (72, 60, 50, 40)

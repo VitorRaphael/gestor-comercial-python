@@ -24,7 +24,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Iterator, Protocol, runtime_checkable
 
 if TYPE_CHECKING:  # pragma: no cover - só para o type checker
     # Import só de tipo: em runtime `hardware/` não depende de `domain/`, o que
@@ -154,7 +154,7 @@ def _sessao_de_impressao(
 class _DriverEscpos:
     """Adapta os `BlocoTexto` para os comandos ESC/POS da biblioteca."""
 
-    def __init__(self, conexao, nome: str) -> None:
+    def __init__(self, conexao: Any, nome: str) -> None:
         self._conexao = conexao
         self._nome = nome
 

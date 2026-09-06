@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from PySide6.QtCore import Qt, QSize, Signal
+from PySide6.QtGui import QMouseEvent
 
 from gestor_comercial.domain.enums import TipoConexaoImpressora
 from gestor_comercial.domain.impressora import COLUNAS_PADRAO, Impressora
@@ -55,6 +56,9 @@ from gestor_comercial.services.exceptions import (
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.widgets.modais import executar_modal
+from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
+from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 
 # Coluna 0 é só o traço indicador (~4px) da linha selecionada -- não é
 # impressora nenhuma, então não entra em `_preencher_linha` como dado.
@@ -126,9 +130,7 @@ class ImpressorasView(QWidget):
         layout.addSpacing(20)
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet(
-            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
-        )
+        self._label_erro.setObjectName("labelErro")
         layout.addWidget(self._label_erro)
 
         self._aviso = AvisoDeImpressao()
@@ -263,7 +265,7 @@ class ImpressorasView(QWidget):
         # respondeu pode ser justamente a que acabou de mudar de porta.
         self._aviso.limpar()
         self._impressoras = self._service.listar_impressoras()
-        self._tabela.setRowCount(len(self._impressoras))
+        limpar_tabela(self._tabela, linhas=len(self._impressoras), preservar_selecao=True)
         for linha, impressora in enumerate(self._impressoras):
             self._preencher_linha(linha, impressora)
         self._ao_selecionar_linha()
@@ -282,9 +284,7 @@ class ImpressorasView(QWidget):
             indicador = self._tabela.cellWidget(linha, 0)
             if indicador is None:
                 continue
-            indicador.setProperty("ativo", "true" if linha == linha_selecionada else "false")
-            indicador.style().unpolish(indicador)
-            indicador.style().polish(indicador)
+            aplicar_propriedade(indicador, "ativo", "true" if linha == linha_selecionada else "false")
 
     def _atualizar_categorias(self) -> None:
         self._lista_categorias.clear()
@@ -342,10 +342,10 @@ class ImpressorasView(QWidget):
         indicador = _CelulaSelecionavel(self._tabela)
         indicador.setObjectName("impressorasIndicador")
         indicador.setFixedWidth(4)
-        self._tabela.setCellWidget(linha, 0, indicador)
+        definir_celula(self._tabela, linha, 0, indicador)
 
-        self._tabela.setCellWidget(linha, 1, self._montar_celula_nome(impressora))
-        self._tabela.setCellWidget(linha, 2, self._montar_celula_conexao(impressora))
+        definir_celula(self._tabela, linha, 1, self._montar_celula_nome(impressora))
+        definir_celula(self._tabela, linha, 2, self._montar_celula_conexao(impressora))
 
         item_destino = QTableWidgetItem(_descricao_destino(impressora))
         item_destino.setFlags(item_destino.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -355,8 +355,8 @@ class ImpressorasView(QWidget):
         item_bobina.setFlags(item_bobina.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self._tabela.setItem(linha, 4, item_bobina)
 
-        self._tabela.setCellWidget(linha, 5, self._montar_celula_padrao(impressora))
-        self._tabela.setCellWidget(linha, 6, self._montar_celula_status(impressora))
+        definir_celula(self._tabela, linha, 5, self._montar_celula_padrao(impressora))
+        definir_celula(self._tabela, linha, 6, self._montar_celula_status(impressora))
 
     def _montar_celula_nome(self, impressora: Impressora) -> QWidget:
         celula = _CelulaSelecionavel(self._tabela)
@@ -437,7 +437,7 @@ class ImpressorasView(QWidget):
 
     def _criar(self) -> None:
         modal = _ImpressoraDialog("Nova impressora", self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         nome, tipo, parametros = modal.resultado()
 
@@ -455,7 +455,7 @@ class ImpressorasView(QWidget):
             self._mostrar_erro("Selecione uma impressora na lista.")
             return
         modal = _ImpressoraDialog("Editar impressora", self, impressora=impressora)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         nome, tipo, parametros = modal.resultado()
 
@@ -526,7 +526,7 @@ class _CelulaSelecionavel(QWidget):
         super().__init__(parent)
         self._tabela = tabela
 
-    def mousePressEvent(self, evento) -> None:  # noqa: N802 (override Qt)
+    def mousePressEvent(self, evento: QMouseEvent) -> None:  # noqa: N802 (override Qt)
         indice = self._tabela.indexAt(self.pos())
         if indice.isValid():
             self._tabela.selectRow(indice.row())
@@ -566,7 +566,7 @@ class _LinhaCategoria(QFrame):
     def sizeHint(self) -> QSize:
         return QSize(super().sizeHint().width(), 40)
 
-    def mousePressEvent(self, evento) -> None:  # noqa: N802 (override Qt)
+    def mousePressEvent(self, evento: QMouseEvent) -> None:  # noqa: N802 (override Qt)
         if evento.button() == Qt.MouseButton.LeftButton:
             self._marcada = not self._marcada
             self._aplicar_estado()
@@ -576,9 +576,7 @@ class _LinhaCategoria(QFrame):
     def _aplicar_estado(self) -> None:
         valor = "true" if self._marcada else "false"
         for widget in (self, self._marcador):
-            widget.setProperty("marcada", valor)
-            widget.style().unpolish(widget)
-            widget.style().polish(widget)
+            aplicar_propriedade(widget, "marcada", valor)
 
 
 class _ImpressoraDialog(QDialog):

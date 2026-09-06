@@ -85,11 +85,6 @@ def construir_qss_app(t: dict[str, str]) -> str:
       min-height: 1px;
       margin: 0 8px;
     }}
-    #sidebarBarraUsuario {{
-      background: {t['superficie']};
-      border: 1px solid {t['borda']};
-      border-radius: 12px;
-    }}
     #sidebarGrupoRotulo {{
       color: {t['texto_fraquissimo']};
       font-size: 10px;
@@ -399,7 +394,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
 
     /* ---------- Painéis / cartões ---------- */
 
-    QFrame[variante="painel"], QFrame[variante="cartao"] {{
+    QFrame[variante="cartao"] {{
       background: {t['superficie']};
       border: 1px solid {t['borda']};
       border-radius: 14px;
@@ -520,7 +515,75 @@ def construir_qss_app(t: dict[str, str]) -> str:
     /* ---------- Labels auxiliares ---------- */
 
     QLabel[variante="fraco"] {{ color: {t['texto_fraco']}; }}
-    QLabel[variante="fraquissimo"] {{ color: {t['texto_fraquissimo']}; }}
+
+    /* ---------- Linha de erro/aviso das telas (§3.15) ----------
+       Estas cores viviam em ~14 cópias de `setStyleSheet` inline, resolvidas
+       na construção da tela. Como o stylesheet por widget vence o QSS global,
+       a paleta do boot ficava congelada ali e a troca de tema não alcançava
+       essas linhas. Aqui elas voltam a acompanhar o tema. */
+
+    QLabel#labelErro {{ color: {t['perigo']}; font-size: 12px; background: transparent; }}
+    QLabel#labelErro[tom="sucesso"] {{ color: {t['sucesso']}; }}
+
+    /* Âmbar, e não vermelho, de propósito: impressão que falha não interrompe
+       a venda — ver o docstring de `AvisoDeImpressao`. */
+    QLabel#avisoImpressao {{ color: {t['texto_fraco']}; font-size: 12px; background: transparent; }}
+    QLabel#avisoImpressao[tom="sucesso"] {{ color: {t['sucesso']}; }}
+    QLabel#avisoImpressao[tom="aviso"] {{ color: {t['aviso']}; }}
+
+    /* Demais cores que estavam congeladas em `setStyleSheet` de construção
+       (§3.15). Todas seguem a mesma regra: quem pinta é o QSS, quem escolhe o
+       estado é uma propriedade ou o objectName. */
+
+    QLabel#dicaFraca {{ color: {t['texto_fraquissimo']}; font-size: 11px; background: transparent; }}
+    QLabel#comandaCelulaTexto {{ color: {t['tabela_comanda_texto']}; }}
+
+    /* Tempo na cozinha: cinza até 30 min, âmbar até 1 h, vermelho depois. */
+    QLabel#comandaHorario {{ font-size: 13px; margin-left: 8px; color: {t['texto_fraquissimo']}; }}
+    QLabel#comandaHorario[tom="aviso"] {{ color: {t['aviso']}; }}
+    QLabel#comandaHorario[tom="perigo"] {{ color: {t['perigo']}; }}
+
+    QLabel#campoErroRotulo {{ color: {t['campo_erro_texto']}; font-size: 11px; background: transparent; }}
+    QLineEdit[erro="true"] {{
+      border: 1px solid {t['campo_erro_texto']};
+      background-color: {t['campo_erro_bg']};
+    }}
+
+    /* Barra de margem do cardápio. O trilho é a mesma transparência nos dois
+       temas — literal, e não token, porque não existe cor de paleta para ele e
+       inventar uma seria decisão de design, não faxina. */
+    QFrame#margemTrilho {{ background: rgba(255, 255, 255, 0.08); border-radius: 3px; }}
+    QFrame#margemPreenchida {{ background: {t['sucesso']}; border-radius: 3px; }}
+
+    /* Comprovante digital de fechamento. Era o último widget lendo as
+       "constantes planas" de `tokens.py` — o bloco inteiro morreu com isto. */
+    QDialog#comprovanteDialog {{ background: {t['superficie']}; }}
+    QPlainTextEdit#comprovantePapel {{
+      background: {t['bg_terminal']};
+      color: {t['texto']};
+      border: 1px solid {t['borda']};
+      border-radius: 14px;
+      padding: 16px;
+      selection-background-color: {t['acento']};
+    }}
+    QLabel#comprovanteStatus {{ color: {t['texto_fraco']}; font-size: 12px; }}
+
+    QLabel#comandaTitulo {{ font-weight: 800; font-size: 32px; color: {t['texto']}; }}
+    QLabel#comandaRotuloAtendeu {{
+      color: {t['combo_atendente_borda']};
+      font-size: 13px;
+      font-weight: 500;
+    }}
+
+    QLabel#badgeCombo {{
+      background-color: {t['badge_combo_bg']};
+      color: {t['badge_combo_texto']};
+      font-weight: 700;
+      font-size: 11px;
+      border-radius: 4px;
+      padding: 3px 10px;
+      margin: 0px;
+    }}
     QLabel[variante="badge"] {{
       background: {t['sucesso']};
       color: white;
@@ -619,7 +682,6 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
     QLabel#caixaMiniCardTitulo {{ color: {t['texto']}; font-size: 12px; font-weight: 700; background: transparent; }}
     QLabel#caixaMiniCardSub {{ color: {t['texto_fraquissimo']}; font-size: 10px; letter-spacing: 0.4px; background: transparent; }}
-    QLabel#caixaMiniCardValor {{ color: {t['perigo_hover']}; font-size: 13px; font-weight: 800; background: transparent; }}
     QLabel#caixaMiniCardValorPositivo {{ color: {t['sucesso']}; font-size: 11px; font-weight: 700; background: transparent; }}
     QLabel#caixaMiniCardValorNegativo {{ color: {t['perigo_hover']}; font-size: 11px; font-weight: 700; background: transparent; }}
     QLabel#caixaMiniCardValorNeutro {{ color: {t['texto_fraco']}; font-size: 11px; font-weight: 700; background: transparent; }}
@@ -698,7 +760,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
     QPushButton[variante="voltar-pdv"]:hover {{ background: {t['borda']}; }}
 
-    /* ---------- Configurações / placeholders simples (Estoque) ---------- */
+    /* ---------- Configurações ---------- */
 
     QLabel#configEyebrow {{
       color: {t['texto_fraquissimo']};
@@ -751,8 +813,6 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
     QLabel#impressoraConexaoIcone {{ font-size: 13px; background: transparent; }}
     QLabel#impressoraConexaoTexto {{ color: {t['texto_fraco']}; font-size: 12px; background: transparent; }}
-    QLabel#impressoraDestinoTexto {{ color: {t['texto_fraco']}; font-size: 12px; background: transparent; }}
-    QLabel#impressoraBobinaTexto {{ color: {t['texto_fraco']}; font-size: 12px; background: transparent; }}
 
     QLabel[variante="badgePadrao"] {{
       color: {t['acento']};
@@ -778,18 +838,6 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background: rgba(239, 68, 68, 0.16);
       color: {t['perigo_hover']};
     }}
-
-    QPushButton[variante="pilula-ciano"] {{
-      background: {t['pilula_ciano']};
-      color: {t['pilula_ciano_texto']};
-      border: none;
-      border-radius: 14px;
-      padding: 8px 16px;
-      font-size: 12px;
-      font-weight: 800;
-    }}
-    QPushButton[variante="pilula-ciano"]:hover {{ background: {t['pilula_ciano_hover']}; }}
-    QPushButton[variante="pilula-ciano"]:disabled {{ background: {t['borda']}; color: {t['texto_fraquissimo']}; }}
 
     QLabel#impressorasSelecaoLabel {{
       color: {t['texto_fraquissimo']};

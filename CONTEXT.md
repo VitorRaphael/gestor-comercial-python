@@ -1,7 +1,7 @@
 ---
 project: gestor-comercial-python
 domain: PDV desktop offline (food truck do pai do Vitor)
-status: Remasterização da V1 — Fases 0-4 concluídas em 2026-09-06, PRÓXIMA é a Fase 5 (Higiene da UI), sem decisão pendente bloqueando. Onde paramos e o porquê: §0 do REMASTERIZACAO-V1.md. Suíte: 727 verdes, 0 xfail, 0 falhas. A Fase 4 fechou os 2 defeitos reais (§3.7 limpar_layout, §3.9 hook do PIN), reescreveu os 7 xfail e versionou a bancada de memória em tools/medir_memoria.py — que provou que os +40 MB do §2.3 eram artefato de medição, o terceiro achado de memória derrubado. A EstoqueView já está decidida (remover) e é o primeiro item da Fase 5. Empacotamento continua aberto: falta testar o .exe em máquina limpa de verdade
+status: Remasterização da V1 — Fases 0-5 concluídas em 2026-09-06, PRÓXIMA é a Fase 6 (Arquitetura da UI: quebrar as views gigantes só onde compensar), sem decisão pendente bloqueando. Onde paramos e o porquê: §0 do REMASTERIZACAO-V1.md. Suíte: 775 verdes, 0 xfail, 0 falhas. A Fase 5 fechou os 9 itens de higiene da UI — EstoqueView removida, os 31 modais e as 6 tabelas padronizados, lambdas do tema viraram métodos ligados, chave do cache de miniaturas corrigida, código morto e 3 comentários que mentiam eliminados, 20 cores congeladas foram para o QSS global e a tipagem pública ficou completa (403/403). Dois achados no caminho: a MainWindow não era coberta por teste nenhum (agora é), e a troca das tabelas teria apagado a seleção do usuário se não fosse medida antes. Empacotamento continua aberto: falta testar o .exe em máquina limpa de verdade
 local: C:\Vitor Raphael\Códigos\Gestor Comercial Python
 repo: https://github.com/VitorRaphael/gestor-comercial-python
 ---

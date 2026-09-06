@@ -33,7 +33,6 @@ from gestor_comercial.ui.views.cardapio_view import CardapioView
 from gestor_comercial.ui.views.comanda_view import ComandaView
 from gestor_comercial.ui.views.configuracoes_view import ConfiguracoesView
 from gestor_comercial.ui.views.dashboard_mensal_view import DashboardMensalView
-from gestor_comercial.ui.views.estoque_view import EstoqueView
 from gestor_comercial.ui.views.funcionarios_view import FuncionariosView
 from gestor_comercial.ui.views.historico_caixa_view import HistoricoCaixaView
 from gestor_comercial.ui.views.impressoras_view import ImpressorasView
@@ -132,5 +131,4 @@ def todas_as_telas(
         "Impressoras": ImpressorasView(cardapio, impressao),
         "Configurações": ConfiguracoesView(auth),
         "Central de Loja": LojaHubView(),
-        "Estoque": EstoqueView(),
     }

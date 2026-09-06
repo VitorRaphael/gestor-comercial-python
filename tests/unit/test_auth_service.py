@@ -12,7 +12,7 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
-from tests.conftest import PIN_ATENDENTE, PIN_GERENTE, PIN_LOGIN, PIN_MASTER, PIN_OPERACIONAL
+from tests.conftest import PIN_ATENDENTE, PIN_LOGIN, PIN_MASTER, PIN_OPERACIONAL
 
 PIN_OUTRO_GERENTE = PIN_MASTER
 PIN_INVALIDO = "000000"

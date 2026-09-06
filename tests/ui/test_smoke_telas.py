@@ -30,8 +30,8 @@ def test_todas_as_telas_sobrevivem_a_um_atualizar(todas_as_telas):
     """`atualizar()` é o que a `MainWindow` chama a cada navegação.
 
     Com o banco vazio — sem mesa, sem produto, sem caixa aberto — nenhuma tela
-    pode estourar. Telas sem `atualizar()` (Login, Central de Loja, Estoque)
-    são puladas de propósito: não têm dado pra recarregar.
+    pode estourar. Telas sem `atualizar()` (Login, Central de Loja) são puladas de
+    propósito: não têm dado pra recarregar.
     """
     for nome, tela in todas_as_telas.items():
         atualizar = getattr(tela, "atualizar", None)

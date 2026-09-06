@@ -56,6 +56,9 @@ from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
+from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
+from gestor_comercial.ui.widgets.modais import executar_modal
+from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
 from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
 
 _TAMANHO_MINIATURA_ITEM = 32
@@ -115,16 +118,14 @@ class ComandaView(QWidget):
         cabecalho.addWidget(self._botao_voltar)
 
         self._label_titulo = QLabel("")
-        self._label_titulo.setStyleSheet(
-            f"font-weight: 800; font-size: 32px; color: {ThemeController.instancia().tokens_atuais['texto']};"
-        )
+        self._label_titulo.setObjectName("comandaTitulo")
         cabecalho.addWidget(self._label_titulo)
 
         # Indicador de tempo na cozinha: continua calculado em `atualizar()`
         # (outras telas/testes podem inspecionar o texto), mas fica oculto do
         # cabeçalho para não poluir a barra de ações com texto colorido.
         self._label_horario = QLabel("")
-        self._label_horario.setStyleSheet("font-size: 12px; margin-left: 8px;")
+        self._label_horario.setObjectName("comandaHorario")
         self._label_horario.hide()
         cabecalho.addStretch()
 
@@ -166,10 +167,7 @@ class ComandaView(QWidget):
 
         linha_atendente = QHBoxLayout()
         label_atendeu = QLabel("Atendeu:")
-        label_atendeu.setStyleSheet(
-            f"color: {ThemeController.instancia().tokens_atuais['combo_atendente_borda']}; "
-            "font-size: 13px; font-weight: 500;"
-        )
+        label_atendeu.setObjectName("comandaRotuloAtendeu")
         linha_atendente.addWidget(label_atendeu)
         self._combo_atendente = QComboBox()
         self._combo_atendente.setObjectName("combo-atendente")
@@ -180,9 +178,7 @@ class ComandaView(QWidget):
         layout_externo.addLayout(linha_atendente)
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet(
-            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
-        )
+        self._label_erro.setObjectName("labelErro")
         layout_externo.addWidget(self._label_erro)
 
         self._aviso_impressao = AvisoDeImpressao()
@@ -215,8 +211,11 @@ class ComandaView(QWidget):
 
         layout_externo.addWidget(self._secao_pendentes)
 
-        # Atalhos de teclado para o envio em lote — guardados como atributos
-        # para não serem coletados pelo GC do Python.
+        # Atalhos de teclado para o envio em lote. O que os mantém vivos é o
+        # parent (`self`), passado no construtor — não o atributo: o lado C++
+        # pertence à view e morre com ela. O atributo é só nome, para dar onde
+        # pegar o atalho ao depurar. (§3.13 conferiu o ciclo de vida destes
+        # dois; §3.12 pegou o comentário antigo, que creditava o GC do Python.)
         self._atalho_enviar_ctrl_enter = QShortcut(QKeySequence("Ctrl+Return"), self)
         self._atalho_enviar_ctrl_enter.activated.connect(self._imprimir_producao)
         self._atalho_enviar_f5 = QShortcut(QKeySequence("F5"), self)
@@ -332,13 +331,13 @@ class ComandaView(QWidget):
             self._formatar_tempo_aberta(primeiro_envio) if primeiro_envio else ""
         )
 
-        self._tabela_pendentes.setRowCount(len(itens_pendentes))
+        limpar_tabela(self._tabela_pendentes, linhas=len(itens_pendentes))
         for linha, item in enumerate(itens_pendentes):
             self._preencher_linha_pendente(linha, item)
         self._ajustar_altura_tabela(self._tabela_pendentes)
 
         grupos_lancados = self._agrupar_para_exibicao(itens_lancados)
-        self._tabela_lancados.setRowCount(len(grupos_lancados))
+        limpar_tabela(self._tabela_lancados, linhas=len(grupos_lancados))
         for linha, grupo in enumerate(grupos_lancados):
             self._preencher_linha_lancada(linha, grupo)
         self._ajustar_altura_tabela(self._tabela_lancados)
@@ -412,14 +411,13 @@ class ComandaView(QWidget):
 
     def _formatar_tempo_aberta(self, primeiro_envio: datetime) -> str:
         minutos = int((datetime.now() - primeiro_envio).total_seconds() // 60)
-        t = ThemeController.instancia().tokens_atuais
         if minutos >= 60:
-            cor, tempo = t["perigo"], f"{minutos // 60}h{minutos % 60:02d}"
+            tom, tempo = "perigo", f"{minutos // 60}h{minutos % 60:02d}"
         elif minutos >= 30:
-            cor, tempo = t["aviso"], f"{minutos} min"
+            tom, tempo = "aviso", f"{minutos} min"
         else:
-            cor, tempo = t["texto_fraquissimo"], f"{minutos} min"
-        self._label_horario.setStyleSheet(f"font-size: 13px; margin-left: 8px; color: {cor};")
+            tom, tempo = "", f"{minutos} min"
+        aplicar_propriedade(self._label_horario, "tom", tom)
         return f"Na cozinha desde {primeiro_envio.strftime('%H:%M')} · há {tempo}"
 
     # Nome do produto em destaque (branco puro); preço/qtd/total em cinza
@@ -441,7 +439,9 @@ class ComandaView(QWidget):
     ) -> None:
         total_item = preco_unit * quantidade
 
-        tabela.setCellWidget(linha, 0, self._criar_celula_produto(imagem_path, nome_produto, descricao))
+        definir_celula(
+            tabela, linha, 0, self._criar_celula_produto(imagem_path, nome_produto, descricao)
+        )
 
         for coluna, texto in (
             (1, formatar_reais(preco_unit)),
@@ -475,7 +475,7 @@ class ComandaView(QWidget):
         layout_celula.addWidget(rotulo_imagem)
 
         rotulo_texto = QLabel(descricao)
-        rotulo_texto.setStyleSheet("color: " + ThemeController.instancia().tokens_atuais["tabela_comanda_texto"])
+        rotulo_texto.setObjectName("comandaCelulaTexto")
         layout_celula.addWidget(rotulo_texto, stretch=1)
 
         return celula
@@ -493,9 +493,7 @@ class ComandaView(QWidget):
         # que ela traz) só é aplicada depois, a tabela já reservou o tamanho
         # do botão genérico e nunca reconsulta o sizeHint, deixando o texto
         # cortado numa caixa pequena demais pra ele.
-        botao.setProperty("variante", variante)
-        botao.style().unpolish(botao)
-        botao.style().polish(botao)
+        aplicar_propriedade(botao, "variante", variante)
 
     def _preencher_linha_pendente(self, linha: int, item: ItemComanda) -> None:
         descricao = item.produto.nome
@@ -532,7 +530,7 @@ class ComandaView(QWidget):
         botao_remover.clicked.connect(lambda _checked=False, i=item: self._remover_item(i))
         layout_acoes.addWidget(botao_remover)
 
-        self._tabela_pendentes.setCellWidget(linha, 4, acoes_item)
+        definir_celula(self._tabela_pendentes, linha, 4, acoes_item)
 
     def _preencher_linha_lancada(self, linha: int, grupo: list[ItemComanda]) -> None:
         primeiro = grupo[0]
@@ -569,13 +567,16 @@ class ComandaView(QWidget):
         botao_cancelar.clicked.connect(lambda _checked=False, g=grupo: self._cancelar_grupo(g))
         layout_acoes.addWidget(botao_cancelar)
 
-        self._tabela_lancados.setCellWidget(linha, 4, acoes_item)
-        self._aplicar_variante(botao_cancelar, "perigo-tabela")
+        definir_celula(self._tabela_lancados, linha, 4, acoes_item)
 
     def _mostrar_mensagem(self, texto: str, *, sucesso: bool) -> None:
-        t = ThemeController.instancia().tokens_atuais
-        cor = t["sucesso"] if sucesso else t["perigo"]
-        self._label_erro.setStyleSheet(f"color: {cor}; font-size: 12px;")
+        """A mesma linha serve para confirmar e para reclamar.
+
+        Verde ou vermelho vem do QSS global (`QLabel#labelErro[tom="sucesso"]`),
+        não de um `setStyleSheet` daqui: assim a linha acompanha a troca de tema
+        como o resto da tela (§3.15).
+        """
+        aplicar_propriedade(self._label_erro, "tom", "sucesso" if sucesso else "erro")
         self._label_erro.setText(texto)
 
     def _remover_item(self, item: ItemComanda) -> None:
@@ -596,7 +597,7 @@ class ComandaView(QWidget):
             else f"Cancelar {len(grupo)}x {nome_produto}"
         )
         modal = CancelamentoDialog(titulo, self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         motivo, pin_gerente = modal.resultado()
 
@@ -618,7 +619,7 @@ class ComandaView(QWidget):
         if self._comanda is None:
             return
         modal = CancelamentoDialog(f"Cancelar comanda {self._comanda.id}", self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         motivo, pin_gerente = modal.resultado()
 
@@ -722,7 +723,7 @@ class ComandaView(QWidget):
         botao_descartar.setProperty("variante", "perigo")
         botao_continuar.setProperty("variante", "secundario")
 
-        caixa.exec()
+        executar_modal(caixa)
         clicado = caixa.clickedButton()
 
         if clicado is botao_enviar:
@@ -749,7 +750,7 @@ class ComandaView(QWidget):
         if self._comanda is None:
             return
         modal = _FecharConferenciaDialog(self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         taxa, desconto = modal.resultado()
 
@@ -783,7 +784,7 @@ class ComandaView(QWidget):
         if self._comanda is None:
             return
         modal = CancelamentoDialog(f"Reabrir comanda {self._comanda.id}", self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         _motivo, pin_gerente = modal.resultado()
 
@@ -810,7 +811,7 @@ class ComandaView(QWidget):
             return
 
         modal = _AdicionarItemDialog(produtos, self._lancar_item_do_modal, self)
-        modal.exec()
+        executar_modal(modal)
         # O modal já lança cada item na hora (fluxo rápido de PDV); ao
         # fechar, só falta atualizar a tabela com o que ficou de fora dela.
         self.atualizar()
@@ -857,7 +858,7 @@ class _AdicionarItemDialog(QDialog):
         layout.addWidget(self._busca)
 
         dica = QLabel("Duplo clique ou Enter no item lança direto. Ou selecione e use Adicionar.")
-        dica.setStyleSheet(f"color: {ThemeController.instancia().tokens_atuais['texto_fraquissimo']}; font-size: 11px;")
+        dica.setObjectName("dicaFraca")
         layout.addWidget(dica)
 
         formulario = QFormLayout()
@@ -875,9 +876,7 @@ class _AdicionarItemDialog(QDialog):
         layout.addLayout(formulario)
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet(
-            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
-        )
+        self._label_erro.setObjectName("labelErro")
         layout.addWidget(self._label_erro)
 
         botoes = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -931,7 +930,7 @@ class _FecharConferenciaDialog(QDialog):
             "Use 'Reabrir' (com PIN de gerente) para desfazer."
         )
         aviso.setWordWrap(True)
-        aviso.setStyleSheet(f"color: {ThemeController.instancia().tokens_atuais['texto_fraquissimo']}; font-size: 11px;")
+        aviso.setObjectName("dicaFraca")
         layout.addWidget(aviso)
 
         self._marcar_taxa_servico = QCheckBox(f"Cobrar taxa de serviço ({_TAXA_SERVICO_PADRAO:g}%)")

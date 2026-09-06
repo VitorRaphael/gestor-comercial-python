@@ -45,7 +45,10 @@ from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.layout_utils import limpar_layout
+from gestor_comercial.ui.widgets.modais import executar_modal
 from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
+from gestor_comercial.ui.widgets.estilo import repolir
+from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
 
 _COLUNAS_MOVIMENTOS = ["Quando", "Tipo", "Descrição", "Valor"]
 
@@ -113,9 +116,7 @@ class CaixaView(QWidget):
         layout_externo.addLayout(self._montar_cabecalho())
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet(
-            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
-        )
+        self._label_erro.setObjectName("labelErro")
         layout_externo.addWidget(self._label_erro)
 
         self._aviso_impressao = AvisoDeImpressao()
@@ -331,7 +332,7 @@ class CaixaView(QWidget):
             self._caixa_id = None
             self._label_titulo.setText("Caixa — fechado")
             self._label_subtitulo.setText("Nenhum caixa aberto. Abra o caixa para começar o dia.")
-            self._tabela.setRowCount(0)
+            limpar_tabela(self._tabela)
             self._definir_acoes_disponiveis(caixa_aberto=False)
             self._atualizar_fechamentos()
             return
@@ -400,14 +401,13 @@ class CaixaView(QWidget):
         label.setObjectName("caixaAjusteValorNegativo" if negativo else "caixaAjusteValor")
         prefixo = "-" if negativo and valor != 0 else ""
         label.setText(f"{prefixo}{formatar_reais(valor)}")
-        label.style().unpolish(label)
-        label.style().polish(label)
+        repolir(label)
 
     def _atualizar_movimentos(self) -> None:
         if self._caixa_id is None:
             return
         movimentos = self._caixa_service.listar_movimentos(self._caixa_id)
-        self._tabela.setRowCount(len(movimentos))
+        limpar_tabela(self._tabela, linhas=len(movimentos))
         for linha, movimento in enumerate(movimentos):
             self._preencher_linha(linha, movimento)
 
@@ -493,7 +493,9 @@ class CaixaView(QWidget):
         tipo_texto = _ROTULOS_TIPO_MOVIMENTO.get(movimento.tipo, movimento.tipo.value)
 
         self._tabela.setItem(linha, 0, QTableWidgetItem(quando))
-        self._tabela.setCellWidget(linha, 1, _criar_badge_movimento(movimento.tipo, tipo_texto))
+        definir_celula(
+            self._tabela, linha, 1, _criar_badge_movimento(movimento.tipo, tipo_texto)
+        )
         self._tabela.setItem(linha, 2, QTableWidgetItem(movimento.descricao or ""))
 
         sai_da_gaveta = movimento.tipo in (TipoMovimento.SANGRIA, TipoMovimento.DESPESA)
@@ -509,7 +511,7 @@ class CaixaView(QWidget):
 
     def _abrir_caixa(self) -> None:
         modal = _ValorDialog("Abrir caixa", "Valor de abertura", self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         try:
             valor = modal.valor()
@@ -529,7 +531,7 @@ class CaixaView(QWidget):
         if self._caixa_id is None:
             return
         modal = _FecharCaixaDialog(self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         try:
             valor_contado_dinheiro, valor_contado_maquininha, observacao = modal.resultado()
@@ -572,7 +574,7 @@ class CaixaView(QWidget):
 
     def _abrir_modal_movimento(self, tipo: TipoMovimento) -> None:
         modal = _MovimentoDialog(_ROTULOS_TIPO_MOVIMENTO[tipo], self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         try:
             valor, descricao = modal.resultado()

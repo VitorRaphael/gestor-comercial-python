@@ -20,8 +20,8 @@
 
 ## 0. Onde paramos — 2026-09-06
 
-**Fases 0 a 4 concluídas. Parado no início da Fase 5.**
-Suíte: **727 passando, 0 `xfail`, 0 falhas** — de 706 + 7 `xfail`.
+**Fases 0 a 5 concluídas. Parado no início da Fase 6.**
+Suíte: **775 passando, 0 `xfail`, 0 falhas** — de 727 ao fim da Fase 4.
 
 | Fase | Estado |
 |---|---|
@@ -30,46 +30,57 @@ Suíte: **727 passando, 0 `xfail`, 0 falhas** — de 706 + 7 `xfail`.
 | 2 — Núcleo de dados e performance | ✅ concluída |
 | 3 — Utilitários compartilhados | ✅ concluída |
 | 4 — Ciclo de vida da UI (escopo enxuto) | ✅ concluída |
-| **5 — Higiene da UI** | ⏸️ **próxima — 0 de 9 itens**, com a `EstoqueView` já decidida |
-| 6 — Arquitetura da UI · 7 — Validação | não iniciadas |
+| 5 — Higiene da UI | ✅ **concluída — 9 de 9 itens** |
+| **6 — Arquitetura da UI** | ⏸️ **próxima**, sem decisão pendente bloqueando |
+| 7 — Validação final | não iniciada |
 
-### O que a Fase 4 fechou
+### O que a Fase 5 fechou
 
-Escopo **enxuto**, decidido pelo Vitor (§8): os dois defeitos reais, a reescrita
-dos 7 `xfail` e a medição de RSS. Os 31 sites de `executar_modal`, as 6 tabelas
-e as lambdas do tema foram para a **Fase 5**, onde padronização é o objetivo
-declarado.
+Os 9 itens, todos com teste que **reprova quando a mudança é desfeita** —
+conferido revertendo cada uma e vendo a suíte ficar vermelha, não só vendo-a
+verde depois:
 
-Toda correção entrou com o teste que a **reprova quando desfeita** — conferido
-revertendo o código e vendo a suíte ficar vermelha, não só vendo-a verde depois:
-
-| O que entrou | Prova |
-|---|---|
-| §3.7 — as 4 cópias de "limpar layout" viraram 1 | Sem o `setParent(None)`, **6 testes falham**, incluindo os 2 novos sobre `caixa_view` e `mesas_view` |
-| §3.9 — `closeEvent` → `done()` nos 2 diálogos de PIN | Com o hook antigo, **6 dos 10 testes de PIN falham** |
-| 7 `xfail` reescritos | A rede larga pega um vazamento injetado numa tela real: Cardápio 80 → 100 widgets |
-
-### 🔴 O que a Fase 4 descobriu: o §2.3 também era artefato de medição
-
-A Fase 3 já tinha derrubado o §3.3 e rebaixado o §3.2 por medição feita sem laço
-de eventos. A medição de RSS fechou o círculo: `tools/medir_memoria.py` roda o
-roteiro do §2.3 **dos dois jeitos**, e os +40,8 MB da linha de base saem
-**hoje**, com a Fase 4 pronta, sempre que se mede sem `exec()`.
-
-| Roteiro, no código de hoje | 300 modais custam | Modais vivos |
+| Item | O que entrou | Prova |
 |---|---|---|
-| Caminho real do app (`exec()` + `assentar`) | **+0,5 MB** | **0 de 300** |
-| Roteiro do §2.3 (sem `exec()`, só `processEvents`) | **+41,7 MB** | **300 de 300** |
+| §3.11 `EstoqueView` | Removida de `main_window` (4 pontos), do arquivo e da fixture | `test_main_window.py` monta a janela — que **nenhum teste montava** — e compara destinos × cards do hub: devolver a tela fantasma deixa vermelho |
+| §3.2 modais | 29 sites via `executar_modal`, 2 laços `while` via `descartar_modal` | Varredura AST: `.exec()` cru numa tela reprova, e `while` sem descarte fora do laço também |
+| §3.3 tabelas | 6 views + `secao_cancelamentos` via `limpar_tabela`/`definir_celula` | Varredura AST + 4 testes de tela real (ver o achado abaixo) |
+| §3.14 tema | As 2 `lambda` viraram métodos ligados, com a guarda anti-laço preservada | Teste de premissa (a `lambda` sobrevive à morte da tela; o método ligado não) + varredura de adoção |
+| §3.10 miniaturas | Inicial na chave; cache descarta ao virar o tema | Coca-Cola e Xis Salada voltam a ter placeholders diferentes |
+| §3.12 código morto | Pacote `config/` vazio, 14 constantes planas, 3 métodos de repository, 2 constantes, bloco QSS sobrescrito, 6 seletores órfãos, changelog duplicado, 4 imports | QSS monta nos 2 temas e as paletas ficam espelhadas — chave removida a mais vira `KeyError` no teste, não no balcão |
+| §3.12 comentários | 3 comentários que mentiam, incluindo o que quebrava o boot | O ciclo de import virou teste: subir o import de `AuthService` para o topo reprova |
+| §3.15 cores inline | 20 `setStyleSheet` congelados no tema do boot → QSS global | Teste lê a cor efetiva da paleta antes e depois de alternar o tema |
+| Tipagem | 23 lacunas fechadas — 403 de 403 funções públicas tipadas | Varredura AST, com teste de premissa contra varredor que não acha nada |
 
-Nenhuma linha de produção separa as duas colunas — **só o método de medição.**
-O "vazamento dominante de memória do app" nunca existiu. A bancada ficou
-versionada justamente para esse erro não poder ser cometido uma quarta vez.
+### 🔴 O que a Fase 5 quase quebrou: a seleção do usuário
+
+Trocar `setRowCount(len(dados))` por uma limpeza de verdade parecia mecânico. Não
+era. As views nunca zeravam a tabela antes de repopular, e **nesse caminho o Qt
+mantém a linha corrente** enquanto a contagem não encolhe — `cardapio_view` e
+`impressoras_view` leem `currentRow()` logo depois de repopular.
+
+Medido antes de trocar:
+
+| Roteiro, linha 1 selecionada de 3 | `currentRow()` depois |
+|---|---|
+| `setRowCount(3)` — o que as views faziam | **1** |
+| `setRowCount(0)` + `setRowCount(3)` — a limpeza | **-1** |
+
+No balcão: o pai do Vitor seleciona um produto, clica em Editar, salva — e o
+produto sai selecionado sozinho, com Editar/Excluir/Combo apagando na cara dele.
+A troca cega ainda fazia a tela emitir `produto_selecionado(None)` no meio do
+próprio refresh.
+
+Por isso `limpar_tabela` ganhou `preservar_selecao`, que devolve a linha
+corrente **com os sinais bloqueados** — do lado de fora, indistinguível do
+`setRowCount` de antes. Os 4 testes de `test_selecao_sobrevive_ao_refresh.py`
+ficam vermelhos se alguém tirar o parâmetro.
 
 ### Retomada
 
-Ler este bloco e a **Fase 5** no §6. A `EstoqueView` (§3.11) já está decidida
-— **remover** — e é o primeiro item da fase. Não há decisão pendente do Vitor
-bloqueando o início.
+Ler este bloco e a **Fase 6** no §6. Não há decisão pendente do Vitor
+bloqueando. O empacotamento continua aberto: falta testar o `.exe` numa máquina
+limpa de verdade (`docs/checklist-maquina-limpa.md`).
 
 ---
 
@@ -208,7 +219,7 @@ de produção real."*
 Session em `PendingRollbackError` permanente — sem rollback, o app fica inútil
 até reiniciar o processo. A mesma correção resolve os dois.
 
-### 3.2 🟡 Os 31 modais nunca são destruídos — ⚠️ **achado corrigido na Fase 3**
+### 3.2 ✅ Os 31 modais nunca são destruídos — **achado corrigido na Fase 3, sites padronizados na Fase 5**
 
 > #### ⚠️ Correção (2026-09-06, Fase 3): a medição não reproduz pelo caminho real
 > Este achado foi remedido com PySide6 6.11.2 e um **laço de eventos rodando de
@@ -288,7 +299,7 @@ def executar_modal(modal: QDialog) -> int:
 `while modal.exec() == Accepted:`, **reaproveitando o mesmo modal** entre
 iterações. Ali o descarte fica **fora** do `while`.
 
-### 3.3 🟢 `setCellWidget` não destrói o widget anterior — ❌ **achado derrubado na Fase 3**
+### 3.3 ✅ `setCellWidget` não destrói o widget anterior — ❌ **achado derrubado na Fase 3, views padronizadas na Fase 5**
 
 > #### ❌ Correção (2026-09-06, Fase 3): com laço de eventos, não vaza
 > Escrever o teste de premissa da Fase 3 derrubou este achado. Medido com
@@ -551,7 +562,7 @@ Aplicar idêntico em `loja_pin_dialog.py:74-78`. ~~Necessário **mas não
 suficiente** — sem o §3.2 o widget continua vivo.~~ **Suficiente:** com o §3.2
 rebaixado, o widget já morre sozinho; o que falta é só o hook certo.
 
-### 3.10 🟠 Cache de miniaturas: teto OK, chave errada
+### 3.10 ✅ Cache de miniaturas: teto OK, chave errada — **RESOLVIDO (Fase 5)**
 
 **Severidade: MÉDIA (bug visível).** ✅ **provado.**
 
@@ -575,7 +586,7 @@ Correção de uma linha: incluir a inicial na chave.
 ⚠️ Reportado também: o cache lê o `ThemeController` mas nunca se inscreve nele —
 placeholders ficam com as cores do tema antigo após alternar Claro/Escuro.
 
-### 3.11 🟡 Tela fantasma: `EstoqueView` é inalcançável
+### 3.11 ✅ Tela fantasma: `EstoqueView` é inalcançável — **RESOLVIDO (Fase 5)**
 
 **Severidade: MÉDIA.** ✅ **provado.**
 
@@ -592,10 +603,34 @@ _SECAO_EQUIPE   = (Funcionários, Relatórios, Configurações)
 um placeholder de um módulo que está no backlog pós-V1 — legítimo como
 intenção, mas hoje é peso morto carregado no boot e no `.exe`.
 
-**Decisão pendente:** remover até a fase de Estoque começar, ou manter e
-documentar como placeholder consciente?
+**Decisão do Vitor: remover.** Executado na Fase 5 — saiu de `main_window`
+(instanciação, `QStackedWidget`, `_destinos_nav` e `_ROTULOS_LOJA`), o arquivo
+foi deletado e a tela saiu da fixture `todas_as_telas`. O git guarda o código
+para quando a fase de Estoque começar. `tests/ui/test_main_window.py` impede a
+volta da tela fantasma: destino sem card na Central de Loja agora reprova.
 
-### 3.12 🟡 Código morto, QSS órfão e documentação que mente
+### 3.12 ✅ Código morto, QSS órfão e documentação que mente — **RESOLVIDO (Fase 5)**
+
+> #### ✅ Resolvido na Fase 5 (2026-09-06)
+> Toda a tabela abaixo foi limpa. Dois pontos merecem registro:
+>
+> **O comentário de `auth_service` era o item perigoso, e o diagnóstico
+> acertou.** Ele afirmava que `loja_config_service` não importa `auth_service`
+> no nível de módulo. Importa — linha 29 de lá. Subir aquele import para o topo
+> foi reproduzido antes de reescrever o comentário e derruba o boot com
+> `ImportError: cannot import name 'AuthService' from partially initialized
+> module`. Agora o convite virou `tests/unit/test_ciclo_de_imports.py`.
+>
+> **As "constantes planas" foram embora inteiras, não só as 15 mortas.** O
+> último leitor das 7 restantes era `comprovante_dialog`, e ele foi para o QSS
+> global junto com o §3.15 — que é exatamente o que o comentário do bloco
+> mandava fazer ("ao tornar um widget reativo, prefira ler de
+> `TEMA_ESCURO`/`TEMA_CLARO` via `ThemeController`").
+>
+> ⚠️ **Uma remoção com ressalva:** `PIN_MIN_DIGITOS = 4` era uma regra de
+> negócio que nunca chegou a ser implementada — nenhum ponto do app valida o
+> tamanho mínimo do PIN. Sair não muda comportamento, mas apaga a intenção. Se
+> exigir 4 dígitos ainda for desejado, entra como validação de verdade (§8).
 
 **Severidade: BAIXA a MÉDIA.** ⚠️ reportado, exceto onde marcado.
 
@@ -647,7 +682,7 @@ Registrado para não gastar tempo do time revisitando:
 - **Identity map não cresce** (§2.4).
 - **Cache de miniaturas já tem teto rígido** (§3.10).
 
-### 3.14 🟡 Assinantes do tema por lambda sem receptor
+### 3.14 ✅ Assinantes do tema por lambda sem receptor — **RESOLVIDO (Fase 5)**
 
 **Severidade: MÉDIA (armadilha latente, não vazamento ativo).** 🔍 verificado.
 
@@ -660,7 +695,7 @@ vazamento no instante em que alguém recriar uma dessas telas.
 `toggled` → `alternar_para`) que **só não entra em laço infinito por causa da
 guarda `if claro == self._claro: return`** (`controller.py:53-54`).
 
-### 3.15 🟡 Cores de tema congeladas em `setStyleSheet` inline
+### 3.15 ✅ Cores de tema congeladas em `setStyleSheet` inline — **RESOLVIDO (Fase 5)**
 
 **Severidade: MÉDIA (visual).** 🔍 verificado. `comanda_view.py:117-119` e ~11
 cópias do mesmo stylesheet de erro. Resolvido uma vez na construção e nunca
@@ -1036,29 +1071,58 @@ Nenhuma linha de `services/`, `repository/`, `domain/` ou `hardware/` alterada.
 > Quantos widgets uma linha usa é detalhe de layout que muda sem ser bug; o que
 > nunca pode acontecer é o total subir a cada `atualizar()`.
 
-### Fase 5 — Higiene da UI ⏸️ PRÓXIMA (0 de 9)
+### Fase 5 — Higiene da UI ✅ CONCLUÍDA (2026-09-06)
 
 > Herdou da Fase 4 os itens que deixaram de ser correção de vazamento e viraram
-> padronização. A `EstoqueView` já está decidida — **remover** (§8) —, então a
-> fase começa sem bloqueio.
+> padronização. Fechou os 9, cada um com o teste que o reprova quando desfeito.
 
-- [ ] 🟢 **Remover a `EstoqueView`** (§3.11) — decisão do Vitor: sai de
-      `main_window` (instanciação, `QStackedWidget` e `_destinos_nav`), o
-      arquivo é deletado e a tela sai da fixture `todas_as_telas`. O git guarda
-      o código para quando a fase de Estoque começar
-- [ ] 🟡 `executar_modal()` nos 31 sites (§3.2) — **herdado da Fase 4**. É
-      padronização, não correção: o caminho real do app já libera o diálogo
-- [ ] 🟡 `limpar_tabela()`/`definir_celula()` nas 6 views com tabela (§3.3) —
-      **herdado da Fase 4**. Ganho é determinismo de repaint
-- [ ] 🟡 Lambdas do tema → métodos ligados (§3.14), **mantendo a guarda
-      anti-laço** — **herdado da Fase 4**. Latente: só vira vazamento se alguém
-      passar a recriar uma tela
-- [ ] Chave do cache de miniaturas (§3.10)
-- [ ] Código morto, QSS órfão, constantes não lidas (§3.12)
-- [ ] **Corrigir os comentários que mentem** (§3.12) — especialmente
-      `auth_service.py:50-52`, que convida a uma limpeza que quebra o boot
-- [ ] Cores inline → QSS global (§3.15)
-- [ ] Tipagem `typing` nas funções públicas; nomes autoexplicativos
+- [x] 🟢 **Remover a `EstoqueView`** (§3.11) — saiu de `main_window`
+      (instanciação, `QStackedWidget`, `_destinos_nav` e `_ROTULOS_LOJA`), o
+      arquivo foi deletado e a tela saiu da fixture `todas_as_telas`. O git
+      guarda o código para quando a fase de Estoque começar.
+      **Achado no caminho:** a `MainWindow` não era montada por **nenhum**
+      teste — a peça que compõe todas as outras, e um erro nela só apareceria
+      no boot. `tests/ui/test_main_window.py` fechou a lacuna, e é ele que
+      transforma o §3.11 em invariante: destino sem card na Central de Loja
+      (a tela fantasma) e card sem destino agora reprovam
+- [x] 🟡 `executar_modal()` nos 31 sites (§3.2) — 29 diretos; os 2 laços
+      `while` do cardápio reaproveitam a mesma instância e usam
+      `descartar_modal` num `finally` **fora** do laço, porque o caminho de
+      sucesso sai por `return` de dentro dele
+- [x] 🟡 `limpar_tabela()`/`definir_celula()` nas views com tabela (§3.3) —
+      6 views + `secao_cancelamentos`. **Não era mecânico:** ver o achado da
+      seleção no §0. `limpar_tabela` ganhou `preservar_selecao`
+- [x] 🟡 Lambdas do tema → métodos ligados (§3.14), **com a guarda anti-laço
+      preservada** e testada: se a guarda de `alternar_para` sumir, o teste da
+      pílula não falha por asserção — estoura por recursão
+- [x] Chave do cache de miniaturas (§3.10) — a inicial entrou na chave, e a
+      mesma função `_inicial()` alimenta a chave e o desenho, que é o que
+      amarra as duas pontas. Junto, o cache passou a descartar os placeholders
+      quando o tema vira — sem assinar o `ThemeController` (seria uma conexão
+      permanente a um singleton, o próprio §3.14), só comparando a paleta por
+      identidade a cada miniatura pedida
+- [x] Código morto, QSS órfão, constantes não lidas (§3.12) — pacote `config/`
+      vazio, o bloco QSS `pilula-ciano` que era sobrescrito 220 linhas abaixo,
+      6 seletores sem widget, **as 22 "constantes planas" inteiras** (o último
+      leitor, `comprovante_dialog`, foi para o QSS global no §3.15), 3 métodos
+      de repository, 2 constantes de módulo, a 2ª cópia corrompida do changelog
+      e 4 imports
+- [x] **Corrigir os comentários que mentem** (§3.12) — `auth_service.py`
+      afirmava que `loja_config_service` **não** importa `auth_service` no
+      nível de módulo. Importa, na linha 29 de lá: subir aquele import fecha o
+      ciclo e o app não abre. Reproduzido antes de reescrever o comentário, e
+      agora é `tests/unit/test_ciclo_de_imports.py`. Mais 2: o de `main.py`
+      creditava uma economia de PySide6 que não acontece (o Qt entra 60 linhas
+      antes) e o de `comanda_view` dava o motivo errado para o `QShortcut` em
+      atributo (quem o mantém vivo é o parent, não o atributo)
+- [x] Cores inline → QSS global (§3.15) — 20 `setStyleSheet` que resolviam a
+      cor **na construção**. Como stylesheet por widget vence o QSS global, a
+      paleta do boot ficava congelada ali e a troca de tema não alcançava
+      aquelas linhas. Junto vieram os 10 pares `unpolish`/`polish` copiados
+      pela UI, agora um só em `ui/widgets/estilo.py`
+- [x] Tipagem `typing` nas funções públicas — o projeto já estava em **380 de
+      403**; as 23 que faltavam eram as sobrecargas de evento do Qt, os
+      `session` do seed e 3 callbacks. Agora é invariante, não estado do dia
 
 > **`gc.collect()` na destruição de telas pesadas: item removido.** Estava aqui
 > como "se a medição mostrar ganho". A medição existe agora
@@ -1088,8 +1152,9 @@ Nenhuma linha de `services/`, `repository/`, `domain/` ou `hardware/` alterada.
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Testes verdes | 620/621 (1 falha) | **727, 0 xfail, 0 falhas** (Fase 4) |
-| Arquivos de teste de UI | 0 | **8** (Fase 4) |
+| Testes verdes | 620/621 (1 falha) | **775, 0 xfail, 0 falhas** (Fase 5) |
+| Arquivos de teste de UI | 0 | **15** (Fase 5) |
+| `MainWindow` coberta por teste | ❌ nenhum | ✅ **5 testes** (Fase 5) |
 | Testes marcados `xfail` | 7 (Fase 0) | ✅ **0** — reescritos (Fase 4) |
 | Caminhos de produção com `rollback()` | 0 | **todos** (Fase 1) |
 | `PRAGMA foreign_keys` no app real | 0 | ✅ **1** (Fase 1) |
@@ -1101,8 +1166,16 @@ Nenhuma linha de `services/`, `repository/`, `domain/` ou `hardware/` alterada.
 | Cópias de "limpar layout" | 4, em 6 sites | ✅ **1** (Fase 4, §3.7) |
 | Sites com a versão SEM `setParent(None)` | 3 (`caixa_view`, `mesas_view` ×2) | ✅ **0** (Fase 4) |
 | Diálogos de PIN limpando o campo no hook certo | 0 de 2 | ✅ **2 de 2** (Fase 4, §3.9) |
-| Linhas em `src/` | 17.697 | **18.526** (+829) — ver nota |
-| Linhas em `tests/` | 6.794 | **8.925** (+2.131) |
+| Aberturas de modal fora de `executar_modal` | 31 de 31 | ✅ **0** (Fase 5, §3.2) |
+| Tabelas repopuladas sem destruir os cell widgets | 6 views | ✅ **0** (Fase 5, §3.3) |
+| Assinantes de `ThemeController.mudou` sem receptor | 2 de 2 | ✅ **0** (Fase 5, §3.14) |
+| Cores de tema congeladas em `setStyleSheet` | 20 | ✅ **0** (Fase 5, §3.15) |
+| Cópias do par `unpolish`/`polish` | 10 | ✅ **1** (Fase 5) |
+| Telas montadas no boot sem caminho até elas | 1 (`EstoqueView`) | ✅ **0** (Fase 5, §3.11) |
+| Funções públicas sem tipagem completa | 23 de 403 | ✅ **0 de 403** (Fase 5) |
+| "Constantes planas" de tema sem leitor | 14 de 22 | ✅ **bloco inteiro removido** (Fase 5) |
+| Linhas em `src/` | 17.697 | **18.634** (+937) — ver nota |
+| Linhas em `tests/` | 6.794 | **10.043** (+3.249) |
 
 > **Sobre `src/` ter crescido 829 linhas.** Uma faxina que aumenta o código
 > pede explicação. As cópias apagadas (10 de `_formatar_reais`, 4 de "limpar
@@ -1112,6 +1185,12 @@ Nenhuma linha de `services/`, `repository/`, `domain/` ou `hardware/` alterada.
 > explica **por que** cada um existe, que é o que impede a próxima limpeza de
 > desfazê-los. Encolher `src/` nunca foi meta desta remasterização; a meta era
 > não ter duas versões da mesma regra. Essa parte está no quadro acima.
+>
+> A Fase 5 acrescentou só **+108 linhas** a `src/` — apagou uma tela inteira,
+> um pacote vazio, um bloco QSS morto e 22 constantes, e gastou o saldo em
+> `ui/widgets/estilo.py` e nas regras de QSS que substituíram os 20
+> `setStyleSheet`. `src/` tem hoje **92 arquivos**, um a menos que no início
+> da fase.
 
 ### 7.2 Memória — o "depois" que corrigiu o "antes"
 
@@ -1215,16 +1294,22 @@ leituras muito mais baratas.
 | 2026-09-06 | Bancada de medição versionada em `tools/medir_memoria.py` | Três achados do documento vieram de uma medição que ninguém conseguia repetir. `ctypes` em vez de `psutil` porque nenhuma dependência nova entra — nem em ferramenta. Fica fora de `src/`, então não entra no `.exe` |
 | 2026-09-06 | Toda correção da Fase 4 foi conferida **desfazendo-a** | Ver a suíte verde depois da correção não prova nada — foi assim que os `xfail` nasceram medindo a coisa errada. Sem o `setParent(None)`, 6 testes de `test_layout_utils.py` falham; com o `closeEvent` de volta, 6 dos 10 de `test_pin_dialogs.py` falham |
 | 2026-09-06 | `gc.collect()` na destruição de telas **descartado** da Fase 5 | Estava listado como "se a medição mostrar ganho". A medição existe agora e mostra o contrário: não há o que recolher, e a pausa custa caro na máquina fraca do food truck |
+| 2026-09-06 | **`limpar_tabela` ganhou `preservar_selecao`** (Fase 5) | A troca cega apagaria a seleção que hoje sobrevive ao refresh: as views chamavam `setRowCount(len(dados))` sem zerar antes, e nesse caminho o Qt mantém a linha corrente. Medido antes de trocar (linha 1 de 3 selecionada: `setRowCount(3)` → 1; `setRowCount(0)`+`setRowCount(3)` → -1). Sem o parâmetro, editar um produto o deixava sem seleção e apagava os botões do rodapé. A restauração vai com os sinais bloqueados, para o observável ficar idêntico ao de antes |
+| 2026-09-06 | **`MainWindow` ganhou teste** (Fase 5) | Remover a `EstoqueView` mexe em quatro lugares do mesmo arquivo, e descobriu-se que **nenhum teste montava a `MainWindow`** — a peça que compõe todas as outras. Um esquecimento ali só apareceria no boot. Os 5 testes novos também transformam o §3.11 em invariante: destino sem card no hub, e card sem destino, agora reprovam |
+| 2026-09-06 | Cache de miniaturas **não assina** o `ThemeController` (Fase 5) | O §3.10 pedia que os placeholders acompanhassem a troca de tema. Assinar o sinal criaria uma conexão permanente a um singleton, sem ninguém para desfazê-la — o próprio §3.14. Em vez disso o cache compara a paleta por identidade a cada miniatura pedida e descarta o que foi pintado com a anterior |
+| 2026-09-06 | Pares `unpolish`/`polish` unificados junto com o §3.15 (Fase 5) | Não estavam na lista dos 9 itens. Entraram porque o §3.15 precisava do mesmo par para trocar a propriedade de tom, e deixar nove cópias quase idênticas ao lado do utilitário novo seria criar exatamente o cheiro que esta remasterização existe para matar (§3.7, §3.8) |
+| 2026-09-06 | `PIN_MIN_DIGITOS = 4` **removida** com o resto do código morto (Fase 5) | ⚠️ Era uma regra de negócio que **nunca foi implementada**: nenhum ponto do app valida o tamanho mínimo do PIN. Removê-la não muda comportamento nenhum, mas apaga a intenção — se exigir 4 dígitos ainda for desejado, é decisão de produto e entra como validação de verdade, não como constante sem leitor |
 
 ### Decisões pendentes do Vitor
 
 **Nenhuma.** As duas que bloqueavam o trabalho foram decididas em 2026-09-06 e
 estão registradas no quadro acima:
 
-~~1. `EstoqueView`~~ — **decidido**: remover. É o primeiro item da Fase 5.
+~~1. `EstoqueView`~~ — **decidido**: remover. ✅ Executado na Fase 5.
 
 ~~2. Escopo da Fase 4~~ — **decidido**: enxuta, mais a medição de RSS. Fase
-concluída; os 31 + 6 sites e as lambdas do tema migraram para a Fase 5.
+concluída; os 31 + 6 sites e as lambdas do tema migraram para a Fase 5, e ✅
+foram executados lá.
 
 ~~3. Formato monetário~~ — **decidido em 2026-09-06**: `R$ 1.234,50`. Ver §8.
 

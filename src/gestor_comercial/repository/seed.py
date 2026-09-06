@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+from sqlalchemy.orm import Session
+
 from gestor_comercial.domain.categoria import Categoria
 from gestor_comercial.domain.combo_item import ComboItem
 from gestor_comercial.domain.enums import PerfilUsuario
@@ -211,14 +213,14 @@ def hash_pin(pin: str, salt: str) -> str:
     return base64.b64encode(digest).decode()
 
 
-def seed_mesas(session) -> None:
+def seed_mesas(session: Session) -> None:
     existentes = {m.numero for m in session.query(Mesa.numero).all()}
     for numero in range(1, TOTAL_MESAS + 1):
         if numero not in existentes:
             session.add(Mesa(numero=numero))
 
 
-def seed_usuarios_turno(session) -> None:
+def seed_usuarios_turno(session: Session) -> None:
     # Sem PIN pessoal (§3.13, cascata unificada): o `Usuario` só existe pra
     # identificar QUEM está logando no dropdown da tela de login — a senha
     # em si (Nível 1, padrão "26407200") vive em `LojaConfig`, bootstrapada
@@ -234,7 +236,7 @@ def seed_usuarios_turno(session) -> None:
         )
 
 
-def seed_funcionarios_turno(session) -> None:
+def seed_funcionarios_turno(session: Session) -> None:
     # Idempotente por nome (não por contagem): precisa rodar tanto num boot
     # fresco quanto numa instalação existente que só ganhou os dois
     # `Usuario` via migração de dados (d3f8a1c4e6b9) e ainda não tem os
@@ -260,7 +262,7 @@ def seed_funcionarios_turno(session) -> None:
             )
 
 
-def seed_cardapio(session) -> None:
+def seed_cardapio(session: Session) -> None:
     categorias_existentes = {c.nome: c for c in session.query(Categoria).all()}
     produtos_existentes = {p.nome for p in session.query(Produto.nome).all()}
 
@@ -284,7 +286,7 @@ def seed_cardapio(session) -> None:
                 produtos_existentes.add(nome_produto)
 
 
-def seed_combos(session) -> None:
+def seed_combos(session: Session) -> None:
     categoria = session.query(Categoria).filter_by(nome=CATEGORIA_COMBOS).first()
     if categoria is None:
         categoria = Categoria(nome=CATEGORIA_COMBOS)

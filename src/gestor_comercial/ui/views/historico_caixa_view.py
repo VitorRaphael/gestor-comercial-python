@@ -17,6 +17,8 @@ abaixo); esta view só sabe operar sobre o fechamento selecionado na tabela.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from datetime import date
 from decimal import Decimal
 
@@ -68,6 +70,8 @@ from gestor_comercial.ui.widgets.kpi_card import CardKpi
 from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.layout_utils import limpar_layout
+from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
+from gestor_comercial.ui.widgets.modais import executar_modal
 
 _COLUNAS = ["DATA", "TURNO / SEQ", "OPERADOR", "FATURAMENTO", "DIFERENÇA", "AÇÕES"]
 _COLUNA_ACOES = 5
@@ -121,9 +125,7 @@ class HistoricoCaixaView(QWidget):
         layout_externo.addLayout(self._montar_filtros())
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet(
-            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
-        )
+        self._label_erro.setObjectName("labelErro")
         layout_externo.addWidget(self._label_erro)
 
         self._aviso_impressao = AvisoDeImpressao()
@@ -298,7 +300,7 @@ class HistoricoCaixaView(QWidget):
     def periodo_atual(self) -> str:
         return self._seletor_mes.currentText()
 
-    def conectar_mudanca_periodo(self, callback) -> None:
+    def conectar_mudanca_periodo(self, callback: Callable[[int], None]) -> None:
         self._seletor_mes.currentIndexChanged.connect(callback)
 
     def _popular_pills_operador(self) -> None:
@@ -379,7 +381,7 @@ class HistoricoCaixaView(QWidget):
         self._label_total_periodo.setText(formatar_reais(faturamento_periodo))
 
     def _preencher_tabela(self) -> None:
-        self._tabela.setRowCount(len(self._fechamentos))
+        limpar_tabela(self._tabela, linhas=len(self._fechamentos))
         for linha, caixa in enumerate(self._fechamentos):
             self._preencher_linha(linha, caixa)
         self._tabela.clearSelection()
@@ -425,7 +427,7 @@ class HistoricoCaixaView(QWidget):
         botao_ver = QPushButton("🖨 2ª via")
         botao_ver.setProperty("variante", "pilula-impressora")
         botao_ver.clicked.connect(lambda _=False, caixa_id=caixa.id: self._abrir_comprovante(caixa_id))
-        self._tabela.setCellWidget(linha, _COLUNA_ACOES, botao_ver)
+        definir_celula(self._tabela, linha, _COLUNA_ACOES, botao_ver)
 
     # ------------------------------------------------------------------
     # Ações (acionadas pela barra de ações compartilhada de RelatoriosView)
@@ -454,7 +456,7 @@ class HistoricoCaixaView(QWidget):
             self._label_erro.setText(str(erro))
             return
         modal = ComprovanteFechamentoDialog(caixa, texto, self)
-        modal.exec()
+        executar_modal(modal)
 
     def reimprimir(self) -> None:
         self._label_erro.setText("")
@@ -486,7 +488,7 @@ class HistoricoCaixaView(QWidget):
         resumo = self._caixas.resumo_cancelamentos(caixa.id)
 
         modal = _CancelamentosDialog(titulo, resumo, self)
-        modal.exec()
+        executar_modal(modal)
 
     def _preencher_gaveta(self, gaveta: FechamentoGaveta) -> None:
         self._label_gaveta_identificacao.setText(gaveta.identificacao)

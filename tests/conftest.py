@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from gestor_comercial.domain import *  # noqa: F401,F403 - registra os mappers
+import gestor_comercial.domain  # noqa: F401 - importar o pacote já registra os mappers
 from gestor_comercial.domain.caixa import Caixa
 from gestor_comercial.domain.categoria import Categoria
 from gestor_comercial.domain.enums import PerfilUsuario

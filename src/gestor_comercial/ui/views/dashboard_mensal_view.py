@@ -9,6 +9,8 @@ entrar na aba) busca `CaixaService.resumo_mensal`.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from datetime import date
 from decimal import Decimal
 
@@ -96,9 +98,7 @@ class DashboardMensalView(QWidget):
         layout_externo.addLayout(self._montar_filtro_mes())
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet(
-            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
-        )
+        self._label_erro.setObjectName("labelErro")
         layout_externo.addWidget(self._label_erro)
 
         # Corpo rolável: sem isso, os painéis (formas de pagamento, mix de
@@ -305,7 +305,7 @@ class DashboardMensalView(QWidget):
     def periodo_atual(self) -> str:
         return self._seletor_mes.currentText()
 
-    def conectar_mudanca_periodo(self, callback) -> None:
+    def conectar_mudanca_periodo(self, callback: Callable[[int], None]) -> None:
         self._seletor_mes.currentIndexChanged.connect(callback)
 
     def _popular_pills_operador(self) -> None:

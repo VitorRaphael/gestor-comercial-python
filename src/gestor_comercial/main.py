@@ -77,8 +77,9 @@ def main() -> int:
         return 1
 
     # Import tardio: só depois que os mappers do domain já foram registrados
-    # pelas migrations/seed acima, e para não pagar o custo de importar
-    # PySide6 + todas as views antes de sabermos que o banco sobe.
+    # pelas migrations/seed acima, e para não montar as dez views antes de
+    # sabermos que o banco sobe. (O PySide6 em si já entrou no topo deste
+    # arquivo — a economia é das views e dos services, não do Qt.)
     from gestor_comercial.repository.unit_of_work import UnitOfWork
     from gestor_comercial.services.auth_service import AuthService
     from gestor_comercial.services.caixa_service import CaixaService

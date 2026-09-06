@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from gestor_comercial.services.caixa_service import ResumoCancelamentos
 from gestor_comercial.ui.formatacao import formatar_reais
+from gestor_comercial.ui.widgets.tabelas import limpar_tabela
 
 _COLUNAS_POR_PRODUTO = ["Produto", "Qtd cancelada", "Subtotal"]
 _COLUNAS_DETALHADO = ["Horário", "Origem", "Item", "Autorizado por", "Motivo"]
@@ -81,8 +82,8 @@ class SecaoCancelamentos(QWidget):
             self._label_detalhado.setVisible(False)
             self._tabela_por_produto.setVisible(False)
             self._tabela_detalhado.setVisible(False)
-            self._tabela_por_produto.setRowCount(0)
-            self._tabela_detalhado.setRowCount(0)
+            limpar_tabela(self._tabela_por_produto)
+            limpar_tabela(self._tabela_detalhado)
             return
 
         self._label_por_produto.setVisible(True)
@@ -95,7 +96,7 @@ class SecaoCancelamentos(QWidget):
             f"    |    Impacto financeiro: {formatar_reais(resumo.valor_total)}"
         )
 
-        self._tabela_por_produto.setRowCount(len(resumo.por_produto))
+        limpar_tabela(self._tabela_por_produto, linhas=len(resumo.por_produto))
         for linha, item in enumerate(resumo.por_produto):
             self._tabela_por_produto.setItem(linha, 0, QTableWidgetItem(item.produto_nome))
             self._tabela_por_produto.setItem(
@@ -105,7 +106,7 @@ class SecaoCancelamentos(QWidget):
                 linha, 2, QTableWidgetItem(formatar_reais(item.valor))
             )
 
-        self._tabela_detalhado.setRowCount(len(resumo.detalhado))
+        limpar_tabela(self._tabela_detalhado, linhas=len(resumo.detalhado))
         for linha, ocorrencia in enumerate(resumo.detalhado):
             self._tabela_detalhado.setItem(
                 linha, 0, QTableWidgetItem(ocorrencia.quando.strftime("%H:%M"))

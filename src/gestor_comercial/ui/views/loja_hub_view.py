@@ -1,7 +1,7 @@
 """Central de Loja: hub administrativo com os módulos de configuração da
 operação, organizados por área em cards.
 
-Agrupa Cardápio, Estoque, Impressoras, Funcionários, Relatórios e
+Agrupa Cardápio, Impressoras, Funcionários, Relatórios e
 Configurações atrás de um único ponto de entrada com PIN na sidebar (ver
 `MainWindow._abrir_area_loja`). Não tem botão de saída próprio -- voltar ao
 PDV é só clicar em "Mesas" na sidebar, como qualquer outra tela do shell.
@@ -10,6 +10,7 @@ PDV é só clicar em "Mesas" na sidebar, como qualquer outra tela do shell.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from gestor_comercial.ui.widgets.flow_layout import FlowLayout
@@ -61,7 +62,7 @@ class _CardModulo(QFrame):
         bloco_texto.addWidget(sub)
         layout.addLayout(bloco_texto, 1)
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802 (override Qt)
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (override Qt)
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicado.emit()
         super().mousePressEvent(event)

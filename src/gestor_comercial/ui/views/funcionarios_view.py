@@ -54,6 +54,8 @@ from gestor_comercial.services.pagamento_service import PagamentoService
 from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.rotulo_identidade import rotulo_identidade
 from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.widgets.modais import executar_modal
+from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 
 _CARGOS_SUGERIDOS = [cargo.value for cargo in CargoFuncionario]
 
@@ -110,9 +112,7 @@ class FuncionariosView(QWidget):
         layout_externo.addLayout(self._montar_cabecalho())
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet(
-            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
-        )
+        self._label_erro.setObjectName("labelErro")
         layout_externo.addWidget(self._label_erro)
 
         layout_externo.addLayout(self._montar_kpis())
@@ -286,9 +286,7 @@ class FuncionariosView(QWidget):
 
     def _atualizar_pills(self) -> None:
         for chave, pill in self._pills_status.items():
-            pill.setProperty("ativo", chave == self._filtro_status)
-            pill.style().unpolish(pill)
-            pill.style().polish(pill)
+            aplicar_propriedade(pill, "ativo", chave == self._filtro_status)
 
     # ------------------------------------------------------------------
     # Interação
@@ -309,7 +307,7 @@ class FuncionariosView(QWidget):
 
     def _criar(self) -> None:
         modal = _FuncionarioDialog(parent=self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         nome, cargo, telefone = modal.resultado()
 
@@ -327,7 +325,7 @@ class FuncionariosView(QWidget):
         if funcionario is None:
             return
         modal = _FuncionarioDialog(funcionario=funcionario, parent=self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         nome, cargo, telefone = modal.resultado()
 
@@ -391,7 +389,7 @@ class FuncionariosView(QWidget):
             return
 
         modal = _QuitarConsumoDialog(funcionario.nome, saldo, self)
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         try:
             valor, senha_gerente = modal.resultado()

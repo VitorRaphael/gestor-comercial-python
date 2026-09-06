@@ -45,7 +45,6 @@ from gestor_comercial.ui.views.caixa_view import CaixaView
 from gestor_comercial.ui.views.cardapio_view import CardapioView
 from gestor_comercial.ui.views.comanda_view import ComandaView
 from gestor_comercial.ui.views.configuracoes_view import ConfiguracoesView
-from gestor_comercial.ui.views.estoque_view import EstoqueView
 from gestor_comercial.ui.views.funcionarios_view import FuncionariosView
 from gestor_comercial.ui.views.impressoras_view import ImpressorasView
 from gestor_comercial.ui.views.loja_hub_view import LojaHubView
@@ -56,7 +55,9 @@ from gestor_comercial.ui.views.relatorios_view import RelatoriosView
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.gerente_pin_dialog import GerentePinDialog
 from gestor_comercial.ui.widgets.loja_pin_dialog import LojaPinDialog
+from gestor_comercial.ui.widgets.modais import executar_modal
 from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
+from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 
 # Destinos administrativos atrás do PIN de supervisor da Loja (ver
 # _abrir_area_loja): só existem como card dentro do hub "Central de Loja"
@@ -64,7 +65,7 @@ from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
 # acesso e tranca de novo assim que qualquer um deles é abandonado por fora
 # da área da Loja (ex.: clique direto em "Mesas"). "Configurações" fica de
 # fora: não expõe dado sensível, não precisa de PIN.
-_ROTULOS_LOJA = {"Loja", "Cardápio", "Estoque", "Impressoras", "Funcionários", "Relatórios"}
+_ROTULOS_LOJA = {"Loja", "Cardápio", "Impressoras", "Funcionários", "Relatórios"}
 
 # Módulos alcançados só a partir de um card da Central de Loja (todo
 # `_ROTULOS_LOJA` menos o próprio hub, mais "Configurações", que não é
@@ -147,7 +148,6 @@ class MainWindow(QMainWindow):
 
         self._caixa_view = CaixaView(caixa_service, self._impressao)
         self._cardapio_view = CardapioView(cardapio_service)
-        self._estoque_view = EstoqueView()
         self._funcionarios_view = FuncionariosView(
             self._funcionarios, self._pagamentos, auth_service, caixa_service
         )
@@ -172,7 +172,6 @@ class MainWindow(QMainWindow):
             self._comanda_view,
             self._caixa_view,
             self._cardapio_view,
-            self._estoque_view,
             self._funcionarios_view,
             self._impressoras_view,
             self._relatorios_view,
@@ -214,7 +213,6 @@ class MainWindow(QMainWindow):
             # só não tem UI pra consultar por enquanto. Ver HistoricoCaixaView.
             "Loja": lambda: (self._loja_hub_view, lambda: None),
             "Cardápio": lambda: (self._cardapio_view, self._cardapio_view.atualizar),
-            "Estoque": lambda: (self._estoque_view, self._estoque_view.atualizar),
             "Funcionários": lambda: (self._funcionarios_view, self._funcionarios_view.atualizar),
             "Impressoras": lambda: (self._impressoras_view, self._impressoras_view.atualizar),
             "Relatórios": lambda: (self._relatorios_view, self._relatorios_view.atualizar),
@@ -238,7 +236,7 @@ class MainWindow(QMainWindow):
 
         layout.addStretch()
 
-        # Cardápio, Estoque, Funcionários, Impressoras, Relatórios e
+        # Cardápio, Funcionários, Impressoras, Relatórios e
         # Configurações vivem só como cards dentro da Central de Loja (ver
         # `LojaHubView`) -- não duplicam entrada aqui na sidebar. Um único
         # atalho, atrás do PIN de supervisor (ver LojaPinDialog/
@@ -283,7 +281,7 @@ class MainWindow(QMainWindow):
 
     def _montar_barra_voltar_loja(self) -> QWidget:
         """Único caminho de volta visível dentro de um módulo administrativo
-        (Cardápio, Estoque, Funcionários, Impressoras, Relatórios,
+        (Cardápio, Funcionários, Impressoras, Relatórios,
         Configurações): sem isto, sair de um desses exigia lembrar que o
         próprio botão "Central de Loja" da sidebar também serve pra voltar.
         Fica oculta fora desses módulos (ver `_navegar_agora`)."""
@@ -328,7 +326,7 @@ class MainWindow(QMainWindow):
             # digitado há uma hora não prova quem está com o mouse na mão
             # agora, e a área guarda faturamento/diferença de caixa do mês.
             modal = LojaPinDialog(self._auth, self)
-            if modal.exec() != QDialog.DialogCode.Accepted:
+            if executar_modal(modal) != QDialog.DialogCode.Accepted:
                 return
             self._loja_desbloqueada = True
         self._navegar_agora(rotulo)
@@ -346,7 +344,7 @@ class MainWindow(QMainWindow):
             # sensíveis, e um PIN digitado há uma hora não prova quem está
             # com o mouse na mão agora.
             modal = GerentePinDialog(self._auth, self)
-            if modal.exec() != QDialog.DialogCode.Accepted:
+            if executar_modal(modal) != QDialog.DialogCode.Accepted:
                 return
             self._caixa_desbloqueada = True
         self._navegar_agora("Caixa")
@@ -383,9 +381,7 @@ class MainWindow(QMainWindow):
 
     def _marcar_nav_ativo(self, rotulo: str | None) -> None:
         for nome, botao in self._botoes_nav.items():
-            botao.setProperty("ativo", "true" if nome == rotulo else "false")
-            botao.style().unpolish(botao)
-            botao.style().polish(botao)
+            aplicar_propriedade(botao, "ativo", "true" if nome == rotulo else "false")
 
     def _abrir_comanda(self, comanda: Comanda) -> None:
         self._comanda_view.carregar_comanda(comanda)
@@ -407,7 +403,7 @@ class MainWindow(QMainWindow):
     def _abrir_pagamento(self, comanda_id: int) -> None:
         self._aviso_impressao.limpar()
         modal = PagamentoDialog(self._pagamentos, comanda_id, self)
-        modal.exec()
+        executar_modal(modal)
         if modal.comanda_fechada:
             # Recibo só quando a conta fecha: um cupom por pagamento parcial
             # gastaria bobina e nenhum deles traria o total final nem o troco.

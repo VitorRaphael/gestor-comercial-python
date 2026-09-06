@@ -12,11 +12,14 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QKeyEvent,
     QLinearGradient,
+    QPaintEvent,
     QPainter,
     QPainterPath,
     QPen,
     QRadialGradient,
+    QShowEvent,
 )
 from PySide6.QtWidgets import (
     QComboBox,
@@ -77,7 +80,7 @@ class _LogoIsometrico(QWidget):
         self._escura = QColor(escura)
         self.update()
 
-    def paintEvent(self, event) -> None:  # noqa: N802 (override Qt)
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -310,9 +313,20 @@ class LoginView(QWidget):
         # Tema agora só se troca na tela de Configurações (dentro do shell
         # autenticado) — se o usuário deslogar depois de trocar, o login
         # precisa refletir sem precisar de um seletor próprio aqui.
-        controlador.mudou.connect(
-            lambda _tokens: self._aplicar_tema(_TEMA_CLARO if controlador.claro else _TEMA_ESCURO)
-        )
+        controlador.mudou.connect(self._ao_mudar_tema)
+
+    def _ao_mudar_tema(self, _tokens: dict[str, str]) -> None:
+        """Repinta o logo isométrico, que é `QPainter` e não pega o QSS global.
+
+        Método ligado, e não `lambda`: o `ThemeController` é singleton e vive o
+        processo inteiro, então uma conexão sem objeto receptor nunca seria
+        desfeita e seguraria a tela junto. Hoje a `LoginView` também vive o
+        processo inteiro e isso não cresce — mas basta alguém passar a recriar
+        a tela para virar vazamento de verdade (§3.14). Com `self` do outro
+        lado, o Qt desconecta sozinho quando a view morre.
+        """
+        controlador = ThemeController.instancia()
+        self._aplicar_tema(_TEMA_CLARO if controlador.claro else _TEMA_ESCURO)
 
     # ------------------------------------------------------------------
     # Montagem
@@ -534,14 +548,14 @@ class LoginView(QWidget):
     # Teclado físico
     # ------------------------------------------------------------------
 
-    def showEvent(self, event) -> None:  # noqa: N802 (override Qt)
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (override Qt)
         super().showEvent(event)
         # Chamado toda vez que esta tela volta a ficar visível (abertura do
         # app e cada logout) -- garante que o PIN já é lido sem precisar de
         # um clique manual antes.
         self.setFocus()
 
-    def keyPressEvent(self, event) -> None:  # noqa: N802 (override Qt)
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 (override Qt)
         texto = event.text()
         if texto.isdigit():
             self._adicionar_digito_pin(texto)

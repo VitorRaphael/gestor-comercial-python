@@ -44,6 +44,7 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.loja_config_service import MASCARA, LojaConfigService
 from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.widgets.modais import executar_modal
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
@@ -77,9 +78,7 @@ class ConfiguracoesView(QWidget):
         layout.addSpacing(28)
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet(
-            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
-        )
+        self._label_erro.setObjectName("labelErro")
         layout.addWidget(self._label_erro)
 
         layout.addWidget(self._montar_card_tema())
@@ -138,11 +137,29 @@ class ConfiguracoesView(QWidget):
         botao_escuro.setChecked(not controlador.claro)
         botao_claro.toggled.connect(lambda marcado: marcado and controlador.alternar_para(True))
         botao_escuro.toggled.connect(lambda marcado: marcado and controlador.alternar_para(False))
-        controlador.mudou.connect(lambda _tokens: botao_claro.setChecked(controlador.claro))
+        # Guardado em atributo porque `_ao_mudar_tema` precisa dele — e ele
+        # precisa ser um método ligado, não `lambda`; ver o docstring de lá.
+        self._botao_tema_claro = botao_claro
+        controlador.mudou.connect(self._ao_mudar_tema)
 
         cartao_layout.addWidget(pilula)
         bloco_layout.addWidget(cartao)
         return bloco
+
+    def _ao_mudar_tema(self, _tokens: dict[str, str]) -> None:
+        """Espelha na pílula o tema que passou a valer — inclusive quando quem
+        trocou foi outra tela.
+
+        **Isto realimenta de propósito:** `mudou` → `setChecked` → `toggled` →
+        `alternar_para`. O que impede o laço infinito é a guarda
+        `if claro == self._claro: return` em `ThemeController.alternar_para`;
+        mexer aqui ou lá sem olhar para o outro trava o app (§3.14).
+
+        Método ligado, e não `lambda`: o controlador é singleton e vive o
+        processo inteiro, então uma conexão sem objeto receptor nunca seria
+        desfeita e seguraria esta tela junto.
+        """
+        self._botao_tema_claro.setChecked(ThemeController.instancia().claro)
 
     # ------------------------------------------------------------------
     # Seção "Cópia de Segurança"
@@ -307,7 +324,7 @@ class ConfiguracoesView(QWidget):
             rotulo_novo="Nova Senha de Login",
             parent=self,
         )
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         senha_nivel_2_ou_3, nova_senha = modal.resultado()
 
@@ -326,7 +343,7 @@ class ConfiguracoesView(QWidget):
             rotulo_novo="Nova Senha Operacional",
             parent=self,
         )
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         senha_master, nova_senha = modal.resultado()
 
@@ -346,7 +363,7 @@ class ConfiguracoesView(QWidget):
             mascarar_credencial=False,
             parent=self,
         )
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         cpf_atual, nova_senha = modal.resultado()
 
@@ -369,7 +386,7 @@ class ConfiguracoesView(QWidget):
             mascarar_novo=False,
             parent=self,
         )
-        if modal.exec() != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         cpf_atual, novo_cpf = modal.resultado()
 

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtGui import QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -40,6 +40,7 @@ from gestor_comercial.services.exceptions import (
 from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.layout_utils import limpar_layout
+from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 
 _COLUNAS_GRADE = 8
 _ESPACAMENTO = 14
@@ -132,7 +133,7 @@ class _BarraProgresso(QWidget):
         self._percentual = max(0.0, min(100.0, percentual))
         self._reposicionar()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802 (override Qt)
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (override Qt)
         super().resizeEvent(event)
         self._reposicionar()
 
@@ -175,10 +176,7 @@ class MesasView(QWidget):
         coluna.addLayout(self._montar_filtros())
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet(
-            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; "
-            "font-size: 12px; background: transparent;"
-        )
+        self._label_erro.setObjectName("labelErro")
         coluna.addWidget(self._label_erro)
 
         coluna.addWidget(self._montar_container_grade(), 1)
@@ -398,9 +396,7 @@ class MesasView(QWidget):
         }
         for chave, botao in self._botoes_filtro.items():
             botao.setText(f"{_ROTULOS_FILTRO[chave]}  {contagens[chave]}")
-            botao.setProperty("ativo", "true" if chave == self._filtro_atual else "false")
-            botao.style().unpolish(botao)
-            botao.style().polish(botao)
+            aplicar_propriedade(botao, "ativo", "true" if chave == self._filtro_atual else "false")
 
     def _atualizar_painel_direito(self) -> None:
         livres = sum(1 for r in self._resumos if r.status == "livre")

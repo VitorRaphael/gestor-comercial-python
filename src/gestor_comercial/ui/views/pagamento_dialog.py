@@ -66,9 +66,7 @@ class PagamentoDialog(QDialog):
         layout.addWidget(self._label_resumo)
 
         self._label_erro = QLabel("")
-        self._label_erro.setStyleSheet(
-            f"color: {ThemeController.instancia().tokens_atuais['perigo']}; font-size: 12px;"
-        )
+        self._label_erro.setObjectName("labelErro")
         layout.addWidget(self._label_erro)
 
         formulario = QFormLayout()

@@ -29,6 +29,8 @@ dinheiro se estiverem erradas:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -41,6 +43,7 @@ from gestor_comercial.domain.item_comanda import ItemComanda
 from gestor_comercial.hardware.impressora_escpos import (
     BlocoTexto,
     Documento,
+    DriverImpressora,
     ErroDeImpressao,
 )
 from gestor_comercial.hardware.impressora_escpos import abrir_driver as abrir_driver_escpos
@@ -58,6 +61,11 @@ from gestor_comercial.services.comanda_service import ComandaService
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
 from gestor_comercial.services.exceptions import RecursoNaoEncontradoError
 from gestor_comercial.services.transacao import transacional
+
+# Assinatura da fábrica de driver que o `ImpressaoService` aceita. Existe para
+# a costura de teste ter nome: a suíte injeta um driver falso e exercita todo o
+# roteamento sem impressora, sem `escpos` e sem arquivo em disco.
+AbridorDeDriver = Callable[..., AbstractContextManager[DriverImpressora]]
 
 # Nome do grupo cujos itens não têm para onde ir. Aparece na tela do operador
 # junto com o motivo, para ele saber qual categoria configurar.
@@ -106,7 +114,12 @@ class _GrupoDeImpressao:
 class ImpressaoService:
     """Roteia e imprime comanda de produção, recibo do cliente e fechamento (§3.12)."""
 
-    def __init__(self, uow: UnitOfWork, auth: AuthService, abrir_driver=abrir_driver_escpos) -> None:
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        auth: AuthService,
+        abrir_driver: AbridorDeDriver = abrir_driver_escpos,
+    ) -> None:
         self.uow = uow
         self.auth = auth
         # `abrir_driver` injetável é a costura de teste: a suíte passa um driver

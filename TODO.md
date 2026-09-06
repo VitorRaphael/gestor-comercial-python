@@ -5,9 +5,9 @@
 > **2026-09-06 — Remasterização da V1.0 em andamento.** A faxina final antes da
 > produção (memória, integridade de dados, duplicação, código morto) tem plano
 > próprio em [`REMASTERIZACAO-V1.md`](REMASTERIZACAO-V1.md), com 8 fases e
-> contrato de zero-regressão. Suíte: **727 passando, 0 `xfail`, 0 falhas**.
-> **Fases 0 a 4 concluídas; a próxima é a Fase 5 (Higiene da UI)**, sem decisão
-> pendente bloqueando — o estado completo está no §0 do
+> contrato de zero-regressão. Suíte: **775 passando, 0 `xfail`, 0 falhas**.
+> **Fases 0 a 5 concluídas; a próxima é a Fase 6 (Arquitetura da UI)**, sem
+> decisão pendente bloqueando — o estado completo está no §0 do
 > [`REMASTERIZACAO-V1.md`](REMASTERIZACAO-V1.md).
 >
 > - **Fase 0** — a camada `ui/`, que não tinha nenhum teste, ganhou rede (`tests/ui/`).
@@ -26,6 +26,18 @@
 >   sobreposto que ainda dormia em `caixa_view` e `mesas_view` morreu), os dois
 >   diálogos de PIN passaram a limpar o campo no hook certo, e os 7 `xfail`
 >   foram reescritos para medir o **app** em vez da API do Qt.
+> - **Fase 5** — higiene da UI: a `EstoqueView` (tela montada no boot sem
+>   nenhum caminho de usuário até ela) saiu, os 31 modais e as 6 tabelas
+>   passaram a usar os utilitários da Fase 3, o cardápio parou de mostrar a
+>   inicial errada nos produtos sem foto, e **20 cores que ficavam congeladas
+>   no tema do boot foram para o QSS global** — alternar Claro/Escuro agora
+>   alcança a tela inteira. Junto: código morto, três comentários que diziam o
+>   oposto do código (um deles convidava a uma "limpeza" que derruba o boot) e
+>   as 23 últimas lacunas de tipagem.
+>   Dois achados no caminho: a **`MainWindow` não era coberta por teste nenhum**
+>   — a peça que compõe todas as outras —, e a troca das tabelas **teria
+>   apagado a seleção do usuário** (editar um produto o deixaria sem seleção,
+>   com os botões apagando) se não tivesse sido medida antes de aplicar.
 >
 > **A conclusão desconfortável das Fases 3 e 4:** os três achados de memória do
 > diagnóstico — o vazamento dos modais, o das tabelas e os +40 MB da linha de
