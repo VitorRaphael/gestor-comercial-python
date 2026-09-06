@@ -1027,7 +1027,13 @@ def test_resumo_mensal_sem_nenhum_fechamento_no_mes(caixas):
     assert resumo.ano == 2026
     assert resumo.mes == 8
     assert resumo.faturamento_bruto == Decimal("0")
-    assert resumo.formas_pagamento == []
+    # Mês sem movimento ainda lista TODAS as formas, zeradas: o Dashboard
+    # Mensal mostra PIX/Consumo interno mesmo sem venda (ver a semeadura em
+    # `resumo_mensal`). Difere de `totais_por_forma`, que omite as formas sem
+    # movimento de propósito.
+    assert [linha.forma for linha in resumo.formas_pagamento] == list(FormaPagamento)
+    assert all(linha.valor == Decimal("0") for linha in resumo.formas_pagamento)
+    assert all(linha.percentual == Decimal("0") for linha in resumo.formas_pagamento)
     assert resumo.turnos_fechados == 0
     assert resumo.ticket_medio == Decimal("0")
     assert resumo.cancelamentos_quantidade == 0

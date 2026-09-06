@@ -2,6 +2,13 @@
 
 > Progresso da V1. Marcar `[x]` conforme cada etapa for concluída e testada. Detalhes de regras/escopo em [`docs/arquitetura.md`](docs/arquitetura.md).
 
+> **2026-09-06 — Remasterização da V1.0 em andamento.** A faxina final antes da
+> produção (memória, integridade de dados, duplicação, código morto) tem plano
+> próprio em [`REMASTERIZACAO-V1.md`](REMASTERIZACAO-V1.md), com 8 fases e
+> contrato de zero-regressão. **Fase 0 concluída**: a camada `ui/`, que não
+> tinha nenhum teste, agora tem rede (`tests/ui/`). Suíte: 626 passando + 7
+> `xfail` que travam os vazamentos até a Fase 4 corrigi-los.
+
 > **2026-08-28 — Refatoração Usuario/Funcionario:** `Funcionario` (Fases 1-3 abaixo)
 > foi cindida em `Usuario` (login/PIN, tela de login) e `Funcionario` (atendimento,
 > sem login). Os itens marcados `[x]` abaixo que mencionam "Funcionario" descrevem
