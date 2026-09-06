@@ -67,6 +67,7 @@ from gestor_comercial.ui.widgets.comprovante_dialog import (
 from gestor_comercial.ui.widgets.kpi_card import CardKpi
 from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
 from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.widgets.layout_utils import limpar_layout
 
 _COLUNAS = ["DATA", "TURNO / SEQ", "OPERADOR", "FATURAMENTO", "DIFERENÇA", "AÇÕES"]
 _COLUNA_ACOES = 5
@@ -304,7 +305,7 @@ class HistoricoCaixaView(QWidget):
         # Reconstrói do zero: um funcionário desativado entre duas visitas à
         # tela ainda tem que aparecer, porque o histórico é dele mesmo assim.
         selecionado = self._operador_selecionado
-        _limpar_layout_horizontal(self._layout_pills_operador)
+        limpar_layout(self._layout_pills_operador)
 
         opcoes: list[tuple[str, int | None]] = [("Todos", _TODOS_OS_OPERADORES)]
         opcoes.extend(
@@ -497,7 +498,7 @@ class HistoricoCaixaView(QWidget):
             self._label_gaveta_diferenca.setText(formatar_reais_com_sinal(gaveta.diferenca))
 
     def _preencher_atendentes(self, ranking: list[ItemRankingAtendente]) -> None:
-        _limpar_layout_vertical(self._layout_atendentes)
+        limpar_layout(self._layout_atendentes)
         if not ranking:
             vazio = QLabel("Nenhuma venda vinculada a atendente neste período.")
             vazio.setObjectName("relatoriosFormaNome")
@@ -540,36 +541,6 @@ def _diferenca_total(resumo: ResumoCaixa) -> Decimal | None:
     if resumo.diferenca_dinheiro is None:
         return None
     return resumo.diferenca_dinheiro + resumo.diferenca_maquininha
-
-
-def _limpar_layout_horizontal(layout: QHBoxLayout) -> None:
-    # Ver o comentário de `_limpar_layout_vertical` abaixo — mesmo bug,
-    # mesma correção: `setParent(None)` antes do `deleteLater()`.
-    while layout.count():
-        item = layout.takeAt(0)
-        widget = item.widget()
-        if widget is not None:
-            widget.setParent(None)
-            widget.deleteLater()
-
-
-def _limpar_layout_vertical(layout: QVBoxLayout) -> None:
-    # `takeAt` só tira o item do LAYOUT — o widget continua filho visível do
-    # container até o `deleteLater()` agendado realmente rodar no próximo
-    # ciclo de eventos. Entre um `_preencher_*` e o outro (trocar de mês,
-    # trocar filtro de operador), isso empilhava a linha antiga por baixo da
-    # nova na mesma posição, produzindo texto sobreposto/corrompido no
-    # repaint. `setParent(None)` desliga o widget da árvore na hora.
-    while layout.count():
-        item = layout.takeAt(0)
-        sub_layout = item.layout()
-        widget = item.widget()
-        if widget is not None:
-            widget.setParent(None)
-            widget.deleteLater()
-        elif sub_layout is not None:
-            _limpar_layout_vertical(sub_layout)
-            sub_layout.deleteLater()
 
 
 def _linha_rotulo_valor(rotulo: str, dono: QWidget, atributo_label_valor: str) -> QHBoxLayout:

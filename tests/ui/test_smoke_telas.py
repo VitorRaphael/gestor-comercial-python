@@ -12,47 +12,13 @@ nenhum caixa aberto).
 
 from __future__ import annotations
 
-import pytest
-
 from gestor_comercial.ui.views.caixa_view import CaixaView
 from gestor_comercial.ui.views.cardapio_view import CardapioView
-from gestor_comercial.ui.views.comanda_view import ComandaView
-from gestor_comercial.ui.views.configuracoes_view import ConfiguracoesView
-from gestor_comercial.ui.views.dashboard_mensal_view import DashboardMensalView
-from gestor_comercial.ui.views.estoque_view import EstoqueView
-from gestor_comercial.ui.views.funcionarios_view import FuncionariosView
-from gestor_comercial.ui.views.historico_caixa_view import HistoricoCaixaView
-from gestor_comercial.ui.views.impressoras_view import ImpressorasView
-from gestor_comercial.ui.views.loja_hub_view import LojaHubView
-from gestor_comercial.ui.views.login_view import LoginView
 from gestor_comercial.ui.views.mesas_view import MesasView
-from gestor_comercial.ui.views.relatorios_view import RelatoriosView
 
-
-@pytest.fixture
-def todas_as_telas(
-    qapp, auth, comandas, cardapio, caixas_service, pagamentos, impressao, funcionarios
-):
-    """Uma instância de cada tela do app, montada com os services reais.
-
-    Devolve dicionário `nome -> widget` para o erro de um teste dizer QUAL tela
-    quebrou, em vez de só apontar o índice de um parametrize.
-    """
-    return {
-        "Login": LoginView(auth),
-        "Mesas": MesasView(comandas),
-        "Comanda": ComandaView(comandas, cardapio, impressao, funcionarios),
-        "Caixa": CaixaView(caixas_service, impressao),
-        "Histórico de Caixa": HistoricoCaixaView(caixas_service, auth, impressao, funcionarios),
-        "Dashboard Mensal": DashboardMensalView(caixas_service, funcionarios),
-        "Relatórios": RelatoriosView(caixas_service, auth, impressao, funcionarios),
-        "Cardápio": CardapioView(cardapio),
-        "Funcionários": FuncionariosView(funcionarios, pagamentos, auth, caixas_service),
-        "Impressoras": ImpressorasView(cardapio, impressao),
-        "Configurações": ConfiguracoesView(auth),
-        "Central de Loja": LojaHubView(),
-        "Estoque": EstoqueView(),
-    }
+# A fixture `todas_as_telas` mora em `conftest.py`: o teste de vazamento das
+# telas varre a mesma lista, e ter uma fonte só é o que garante que tela nova
+# entra nas duas redes de uma vez.
 
 
 def test_todas_as_telas_montam(todas_as_telas):

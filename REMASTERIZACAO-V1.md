@@ -20,8 +20,8 @@
 
 ## 0. Onde paramos — 2026-09-06
 
-**Fases 0, 1, 2 e 3 concluídas. Parado no início da Fase 4, aguardando decisão
-de escopo.** Suíte: **706 passando + 7 `xfail`, 0 falhas**.
+**Fases 0 a 4 concluídas. Parado no início da Fase 5.**
+Suíte: **727 passando, 0 `xfail`, 0 falhas** — de 706 + 7 `xfail`.
 
 | Fase | Estado |
 |---|---|
@@ -29,47 +29,47 @@ de escopo.** Suíte: **706 passando + 7 `xfail`, 0 falhas**.
 | 1 — Integridade de dados | ✅ concluída |
 | 2 — Núcleo de dados e performance | ✅ concluída |
 | 3 — Utilitários compartilhados | ✅ concluída |
-| **4 — Ciclo de vida da UI** | ⏸️ **parada aqui — 0 de 9 itens** |
-| 5 — Higiene da UI · 6 — Arquitetura da UI · 7 — Validação | não iniciadas |
+| 4 — Ciclo de vida da UI (escopo enxuto) | ✅ concluída |
+| **5 — Higiene da UI** | ⏸️ **próxima — 0 de 9 itens**, com a `EstoqueView` já decidida |
+| 6 — Arquitetura da UI · 7 — Validação | não iniciadas |
 
-### Por que a Fase 4 está parada, e não só "não começou"
+### O que a Fase 4 fechou
 
-A Fase 3 derrubou dois dos achados que a Fase 4 existia para corrigir. As
-medições originais do §3.2 e do §3.3 rodaram **sem laço de eventos**, e sem laço
-um `deleteLater()` legítimo fica pendente para sempre — indistinguível de
-vazamento. Remedido com `app.exec()` rodando, o §3.3 **não reproduz** e o §3.2
-só reproduz por um caminho que nenhum dos 31 sites do app percorre. O §3.9 foi
-remedido depois e ficou pela metade: o hook errado é real, o "para sempre" não.
+Escopo **enxuto**, decidido pelo Vitor (§8): os dois defeitos reais, a reescrita
+dos 7 `xfail` e a medição de RSS. Os 31 sites de `executar_modal`, as 6 tabelas
+e as lambdas do tema foram para a **Fase 5**, onde padronização é o objetivo
+declarado.
 
-Consequência: **o critério de pronto da Fase 4 é inalcançável como está
-escrito.** Os 7 `xfail(strict=True)` exercitam a API crua do Qt
-(`tabela.setCellWidget(...)`, `CancelamentoDialog(...)` + `reject()`) sem passar
-por utilitário nenhum — nenhuma correção feita nas *views* muda o que eles medem.
+Toda correção entrou com o teste que a **reprova quando desfeita** — conferido
+revertendo o código e vendo a suíte ficar vermelha, não só vendo-a verde depois:
 
-### O que sobrou de defeito real na Fase 4
-
-| Item | Vale? |
+| O que entrou | Prova |
 |---|---|
-| Unificar cópias de `_limpar_layout` (§3.7) | 🟢 **Sim** — `caixa_view` e `mesas_view` ainda carregam a versão sem `setParent(None)`, o mesmo bug de texto sobreposto já corrigido duas vezes noutros arquivos. É o único item que conserta algo que o usuário vê |
-| `closeEvent` → `done()` nos 2 diálogos de PIN (§3.9) | 🟢 **Sim** — 3 linhas, hook errado confirmado por medição |
-| Reescrever os 7 `xfail` | 🔴 **Obrigatório** antes de qualquer correção, senão a fase não fecha |
-| `executar_modal()` nos 31 sites (§3.2) | 🟡 Virou padronização |
-| Limpeza de tabela nas 6 views (§3.3) | 🟡 Perdeu a justificativa; sobra determinismo de repaint |
-| Lambdas do tema (§3.14) | 🟡 Latente — só vira vazamento se alguém recriar uma tela |
-| Medir RSS (§2.3) | ⚪ Vale como linha de base, não como "depois" de correção |
+| §3.7 — as 4 cópias de "limpar layout" viraram 1 | Sem o `setParent(None)`, **6 testes falham**, incluindo os 2 novos sobre `caixa_view` e `mesas_view` |
+| §3.9 — `closeEvent` → `done()` nos 2 diálogos de PIN | Com o hook antigo, **6 dos 10 testes de PIN falham** |
+| 7 `xfail` reescritos | A rede larga pega um vazamento injetado numa tela real: Cardápio 80 → 100 widgets |
 
-### Recomendação registrada (decisão do Vitor pendente — §8)
+### 🔴 O que a Fase 4 descobriu: o §2.3 também era artefato de medição
 
-**Fase 4 enxuta: §3.7 + §3.9 + reescrever os 7 `xfail`.** É o que conserta
-defeito de verdade e devolve à fase um critério de pronto alcançável. Os 31 + 6
-sites de `executar_modal`/`limpar_tabela` migrariam para a **Fase 5 (Higiene)**,
-onde padronização é o objetivo declarado — em vez de ficarem na fase que existe
-para blindar memória.
+A Fase 3 já tinha derrubado o §3.3 e rebaixado o §3.2 por medição feita sem laço
+de eventos. A medição de RSS fechou o círculo: `tools/medir_memoria.py` roda o
+roteiro do §2.3 **dos dois jeitos**, e os +40,8 MB da linha de base saem
+**hoje**, com a Fase 4 pronta, sempre que se mede sem `exec()`.
+
+| Roteiro, no código de hoje | 300 modais custam | Modais vivos |
+|---|---|---|
+| Caminho real do app (`exec()` + `assentar`) | **+0,5 MB** | **0 de 300** |
+| Roteiro do §2.3 (sem `exec()`, só `processEvents`) | **+41,7 MB** | **300 de 300** |
+
+Nenhuma linha de produção separa as duas colunas — **só o método de medição.**
+O "vazamento dominante de memória do app" nunca existiu. A bancada ficou
+versionada justamente para esse erro não poder ser cometido uma quarta vez.
 
 ### Retomada
 
-Ler este bloco, depois o quadro da **Fase 3** no §6 (é onde estão as medições
-que mudaram tudo) e as **decisões pendentes** no fim do §8.
+Ler este bloco e a **Fase 5** no §6. A `EstoqueView` (§3.11) já está decidida
+— **remover** — e é o primeiro item da fase. Não há decisão pendente do Vitor
+bloqueando o início.
 
 ---
 
@@ -122,6 +122,16 @@ e o vazamento que o briefing suspeitava **existe mesmo**, só que noutro lugar.
   operação e a Fase 0 existe por causa disso.
 
 ### 2.3 Memória — medido headless (`QT_QPA_PLATFORM=offscreen`)
+
+> #### 🔴 AVISO (Fase 4): os números desta seção são artefato de medição
+> Os +40,8 MB e os "300 de 300 modais vivos" abaixo **não descrevem o app**.
+> Foram medidos sem `exec()` e sem `sendPostedEvents(DeferredDelete)` — e sem
+> isso um `deleteLater()` legítimo fica pendente para sempre, indistinguível de
+> vazamento. Pelo caminho que o app percorre, os mesmos 300 modais custam
+> **+0,5 MB** e deixam **0 vivos**. Reproduza os dois com
+> `python tools/medir_memoria.py [--roteiro-antigo]`. A seção fica como está,
+> com este aviso, porque é a origem documentada de três achados derrubados
+> (§3.2, §3.3 e este) — apagá-la esconderia a lição.
 
 | Estágio | RSS |
 |---|---|
@@ -429,7 +439,7 @@ linearmente — e elas rodam dentro de laços N+1 (§3.6).
 Cada uma dessas queries é hoje um **scan de tabela** (§3.5). As duas correções
 se multiplicam: índices + eager loading (`selectinload`) resolvem juntas.
 
-### 3.7 🟠 Quatro a seis cópias do "limpar layout", com comportamentos divergentes
+### 3.7 ✅ Quatro cópias do "limpar layout", com comportamentos divergentes — **RESOLVIDO (Fase 4)**
 
 **Severidade: MÉDIA.** ✅ **provado.** Duplicação que já custou dois bugs visuais.
 
@@ -453,9 +463,11 @@ corrigida  (com setParent): 0 widget(s) antigo(s) ainda filhos do container
 `caixa_view.py` e `mesas_view.py` carregam hoje a versão latente de um bug **que
 já foi diagnosticado e corrigido duas vezes** noutros arquivos.
 
-**Correção:** `ui/widgets/layout_utils.py` com a versão corrigida
-(`setParent(None)` + `deleteLater()` + sub-layouts recursivos), e todos os sites
-importando dele.
+**Correção (Fase 4): feita.** `ui/widgets/layout_utils.py` é a única cópia, e
+os 6 sites importam dele. `grep -rn "takeAt" src/` só acha o utilitário e o
+`FlowLayout`, que implementa a API de layout do Qt e não é cópia deste laço.
+Dois testes novos exercitam `caixa_view` e `mesas_view` de verdade e falham se o
+`setParent(None)` sair.
 **Cuidado:** `mesas_view.py:421-424` usa `while layout.count() > 1` porque o
 último item é um stretch fixo — o helper genérico precisa preservar isso.
 
@@ -488,7 +500,7 @@ separador em todas as outras. Isso é visível para o usuário final.
 > correto em português), mas isso muda a aparência de 9 telas. É decisão sua,
 > não minha.
 
-### 3.9 🟠 PIN do gerente fica em texto claro na memória — ⚠️ **metade corrigida**
+### 3.9 ✅ PIN do gerente fica em texto claro na memória — **RESOLVIDO (Fase 4)**
 
 > #### ⚠️ Correção (2026-09-06): o hook errado é real, o "para sempre" não
 > Remedido pelo caminho real de `main_window._abrir_caixa`, com `app.exec()`
@@ -948,39 +960,111 @@ Nenhuma linha de `services/`, `repository/`, `domain/` ou `hardware/` alterada.
 > lugar da mensagem de verdade, ou o app cairia no balcão por causa da
 > *limpeza*. Cai direto no RNF "zero travamentos".
 
-### Fase 4 — Ciclo de vida da UI 🟡 ⏸️ **PARADA AQUI** (0 de 9)
+### Fase 4 — Ciclo de vida da UI ✅ CONCLUÍDA (2026-09-06)
 
-> Rebaixada de 🔴 pela Fase 3, e **bloqueada por decisão de escopo**. O porquê,
-> o que sobrou de defeito real e a recomendação estão no **§0 — Onde paramos**;
-> a decisão pendente está no fim do §8. Não comece por esta lista sem ler o §0.
+> Rebaixada de 🔴 para 🟡 pela Fase 3 e executada no **escopo enxuto** decidido
+> pelo Vitor (§8): os dois defeitos reais, os 7 `xfail` e a medição. Os 31 + 6
+> sites de padronização foram para a Fase 5.
 
-- [ ] 🔴 **Reescrever os 7 `xfail(strict=True)` antes de qualquer correção** —
-      como estão, exercitam a API crua do Qt e **nunca poderiam ficar verdes**
-      por mudança nenhuma feita nas views. Ver o quadro da Fase 3
-- [ ] ⏳ **Decidir o escopo com o Vitor** (§0) — Fase 4 enxuta ou completa
-- [ ] 🟢 Unificar as cópias de `_limpar_layout` (§3.7) — **o único item que
-      conserta algo que o usuário vê**: `caixa_view` e `mesas_view` ainda têm a
-      versão sem `setParent(None)`
-- [ ] 🟢 `closeEvent` → `done()` nos dois diálogos de PIN (§3.9) — 3 linhas,
-      hook errado confirmado por medição
-- [ ] 🟡 `executar_modal()` nos 31 sites (§3.2) — padronização
-- [ ] 🟡 Limpeza de tabela nas 6 views com tabela (§3.3) — determinismo
-- [ ] 🟡 Lambdas do tema → métodos ligados (§3.14), **mantendo a guarda anti-laço**
-- [ ] ⚪ Medir RSS com o roteiro do §2.3 — agora como linha de base
-- [ ] **`tests/ui/test_vazamento_*.py` passam a verde** ← critério de pronto,
-      **inalcançável até o primeiro item ser feito**
+- [x] **Os 7 `xfail(strict=True)` reescritos** — era o bloqueador: como estavam,
+      exercitavam a API crua do Qt (`tabela.setCellWidget(...)`,
+      `CancelamentoDialog(...)` + `reject()`) e **nenhuma correção feita nas
+      views poderia deixá-los verdes**. Passaram a medir o app: os diálogos
+      reais abertos com `exec()`, e as telas reais recarregadas 20 vezes
+- [x] **`ui/widgets/layout_utils.py` é a única cópia** (§3.7) — `caixa_view` e
+      `mesas_view` (3 sites) saíram da versão **sem** `setParent(None)`;
+      `dashboard_mensal_view` e `historico_caixa_view` (3 sites) largaram as
+      cópias corretas que mantinham. `grep -rn "takeAt" src/` só acha o
+      utilitário e o `FlowLayout` (que implementa a API do Qt, não é cópia)
+- [x] **`closeEvent` → `done()` nos 2 diálogos de PIN** (§3.9) — `accept()`,
+      `reject()` e Esc passam por `done()`; o `clear()` pendurado no
+      `closeEvent` era código morto nos três caminhos
+- [x] **`tools/medir_memoria.py`** — a bancada do §2.3 virou script versionado,
+      com `--roteiro-antigo` para reproduzir a medição original. Sem dependência
+      nova: `GetProcessMemoryInfo` via `ctypes`
+- [x] **21 testes novos** — `test_pin_dialogs.py` (10), 3 em `test_layout_utils.py`,
+      e os arquivos de vazamento reescritos (`test_vazamento_modais.py` 8,
+      `test_vazamento_telas.py` 2, ex-`test_vazamento_tabelas.py`)
+- [x] Fixture `todas_as_telas` movida para `tests/ui/conftest.py` — o smoke e o
+      teste de vazamento varrem a **mesma** lista, então tela nova entra nas
+      duas redes de uma vez
+- [x] `tests/ui/test_vazamento_*.py` verdes ← critério de pronto, agora
+      alcançável porque medem o app e não o Qt
+- [→] `executar_modal()` nos 31 sites (§3.2) e limpeza de tabela nas 6 views
+      (§3.3) — **movidos para a Fase 5**: viraram padronização quando os
+      achados caíram
+- [→] Lambdas do tema (§3.14) — **movido para a Fase 5**, mesma razão
 
-### Fase 5 — Higiene da UI
+**Resultado:** `727 passed` — de `706 passed, 7 xfailed`. Zero `xfail` restantes.
+Nenhuma linha de `services/`, `repository/`, `domain/` ou `hardware/` alterada.
 
+> #### 🔴 O que esta fase descobriu: o §2.3 era artefato de medição
+> A linha de base do documento inteiro dizia que 300 modais custavam **+40,8 MB**
+> e que **300 de 300** continuavam vivos. Rodando os dois roteiros na mesma
+> bancada, no código de hoje:
+>
+> | Roteiro | 300 modais custam | Modais vivos |
+> |---|---|---|
+> | Caminho real do app (`exec()` + `assentar`) | **+0,5 MB** | **0 de 300** |
+> | Roteiro do §2.3 (sem `exec()`, só `processEvents`) | **+41,7 MB** | **300 de 300** |
+>
+> **Nenhuma linha de produção separa as duas colunas.** O +40 MB é reproduzível
+> hoje, com a Fase 4 pronta, e some quando se mede pelo caminho que o app usa.
+> Somado ao §3.2 e ao §3.3, são **três achados de memória** que vieram do mesmo
+> erro de bancada. É por isso que a bancada agora é um arquivo no repositório.
+
+> #### Sobre "provar" correção
+> Cada correção desta fase foi conferida **desfazendo-a** e vendo a suíte ficar
+> vermelha, não só vendo-a verde depois. Sem o `setParent(None)`, 6 testes de
+> `test_layout_utils.py` falham; com o `closeEvent` de volta, 6 dos 10 de
+> `test_pin_dialogs.py` falham; e a rede larga de telas pega um vazamento
+> injetado numa tela real (Cardápio: 80 → 100 widgets). Um teste que passa dos
+> dois jeitos é exatamente o que produziu os `xfail` que esta fase jogou fora.
+
+> #### Decisões tomadas dentro da fase
+> **Os arquivos de vazamento foram reescritos, não "consertados".**
+> `test_vazamento_tabelas.py` virou `test_vazamento_telas.py`: dois dos três
+> `xfail` mediam `QTableWidget` cru, sem passar por view nenhuma. O nome antigo
+> prometia cobrir tabelas e cobria a API do Qt.
+>
+> **O contrato do utilitário e o comportamento do app ficam em arquivos
+> separados.** `test_modais.py`/`test_tabelas.py` testam `modais.py`/`tabelas.py`;
+> `test_vazamento_*.py` testam os diálogos e as telas reais. Misturar os dois foi
+> o que deixou os `xfail` medirem a coisa errada sem ninguém notar.
+>
+> **A rede larga de telas é sobre crescimento, nunca sobre número absoluto.**
+> Quantos widgets uma linha usa é detalhe de layout que muda sem ser bug; o que
+> nunca pode acontecer é o total subir a cada `atualizar()`.
+
+### Fase 5 — Higiene da UI ⏸️ PRÓXIMA (0 de 9)
+
+> Herdou da Fase 4 os itens que deixaram de ser correção de vazamento e viraram
+> padronização. A `EstoqueView` já está decidida — **remover** (§8) —, então a
+> fase começa sem bloqueio.
+
+- [ ] 🟢 **Remover a `EstoqueView`** (§3.11) — decisão do Vitor: sai de
+      `main_window` (instanciação, `QStackedWidget` e `_destinos_nav`), o
+      arquivo é deletado e a tela sai da fixture `todas_as_telas`. O git guarda
+      o código para quando a fase de Estoque começar
+- [ ] 🟡 `executar_modal()` nos 31 sites (§3.2) — **herdado da Fase 4**. É
+      padronização, não correção: o caminho real do app já libera o diálogo
+- [ ] 🟡 `limpar_tabela()`/`definir_celula()` nas 6 views com tabela (§3.3) —
+      **herdado da Fase 4**. Ganho é determinismo de repaint
+- [ ] 🟡 Lambdas do tema → métodos ligados (§3.14), **mantendo a guarda
+      anti-laço** — **herdado da Fase 4**. Latente: só vira vazamento se alguém
+      passar a recriar uma tela
 - [ ] Chave do cache de miniaturas (§3.10)
-- [ ] Decidir o destino de `EstoqueView` (§3.11)
 - [ ] Código morto, QSS órfão, constantes não lidas (§3.12)
 - [ ] **Corrigir os comentários que mentem** (§3.12) — especialmente
       `auth_service.py:50-52`, que convida a uma limpeza que quebra o boot
 - [ ] Cores inline → QSS global (§3.15)
 - [ ] Tipagem `typing` nas funções públicas; nomes autoexplicativos
-- [ ] `gc.collect()` **apenas** na destruição de telas pesadas, **se a medição
-      mostrar ganho** — não por dogma
+
+> **`gc.collect()` na destruição de telas pesadas: item removido.** Estava aqui
+> como "se a medição mostrar ganho". A medição existe agora
+> (`tools/medir_memoria.py`) e mostra o contrário: 300 modais custam +0,5 MB
+> pelo caminho real. Não há o que o `gc.collect()` recolha, e ele custa uma
+> pausa numa máquina fraca. Fica fora até alguma medição pedir.
 
 ### Fase 6 — Arquitetura da UI
 
@@ -1004,22 +1088,64 @@ Nenhuma linha de `services/`, `repository/`, `domain/` ou `hardware/` alterada.
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Testes verdes | 620/621 (1 falha) | **706 + 7 xfail, 0 falhas** (Fase 3) |
-| Arquivos de teste de UI | 0 | **7** (Fase 3) |
+| Testes verdes | 620/621 (1 falha) | **727, 0 xfail, 0 falhas** (Fase 4) |
+| Arquivos de teste de UI | 0 | **8** (Fase 4) |
+| Testes marcados `xfail` | 7 (Fase 0) | ✅ **0** — reescritos (Fase 4) |
 | Caminhos de produção com `rollback()` | 0 | **todos** (Fase 1) |
 | `PRAGMA foreign_keys` no app real | 0 | ✅ **1** (Fase 1) |
 | Índices em FK | 0 de 20 | ✅ **20 de 20** (Fase 2) |
 | Desvios entre schema migrado e `domain/` | 1 (`alembic check` falhava) | ✅ **0** (Fase 2) |
 | `journal_mode` | `delete` | ✅ **WAL** (Fase 2) |
 | `synchronous` (resiliência a queda de energia) | `FULL` | ✅ **`FULL`, intocado** |
-| Widgets na tabela do Cardápio após 20 recargas | 138 → **1.338** (medido sem laço de eventos) | **78 → 78** — nunca cresceu (Fase 3, §3.3) |
-| RSS do shell montado | 154,5 MB | _a preencher_ |
-| RSS após 300 modais | 195,3 MB (+40,8) | _a preencher_ |
-| Modais vivos após 300 aberturas | 300 (medido sem `exec()`) | **0** — já era 0 pelo caminho real (Fase 3, §3.2) |
-| Cell widgets vivos após 50 refreshes | 50 (medido sem laço de eventos) | **1** — o da célula (Fase 3, §3.3) |
-| Linhas em `src/` | 17.697 | _a preencher_ |
 | Cópias de `_formatar_reais` | 10 (+2 com sinal) | ✅ **1 (+1)** (Fase 3) |
-| Cópias de "limpar layout" | 4–6 | 1 (meta) |
+| Cópias de "limpar layout" | 4, em 6 sites | ✅ **1** (Fase 4, §3.7) |
+| Sites com a versão SEM `setParent(None)` | 3 (`caixa_view`, `mesas_view` ×2) | ✅ **0** (Fase 4) |
+| Diálogos de PIN limpando o campo no hook certo | 0 de 2 | ✅ **2 de 2** (Fase 4, §3.9) |
+| Linhas em `src/` | 17.697 | **18.526** (+829) — ver nota |
+| Linhas em `tests/` | 6.794 | **8.925** (+2.131) |
+
+> **Sobre `src/` ter crescido 829 linhas.** Uma faxina que aumenta o código
+> pede explicação. As cópias apagadas (10 de `_formatar_reais`, 4 de "limpar
+> layout") são pequenas perto do que entrou: `repository/backup.py` (o
+> `VACUUM INTO` que torna o WAL seguro, §8), o decorator `@transacional` do
+> §3.1, os 20 índices, os 4 utilitários da Fase 3 — e a documentação que
+> explica **por que** cada um existe, que é o que impede a próxima limpeza de
+> desfazê-los. Encolher `src/` nunca foi meta desta remasterização; a meta era
+> não ter duas versões da mesma regra. Essa parte está no quadro acima.
+
+### 7.2 Memória — o "depois" que corrigiu o "antes"
+
+Medido com `tools/medir_memoria.py`, headless (`QT_QPA_PLATFORM=offscreen`),
+banco temporário, Python 3.14.6 / PySide6 6.11.2.
+
+| Estágio | §2.3 (Fase 1) | Fase 4 |
+|---|---|---|
+| Interpretador nu | 17,9 MB | 18,5 MB |
+| + `QApplication` | 38,1 MB | 38,4 MB |
+| + migrations Alembic + seed | 116,1 MB | 117,0 MB |
+| **+ shell completo, telas montadas** | **154,5 MB** | **156,0 MB** |
+| + 300 aberturas do modal mais simples | 195,3 MB (**+40,8**) | **156,5 MB (+0,5)** |
+| Modais vivos após 300 aberturas | 300 de 300 | **0 de 300** |
+
+**Esta tabela não mostra uma correção — mostra um erro de medição sendo
+desfeito.** O mesmo script, no mesmo código de hoje, com `--roteiro-antigo`:
+
+| Roteiro, código da Fase 4 | 300 modais custam | Modais vivos |
+|---|---|---|
+| Caminho real do app (`exec()` + `assentar`) | +0,5 MB | 0 de 300 |
+| Roteiro do §2.3 (sem `exec()`, só `processEvents`) | **+41,7 MB** | **300 de 300** |
+
+Os +40 MB continuam reproduzíveis hoje. Não sumiram porque algo foi consertado:
+sumem quando se mede pelo caminho que o app percorre. Ver §8.
+
+O leve aumento da linha de base (154,5 → 156,0 MB, **+1,5 MB**) é o custo dos 20
+índices da Fase 2 e das tabelas do WAL — pago de propósito, em troca do −91% de
+consultas do §7.1.
+
+> **As linhas "Widgets na tabela do Cardápio", "Modais vivos após 300 aberturas"
+> e "Cell widgets vivos" saíram desta tabela como "antes × depois".** Os três
+> "antes" foram medidos sem laço de eventos e nunca descreveram o app. Estão
+> preservados acima e no §8 como o que são: registro de um erro de bancada.
 
 ### 7.1 Consultas por tela — Fase 2
 
@@ -1081,15 +1207,24 @@ leituras muito mais baratas.
 | 2026-09-06 | **§3.9 rebaixado de ALTA para MÉDIA** | O hook errado (`closeEvent` em vez de `done()`) foi confirmado por medição e continua valendo correção. O "PIN para sempre na memória" dependia do §3.2 e caiu junto com ele: o diálogo é destruído ao sair de escopo (§3.9) |
 | 2026-09-06 | `modais.py` e `tabelas.py` entregues mesmo com os achados corrigidos | O que entregam deixou de ser correção de vazamento e passou a ser garantia explícita/determinismo — barato, testado, e independe de detalhe de implementação do Qt. Quem decide se vale aplicar nos 37 sites é a Fase 4, com o achado já corrigido na mesa |
 
+| 2026-09-06 | **Fase 4 no escopo enxuto** — decisão do Vitor | §3.7 + §3.9 + reescrita dos 7 `xfail` + medição de RSS. Com o §3.3 derrubado e o §3.2/§3.9 rebaixados, aplicar os utilitários nos 31 + 6 sites virou padronização, não correção de vazamento — e padronização é o objetivo declarado da Fase 5, não o da fase que existe para blindar memória |
+| 2026-09-06 | **`EstoqueView` será removida** — decisão do Vitor | Tela instanciada no boot e registrada na navegação, mas sem nenhum caminho de usuário até ela (§3.11): a Central de Loja renderiza 5 cards e "Estoque" não é um deles. É peso morto no boot e no `.exe` de um módulo que está no backlog pós-V1. O git guarda o código para quando a fase de Estoque começar. Executada como primeiro item da Fase 5, em commit próprio, para não embaralhar as fases |
+| 2026-09-06 | **Os 7 `xfail` foram reescritos, não "corrigidos"** (Fase 4) | Eles mediam a API crua do Qt — `tabela.setCellWidget(...)`, `CancelamentoDialog(...)` + `reject()` — sem passar por utilitário nem por view. Nenhuma correção feita no app poderia deixá-los verdes: o critério de pronto da fase era literalmente inalcançável. Passaram a exercitar os diálogos reais com `exec()` e as telas reais com `atualizar()` |
+| 2026-09-06 | `test_vazamento_tabelas.py` → `test_vazamento_telas.py` | O nome prometia cobrir as tabelas do app e cobria `QTableWidget` cru. O arquivo agora varre as 13 telas da fixture `todas_as_telas`, e a fixture saiu do arquivo de smoke para o `conftest` justamente para as duas redes lerem a mesma lista |
+| 2026-09-06 | **O §2.3 (memória) é artefato de medição, como o §3.2 e o §3.3** (Fase 4) | `tools/medir_memoria.py --roteiro-antigo` reproduz os +40,8 MB e os 300 modais vivos **hoje**, com a Fase 4 pronta. Pelo caminho real do app, os mesmos 300 modais custam +0,5 MB e deixam 0 vivos. Nenhuma linha de produção separa as duas colunas — só o método. São três achados de memória vindos do mesmo erro de bancada |
+| 2026-09-06 | Bancada de medição versionada em `tools/medir_memoria.py` | Três achados do documento vieram de uma medição que ninguém conseguia repetir. `ctypes` em vez de `psutil` porque nenhuma dependência nova entra — nem em ferramenta. Fica fora de `src/`, então não entra no `.exe` |
+| 2026-09-06 | Toda correção da Fase 4 foi conferida **desfazendo-a** | Ver a suíte verde depois da correção não prova nada — foi assim que os `xfail` nasceram medindo a coisa errada. Sem o `setParent(None)`, 6 testes de `test_layout_utils.py` falham; com o `closeEvent` de volta, 6 dos 10 de `test_pin_dialogs.py` falham |
+| 2026-09-06 | `gc.collect()` na destruição de telas **descartado** da Fase 5 | Estava listado como "se a medição mostrar ganho". A medição existe agora e mostra o contrário: não há o que recolher, e a pausa custa caro na máquina fraca do food truck |
+
 ### Decisões pendentes do Vitor
 
-1. **`EstoqueView`** (§3.11) — *bloqueia a Fase 5*: remover até a fase de
-   Estoque começar, ou manter como placeholder consciente e documentado?
-2. **Escopo da Fase 4** — *bloqueia a Fase 4*. Com o §3.3 derrubado, o §3.2
-   rebaixado e o §3.9 rebaixado, aplicar os utilitários nos 31 + 6 sites virou
-   padronização, não correção de vazamento. Recomendação registrada no §0:
-   **Fase 4 enxuta (§3.7 + §3.9 + reescrever os 7 `xfail`)**, empurrando os
-   31 + 6 sites para a Fase 5. Aceitar, ou fazer a Fase 4 inteira como está?
+**Nenhuma.** As duas que bloqueavam o trabalho foram decididas em 2026-09-06 e
+estão registradas no quadro acima:
+
+~~1. `EstoqueView`~~ — **decidido**: remover. É o primeiro item da Fase 5.
+
+~~2. Escopo da Fase 4~~ — **decidido**: enxuta, mais a medição de RSS. Fase
+concluída; os 31 + 6 sites e as lambdas do tema migraram para a Fase 5.
 
 ~~3. Formato monetário~~ — **decidido em 2026-09-06**: `R$ 1.234,50`. Ver §8.
 

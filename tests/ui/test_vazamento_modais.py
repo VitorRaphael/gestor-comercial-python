@@ -1,112 +1,104 @@
-"""Nenhum modal pode sobreviver ao próprio fechamento.
+"""Nenhum diálogo do app pode sobreviver ao próprio fechamento.
 
-Ver `REMASTERIZACAO-V1.md` §3.2 — este é o teste que trava o vazamento
-dominante de memória do app.
+Ver `REMASTERIZACAO-V1.md` §3.2 — **e a correção do §3.2 na Fase 3**.
 
-## Por que estes testes começam marcados `xfail`
+## O que mudou nestes testes, e por quê
 
-Eles descrevem o comportamento que a **Fase 4** vai implementar, e foram
-escritos **antes** da correção de propósito: um teste de vazamento que já nasce
-verde não prova nada. Hoje eles falham, e o `xfail` mantém a suíte verde sem
-esconder o problema.
+Na Fase 0 este arquivo nasceu com quatro `xfail(strict=True)`: eles descreviam
+o vazamento do §3.2 e falhavam de propósito, à espera da Fase 4. A Fase 3
+derrubou a premissa. Remedido com um laço de eventos rodando de verdade, em
+`offscreen` e em `windows`:
 
-O marcador é `strict=True`. Isso significa que, quando a Fase 4 corrigir o
-ciclo de vida dos modais, estes testes vão passar — e o `strict` transforma o
-"passou inesperadamente" em **falha**. Ou seja: a suíte avisa na hora de tirar
-o marcador. Não tem como a correção entrar e o teste continuar mentindo.
+    30 diálogos construídos e fechados com `reject()`, SEM `exec()`: 30 presos
+    30 diálogos abertos com `exec()` — o caminho real do app:          0 presos
 
-## O que o app faz hoje
+Os `xfail` mediam o primeiro cenário — `CancelamentoDialog(...)` seguido de
+`reject()`, sem abrir — que **nenhum dos 31 sites do app percorre**. Eram
+portanto testes que nenhuma correção feita nas views poderia deixar verdes:
+mediam a API crua do Qt, não o app. Por isso foram reescritos em vez de
+"corrigidos".
 
-    modal = CancelamentoDialog(titulo, self)   # parent = uma view que nunca morre
-    if modal.exec() != QDialog.DialogCode.Accepted:
-        return                                  # ninguém destrói o modal
+## O que eles medem agora
 
-Soltar o nome Python não destrói nada: a posse do objeto é do parent, em C++.
-E as 10 views são montadas no boot e vivem o processo inteiro
-(`main_window.py:138-182`), então cada modal aberto fica pendurado para sempre.
+O caminho que o app realmente percorre: diálogo real, com a view como parent,
+aberto com `exec()` e fechado pelo botão do usuário. Depois de trinta idas e
+voltas, a view — que vive o processo inteiro — não pode ter um único diálogo
+pendurado. É regressão de verdade: se alguém trocar o ciclo de vida dos modais
+por um que retenha, é aqui que aparece.
+
+`test_construir_sem_abrir_deixa_o_dialogo_presa_view` é o teste de premissa:
+enquanto ele passar, `executar_modal()`/`descartar_modal()` (§3.2) têm razão de
+existir, porque a armadilha continua a um passo de distância.
+
+O contrato dos utilitários em si é testado em `test_modais.py`. Aqui é o app.
 """
 
 from __future__ import annotations
 
-import gc
-
 import pytest
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QDialog, QWidget
 
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 from gestor_comercial.ui.widgets.gerente_pin_dialog import GerentePinDialog
 from gestor_comercial.ui.widgets.loja_pin_dialog import LojaPinDialog
 
-# Motivo único, para o relatório do pytest dizer o que está pendente.
-PENDENTE_FASE_4 = "Fase 4 da Remasterização: modais ainda não são destruídos (§3.2)"
-
 ABERTURAS = 30
 
 
-def _assentar(qapp) -> None:
-    """Dá ao Qt e ao Python toda chance de liberar o que puder ser liberado.
-
-    Sem isso um `deleteLater()` legítimo ainda estaria pendente na fila de
-    eventos e o teste acusaria vazamento onde não há. Com isso, o que sobrar
-    sobrou de verdade.
-    """
-    gc.collect()
-    qapp.processEvents()
-    gc.collect()
-    qapp.processEvents()
-
-
 def _abrir_e_fechar(fabrica, pai: QWidget, vezes: int = ABERTURAS) -> None:
-    """Repete o ciclo exato do código de produção: cria com parent, fecha pelo
-    caminho do usuário (`reject()`, o mesmo que o botão Cancelar e o Esc) e
-    solta a referência Python."""
+    """Repete o ciclo exato do código de produção.
+
+    Cria com a view como parent, **abre com `exec()`** e fecha pelo caminho do
+    usuário (`reject()`, o mesmo do botão Cancelar e do Esc). O `singleShot` é
+    o teste fazendo o papel do dedo do operador: `exec()` bloqueia até alguém
+    fechar o diálogo, e o app não usa `QTimer` em lugar nenhum.
+    """
     for _ in range(vezes):
         modal = fabrica(pai)
-        modal.reject()
+        QTimer.singleShot(0, modal.reject)
+        modal.exec()
         del modal
 
 
-@pytest.mark.xfail(strict=True, reason=PENDENTE_FASE_4)
-def test_cancelamento_dialog_nao_acumula(qapp):
+def test_cancelamento_dialog_nao_acumula(qapp, assentar):
+    """Aberto a cada cancelamento de item ou de comanda inteira."""
     pai = QWidget()
 
     _abrir_e_fechar(lambda p: CancelamentoDialog("Cancelar item", p), pai)
-    _assentar(qapp)
+    assentar()
 
     vivos = pai.findChildren(CancelamentoDialog)
     assert vivos == [], (
-        f"{len(vivos)} de {ABERTURAS} modais de cancelamento continuam presos ao parent. "
-        "Cada cancelamento de item na comanda deixa um para trás."
+        f"{len(vivos)} de {ABERTURAS} modais de cancelamento continuam presos à view. "
+        "Cada cancelamento de item na comanda deixaria um para trás."
     )
 
 
-@pytest.mark.xfail(strict=True, reason=PENDENTE_FASE_4)
-def test_gerente_pin_dialog_nao_acumula(qapp, auth):
+def test_gerente_pin_dialog_nao_acumula(qapp, assentar, auth):
     """O modal de PIN de gerente é aberto a cada cancelamento autorizado."""
     pai = QWidget()
 
     _abrir_e_fechar(lambda p: GerentePinDialog(auth, p), pai)
-    _assentar(qapp)
+    assentar()
 
     assert pai.findChildren(GerentePinDialog) == []
 
 
-@pytest.mark.xfail(strict=True, reason=PENDENTE_FASE_4)
-def test_loja_pin_dialog_nao_acumula(qapp, auth):
+def test_loja_pin_dialog_nao_acumula(qapp, assentar, auth):
     """Este é o pior caso de frequência: `main_window.py:327-329` exige o PIN a
     cada acesso à Central de Loja, e `_trancar_loja()` roda em toda navegação
     para fora. Um modal por ida e volta."""
     pai = QWidget()
 
     _abrir_e_fechar(lambda p: LojaPinDialog(auth, p), pai)
-    _assentar(qapp)
+    assentar()
 
     assert pai.findChildren(LojaPinDialog) == []
 
 
-@pytest.mark.xfail(strict=True, reason=PENDENTE_FASE_4)
-def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, auth):
-    """Rede larga: qualquer `QDialog` pendurado no parent, de qualquer tipo.
+def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, assentar, auth):
+    """Rede larga: qualquer `QDialog` pendurado na view, de qualquer tipo.
 
     Existe para pegar modal novo que alguém adicione depois sem lembrar de
     liberar — inclusive `QMessageBox`, que também é `QDialog` e aparece em
@@ -117,26 +109,74 @@ def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, auth):
     _abrir_e_fechar(lambda p: CancelamentoDialog("Cancelar comanda", p), pai, vezes=10)
     _abrir_e_fechar(lambda p: GerentePinDialog(auth, p), pai, vezes=10)
     _abrir_e_fechar(lambda p: LojaPinDialog(auth, p), pai, vezes=10)
-    _assentar(qapp)
+    assentar()
 
     vivos = pai.findChildren(QDialog)
     assert vivos == [], f"{len(vivos)} diálogos de 30 aberturas continuam na memória"
 
 
-def test_o_vazamento_de_hoje_esta_documentado(qapp):
-    """Trava o comportamento ATUAL, para a Fase 4 ter um "antes" verificável.
+def test_construir_sem_abrir_deixa_o_dialogo_preso_a_view(qapp, assentar):
+    """A premissa, e a única forma de vazar que sobrou do §3.2.
 
-    Diferente dos testes acima, este passa hoje. Quando a Fase 4 corrigir o
-    ciclo de vida, ele vai falhar — e é para falhar mesmo: é o par do `xfail`,
-    e sai junto com eles. Enquanto existir, é a prova de que o vazamento é real
-    e não teoria.
+    Construir com parent e fechar **sem `exec()`** deixa o diálogo pendurado na
+    view: não houve laço de eventos dono do `exec()` para recolhê-lo, e a posse
+    do objeto é do parent, em C++ — soltar o nome Python não destrói nada.
+
+    Nenhum dos 31 sites do app faz isso hoje (todos abrem com `exec()`), e é
+    por isso que o §3.2 foi rebaixado. Mas a armadilha está a um passo: basta
+    alguém construir um diálogo para "só configurar" e desistir no meio. É esse
+    passo que `executar_modal()`/`descartar_modal()` fecham.
+
+    Se este teste um dia falhar, o Qt passou a recolher sozinho e os
+    utilitários do §3.2 viram redundância — remedir antes de removê-los.
     """
     pai = QWidget()
 
-    _abrir_e_fechar(lambda p: CancelamentoDialog("Cancelar item", p), pai)
-    _assentar(qapp)
+    for _ in range(ABERTURAS):
+        modal = CancelamentoDialog("Cancelar item", pai)
+        modal.reject()  # sem `exec()`: o caminho que a bancada de medição usava
+        del modal
+    assentar()
 
     assert len(pai.findChildren(CancelamentoDialog)) == ABERTURAS, (
-        "O vazamento descrito no §3.2 não reproduziu. Se a correção da Fase 4 já "
-        "entrou, remova este teste e o marcador xfail dos testes acima."
+        "Diálogo construído sem `exec()` deixou de ficar preso ao parent. O §3.2 "
+        "perdeu a última forma de vazar — reavaliar `modais.py` antes da Fase 5."
     )
+
+
+def test_o_utilitario_fecha_a_armadilha_da_premissa(qapp, assentar):
+    """A contraprova do teste acima: o mesmo laço, agora com `descartar_modal()`.
+
+    É o par que dá sentido ao anterior — um mostra o buraco, o outro mostra o
+    utilitário tapando. Sem este, a premissa seria só uma curiosidade sobre o Qt.
+    """
+    from gestor_comercial.ui.widgets.modais import descartar_modal
+
+    pai = QWidget()
+
+    for _ in range(ABERTURAS):
+        modal = CancelamentoDialog("Cancelar item", pai)
+        modal.reject()
+        descartar_modal(modal)
+        del modal
+    assentar()
+
+    assert pai.findChildren(CancelamentoDialog) == []
+
+
+@pytest.mark.parametrize("codigo", [QDialog.DialogCode.Accepted, QDialog.DialogCode.Rejected])
+def test_fechar_pelo_ok_ou_pelo_cancelar_libera_igual(qapp, assentar, codigo):
+    """`accept()` e `reject()` passam os dois por `done()`, e nenhum dos dois
+    pode reter o diálogo. Vale para o operador que confirma tanto quanto para o
+    que desiste — e é o mesmo `done()` que limpa o PIN (§3.9,
+    `test_pin_dialogs.py`)."""
+    pai = QWidget()
+
+    for _ in range(ABERTURAS):
+        modal = CancelamentoDialog("Cancelar item", pai)
+        QTimer.singleShot(0, lambda m=modal: m.done(codigo))
+        modal.exec()
+        del modal
+    assentar()
+
+    assert pai.findChildren(CancelamentoDialog) == []

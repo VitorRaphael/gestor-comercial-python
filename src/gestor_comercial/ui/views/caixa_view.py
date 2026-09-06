@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLayout,
     QLineEdit,
     QProgressBar,
     QPushButton,
@@ -45,6 +44,7 @@ from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
+from gestor_comercial.ui.widgets.layout_utils import limpar_layout
 from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
 
 _COLUNAS_MOVIMENTOS = ["Quando", "Tipo", "Descrição", "Valor"]
@@ -419,7 +419,7 @@ class CaixaView(QWidget):
         )
 
     def _atualizar_fechamentos(self) -> None:
-        _limpar_layout(self._layout_fechamentos)
+        limpar_layout(self._layout_fechamentos)
         try:
             historico = self._caixa_service.listar_historico()
         except _ERROS_SERVICE:
@@ -731,11 +731,3 @@ def _criar_badge_movimento(tipo: TipoMovimento, texto: str) -> QWidget:
     layout.addWidget(badge)
     layout.addStretch()
     return container
-
-
-def _limpar_layout(layout: QLayout) -> None:
-    while layout.count():
-        item = layout.takeAt(0)
-        widget = item.widget()
-        if widget is not None:
-            widget.deleteLater()

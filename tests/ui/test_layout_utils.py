@@ -2,7 +2,9 @@
 
 O projeto carregava de quatro a seis cópias deste laço. Duas já traziam a
 correção do `setParent(None)` (e o comentário explicando o bug); as outras não.
-Este arquivo tranca a versão corrigida antes de a Fase 4 apagar as cópias.
+Este arquivo trancou a versão corrigida antes de a Fase 4 apagar as cópias.
+Com a Fase 4 concluída existe **uma** cópia, e os dois últimos testes daqui
+cobrem os dois sites que ainda carregavam a versão com bug.
 
 O bug que se repetiu duas vezes: `takeAt` tira o item do LAYOUT, mas o widget
 continua **filho visível** do container até o `deleteLater()` agendado rodar.
@@ -15,6 +17,8 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from gestor_comercial.ui.views.caixa_view import CaixaView
+from gestor_comercial.ui.views.mesas_view import MesasView
 from gestor_comercial.ui.widgets.flow_layout import FlowLayout
 from gestor_comercial.ui.widgets.layout_utils import limpar_layout
 
@@ -131,3 +135,84 @@ def test_repopular_muitas_vezes_nao_acumula(qapp, assentar):
     assentar()
 
     assert len(container.findChildren(QLabel)) == 5
+
+
+# ----------------------------------------------------------------------
+# Os dois sites que carregavam a versão SEM `setParent(None)` — §3.7.
+#
+# `caixa_view` e `mesas_view` ficaram com o bug latente enquanto
+# `historico_caixa_view` e `dashboard_mensal_view` já tinham sido corrigidos
+# (duas vezes, separadamente). Os testes abaixo exercitam as views de verdade
+# para que a correção não possa ser desfeita sem a suíte avisar.
+#
+# A asserção é sobre o MESMO ciclo, sem `assentar()`, de propósito: o defeito
+# do §3.7 nunca foi acúmulo ao longo do tempo — o Qt recolhia depois. Era a
+# janela entre limpar e repopular, em que a linha antiga continuava filha
+# visível do container e aparecia por baixo da nova no repaint.
+# ----------------------------------------------------------------------
+
+
+def _widgets_do_layout(layout) -> set:
+    """Só o que o layout de fato segura.
+
+    Não serve olhar todos os filhos do container: o card do Caixa tem um título
+    estático ("Últimos fechamentos") que é irmão do layout e sobrevive a toda
+    recarga por construção — contá-lo acusaria bug onde não há.
+    """
+    return {
+        item.widget()
+        for indice in range(layout.count())
+        if (item := layout.itemAt(indice)) is not None and item.widget() is not None
+    }
+
+
+def test_caixa_view_nao_deixa_fechamento_antigo_por_baixo_do_novo(
+    qapp, caixas_service, impressao, gerente, caixa_aberto
+):
+    """`_atualizar_fechamentos()` roda a cada abertura da tela do Caixa."""
+    view = CaixaView(caixas_service, impressao)
+    view.atualizar()
+    container = view._layout_fechamentos.parentWidget()
+    antes = _widgets_do_layout(view._layout_fechamentos)
+    assert antes, "o layout de fechamentos ficou vazio — o teste não provaria nada"
+
+    view.atualizar()  # sem assentar(): o repaint acontece ANTES do ciclo de eventos
+
+    ainda_na_arvore = {w for w in antes if w.parent() is container}
+    assert not ainda_na_arvore, (
+        f"{len(ainda_na_arvore)} widget(s) da leva anterior continuam filhos do container "
+        "depois de repopular — é o texto sobreposto do §3.7 de volta."
+    )
+
+
+def test_mesas_view_nao_deixa_cartao_antigo_por_baixo_do_novo(qapp, comandas, mesa):
+    """A grade de mesas é reorganizada a cada troca de filtro (Todas / Livres /
+    Ocupadas / Fechando), que é o clique mais frequente da tela principal."""
+    view = MesasView(comandas)
+    view.carregar_mesas()
+    container = view._grade.parentWidget()
+    antes = _widgets_do_layout(view._grade)
+    assert antes, "a grade ficou vazia — o teste não provaria nada"
+
+    view.carregar_mesas()
+
+    ainda_na_arvore = {w for w in antes if w.parent() is container}
+    assert not ainda_na_arvore, (
+        f"{len(ainda_na_arvore)} cartão(ões) da leva anterior continuam filhos da grade."
+    )
+
+
+def test_mesas_view_preserva_o_espacador_da_lista_de_comandas(qapp, comandas, mesa):
+    """`manter_ao_final=1` não é detalhe: o último item do layout é um stretch
+    fixo, e a lista de comandas ativas é inserida ANTES dele. Perder o stretch
+    espalharia as linhas pela altura toda do painel."""
+    view = MesasView(comandas)
+    layout = view._layout_lista_comandas
+
+    view.carregar_mesas()
+    view.carregar_mesas()
+
+    assert layout.count() >= 1
+    assert layout.itemAt(layout.count() - 1).spacerItem() is not None, (
+        "o stretch fixo do fim da lista foi levado junto na limpeza"
+    )

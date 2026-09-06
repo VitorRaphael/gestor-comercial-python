@@ -39,6 +39,7 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.widgets.layout_utils import limpar_layout
 
 _COLUNAS_GRADE = 8
 _ESPACAMENTO = 14
@@ -421,11 +422,7 @@ class MesasView(QWidget):
 
     def _atualizar_lista_comandas_ativas(self) -> None:
         layout = self._layout_lista_comandas
-        while layout.count() > 1:  # o último item é o stretch fixo
-            item = layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        limpar_layout(layout, manter_ao_final=1)  # o último item é o stretch fixo
 
         ativas = [r for r in self._resumos if r.status != "livre"]
         for resumo in ativas:
@@ -476,11 +473,7 @@ class MesasView(QWidget):
         return self._resumos
 
     def _reorganizar_grade(self) -> None:
-        while self._grade.count():
-            item = self._grade.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        limpar_layout(self._grade)
 
         for indice, resumo in enumerate(self._resumos_filtrados()):
             linha, coluna = divmod(indice, _COLUNAS_GRADE)

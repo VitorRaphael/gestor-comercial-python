@@ -44,6 +44,7 @@ from gestor_comercial.ui.formatacao import formatar_reais, formatar_reais_com_si
 from gestor_comercial.ui.widgets.kpi_card import CardKpi
 from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
 from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.widgets.layout_utils import limpar_layout
 
 # Sentinela do item "Todos" do filtro de operador — mesmo padrão do
 # Histórico Diário (`historico_caixa_view._TODOS_OS_OPERADORES`).
@@ -311,7 +312,7 @@ class DashboardMensalView(QWidget):
         # Mesmo padrão do Histórico Diário: reconstrói do zero pra refletir
         # um Caixa desativado/cadastrado entre duas visitas à aba.
         selecionado = self._operador_selecionado
-        _limpar_layout(self._layout_pills_operador)
+        limpar_layout(self._layout_pills_operador)
 
         opcoes: list[tuple[str, int | None]] = [("Todos", _TODOS_OS_OPERADORES)]
         opcoes.extend(
@@ -366,7 +367,7 @@ class DashboardMensalView(QWidget):
         self._preencher_ranking(resumo)
 
     def _preencher_formas_pagamento(self, resumo: ResumoMensal) -> None:
-        _limpar_layout(self._layout_formas)
+        limpar_layout(self._layout_formas)
         for item in resumo.formas_pagamento:
             self._layout_formas.addLayout(
                 _criar_linha_forma(
@@ -378,7 +379,7 @@ class DashboardMensalView(QWidget):
         self._label_total_formas.setText(formatar_reais(resumo.faturamento_bruto))
 
     def _preencher_ranking(self, resumo: ResumoMensal) -> None:
-        _limpar_layout(self._layout_ranking)
+        limpar_layout(self._layout_ranking)
         maior_valor = max((item.valor_total for item in resumo.ranking_produtos), default=Decimal(0))
         if resumo.ranking_produtos:
             lider = resumo.ranking_produtos[0]
@@ -411,7 +412,7 @@ class DashboardMensalView(QWidget):
             self._label_gaveta_diferenca.setText(formatar_reais_com_sinal(gaveta.diferenca))
 
     def _preencher_atendentes(self, ranking: list[ItemRankingAtendente]) -> None:
-        _limpar_layout(self._layout_atendentes)
+        limpar_layout(self._layout_atendentes)
         if not ranking:
             vazio = QLabel("Nenhuma venda vinculada a atendente neste período.")
             vazio.setObjectName("relatoriosFormaNome")
@@ -526,26 +527,6 @@ def _linha_rotulo_valor(rotulo: str, dono: QWidget, atributo_label_valor: str) -
     linha.addWidget(label_valor)
     setattr(dono, atributo_label_valor, label_valor)
     return linha
-
-
-def _limpar_layout(layout: QVBoxLayout) -> None:
-    # `takeAt` só tira o item do LAYOUT — o widget continua filho visível do
-    # container até o `deleteLater()` agendado realmente rodar no próximo
-    # ciclo de eventos. Entre um `_preencher_*` e o outro (ex.: trocar de
-    # mês no Dashboard Mensal), isso empilhava a linha antiga por baixo da
-    # nova na mesma posição, produzindo texto sobreposto/corrompido no
-    # repaint ("Mix de Vendas do Mês" ilegível). `setParent(None)` desliga o
-    # widget da árvore na hora — some do repaint mesmo antes do GC de verdade.
-    while layout.count():
-        item = layout.takeAt(0)
-        sub_layout = item.layout()
-        widget = item.widget()
-        if widget is not None:
-            widget.setParent(None)
-            widget.deleteLater()
-        elif sub_layout is not None:
-            _limpar_layout(sub_layout)
-            sub_layout.deleteLater()
 
 
 _TITULOS_CARD = {

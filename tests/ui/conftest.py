@@ -28,6 +28,19 @@ from gestor_comercial.services.cardapio_service import CardapioService
 from gestor_comercial.services.comanda_service import ComandaService
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.services.pagamento_service import PagamentoService
+from gestor_comercial.ui.views.caixa_view import CaixaView
+from gestor_comercial.ui.views.cardapio_view import CardapioView
+from gestor_comercial.ui.views.comanda_view import ComandaView
+from gestor_comercial.ui.views.configuracoes_view import ConfiguracoesView
+from gestor_comercial.ui.views.dashboard_mensal_view import DashboardMensalView
+from gestor_comercial.ui.views.estoque_view import EstoqueView
+from gestor_comercial.ui.views.funcionarios_view import FuncionariosView
+from gestor_comercial.ui.views.historico_caixa_view import HistoricoCaixaView
+from gestor_comercial.ui.views.impressoras_view import ImpressorasView
+from gestor_comercial.ui.views.loja_hub_view import LojaHubView
+from gestor_comercial.ui.views.login_view import LoginView
+from gestor_comercial.ui.views.mesas_view import MesasView
+from gestor_comercial.ui.views.relatorios_view import RelatoriosView
 
 
 @pytest.fixture(scope="session")
@@ -90,3 +103,34 @@ def pagamentos(uow, auth, comandas, funcionarios):
 @pytest.fixture
 def impressao(uow, auth):
     return ImpressaoService(uow, auth)
+
+
+@pytest.fixture
+def todas_as_telas(
+    qapp, auth, comandas, cardapio, caixas_service, pagamentos, impressao, funcionarios
+):
+    """Uma instância de cada tela do app, montada com os services reais.
+
+    Devolve dicionário `nome -> widget` para o erro de um teste dizer QUAL tela
+    quebrou, em vez de só apontar o índice de um parametrize.
+
+    Mora aqui, e não no arquivo de smoke, porque o teste de vazamento das telas
+    precisa exatamente da mesma lista: o que garante que a rede é completa é as
+    duas varreduras saírem da mesma fonte. Tela nova entra num lugar só e passa
+    a ser coberta pelas duas.
+    """
+    return {
+        "Login": LoginView(auth),
+        "Mesas": MesasView(comandas),
+        "Comanda": ComandaView(comandas, cardapio, impressao, funcionarios),
+        "Caixa": CaixaView(caixas_service, impressao),
+        "Histórico de Caixa": HistoricoCaixaView(caixas_service, auth, impressao, funcionarios),
+        "Dashboard Mensal": DashboardMensalView(caixas_service, funcionarios),
+        "Relatórios": RelatoriosView(caixas_service, auth, impressao, funcionarios),
+        "Cardápio": CardapioView(cardapio),
+        "Funcionários": FuncionariosView(funcionarios, pagamentos, auth, caixas_service),
+        "Impressoras": ImpressorasView(cardapio, impressao),
+        "Configurações": ConfiguracoesView(auth),
+        "Central de Loja": LojaHubView(),
+        "Estoque": EstoqueView(),
+    }

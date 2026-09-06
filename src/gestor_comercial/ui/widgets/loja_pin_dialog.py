@@ -71,8 +71,14 @@ class LojaPinDialog(QDialog):
             return
         self.accept()
 
-    def closeEvent(self, event) -> None:  # noqa: N802 - override Qt
+    def done(self, resultado: int) -> None:  # noqa: N802 - override Qt
         # Limpa o PIN digitado da memória do widget antes de descartar o
         # modal — não há motivo pra ele sobreviver no heap do Celeron.
+        #
+        # O hook certo é `done()`, não `closeEvent()` (§3.9): `accept()` (botão
+        # Entrar), `reject()` (Cancelar) e o Esc passam todos por `done()`, que
+        # faz `hide()` — não `close()`. Só o X da janela dispara `closeEvent`,
+        # e um modal de PIN nem sempre tem X. Medido: com `closeEvent`, o campo
+        # continuava com o PIN depois do `exec()` nos três caminhos.
         self._campo_pin.clear()
-        super().closeEvent(event)
+        super().done(resultado)
