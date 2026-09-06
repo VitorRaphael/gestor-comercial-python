@@ -61,6 +61,25 @@ class ResumoCaixa:
     diferenca_maquininha: Decimal | None
     quantidade_comandas: int
 
+    @property
+    def diferenca_total(self) -> Decimal | None:
+        """Quebra/sobra do turno somando as duas contagens, ou `None` quando o
+        turno não foi conferido.
+
+        Regra única do sistema — antes desta propriedade a mesma conta existia
+        em três lugares, com **três critérios diferentes** para o caso de uma
+        contagem faltar: a gaveta impressa exigia as duas, a tela do Caixa
+        tratava a que faltasse como zero, e o Histórico Diário somava
+        `Decimal + None` (que estoura). As duas contagens sempre viajam juntas
+        — `fechar` recebe e grava as duas —, então as três davam o mesmo
+        resultado na prática, e a divergência era uma armadilha esperando um
+        fechamento parcial existir. Vence o critério mais conservador: sem as
+        duas contagens não há diferença a afirmar.
+        """
+        if self.diferenca_dinheiro is None or self.diferenca_maquininha is None:
+            return None
+        return dinheiro(self.diferenca_dinheiro + self.diferenca_maquininha)
+
 
 @dataclass(frozen=True)
 class ItemCanceladoDetalhe:
@@ -507,18 +526,13 @@ class CaixaService:
             if conferido_fechado
             else None
         )
-        diferenca_total = (
-            None
-            if resumo.diferenca_dinheiro is None
-            else dinheiro(resumo.diferenca_dinheiro + (resumo.diferenca_maquininha or ZERO))
-        )
         linhas.append(
             LinhaConferenciaPagamento(
                 forma=None,
                 rotulo="Total",
                 esperado=esperado_total,
                 conferido=conferido_total,
-                diferenca=diferenca_total,
+                diferenca=resumo.diferenca_total,
             )
         )
         return linhas
@@ -983,16 +997,12 @@ class CaixaService:
         if resumo.valor_contado_maquininha is not None:
             saldo_apurado += resumo.valor_contado_maquininha
 
-        diferenca = None
-        if resumo.diferenca_dinheiro is not None and resumo.diferenca_maquininha is not None:
-            diferenca = dinheiro(resumo.diferenca_dinheiro + resumo.diferenca_maquininha)
-
         return FechamentoGaveta(
             caixa_id=caixa_id,
             identificacao=identificacao,
             total_faturado=_faturamento_total_de(resumo),
             saldo_apurado=dinheiro(saldo_apurado),
-            diferenca=diferenca,
+            diferenca=resumo.diferenca_total,
         )
 
     def fechamento_da_gaveta_do_periodo(self, caixa_ids: Iterable[int]) -> FechamentoGaveta:

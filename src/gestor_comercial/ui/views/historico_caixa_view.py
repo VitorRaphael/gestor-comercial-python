@@ -19,13 +19,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from datetime import date
 from decimal import Decimal
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
@@ -33,7 +31,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -47,8 +44,6 @@ from gestor_comercial.domain.caixa import Caixa
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.caixa_service import (
     CaixaService,
-    FechamentoGaveta,
-    ItemRankingAtendente,
     ResumoCaixa,
     ResumoCancelamentos,
 )
@@ -67,9 +62,10 @@ from gestor_comercial.ui.widgets.comprovante_dialog import (
     montar_texto_comprovante,
 )
 from gestor_comercial.ui.widgets.kpi_card import CardKpi
+from gestor_comercial.ui.widgets.filtro_periodo_operador import FiltroPeriodoOperador
+from gestor_comercial.ui.widgets.paineis_relatorio import PainelAtendentes, PainelGaveta
 from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
 from gestor_comercial.ui.theme.controller import ThemeController
-from gestor_comercial.ui.widgets.layout_utils import limpar_layout
 from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
 from gestor_comercial.ui.widgets.modais import executar_modal
 
@@ -78,16 +74,6 @@ _COLUNA_ACOES = 5
 _ALTURA_MAXIMA_TABELA = 420
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
-
-_MESES = [
-    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
-]
-
-# Sentinela do item "Todos" do filtro de operador — combina com o `userData`
-# de cada pílula, que também guarda `int` de verdade para cada funcionário.
-_TODOS_OS_OPERADORES = None
-
 
 class HistoricoCaixaView(QWidget):
     """Fechamentos do mês selecionado: KPIs, tabela de turnos e comprovante."""
@@ -107,13 +93,6 @@ class HistoricoCaixaView(QWidget):
         self._funcionarios = funcionario_service
         self._fechamentos: list[Caixa] = []
         self._resumos: dict[int, ResumoCaixa] = {}
-        self._operador_selecionado: int | None = _TODOS_OS_OPERADORES
-        self._nome_operador_selecionado = "Todos"
-        # Nenhuma pílula vem destacada ao abrir a tela — só depois que o
-        # usuário de fato clica em uma delas (igual ao seletor de operador do
-        # Login, que também não chega com nada pré-marcado). O filtro em si já
-        # funciona como "Todos" desde o início; só o destaque visual espera o clique.
-        self._algum_operador_clicado = False
 
         self._montar_layout()
 
@@ -122,7 +101,10 @@ class HistoricoCaixaView(QWidget):
         layout_externo.setContentsMargins(0, 0, 0, 0)
         layout_externo.setSpacing(16)
 
-        layout_externo.addLayout(self._montar_filtros())
+        self._filtro = FiltroPeriodoOperador(self._funcionarios)
+        self._filtro.periodo_mudou.connect(self._carregar)
+        self._filtro.operador_mudou.connect(self._carregar)
+        layout_externo.addWidget(self._filtro)
 
         self._label_erro = QLabel("")
         self._label_erro.setObjectName("labelErro")
@@ -180,8 +162,10 @@ class HistoricoCaixaView(QWidget):
         # §3.14 — seções complementares de fechamento, no final da tela.
         painel_fechamento = QHBoxLayout()
         painel_fechamento.setSpacing(16)
-        painel_fechamento.addWidget(self._montar_painel_gaveta(), 35)
-        painel_fechamento.addWidget(self._montar_painel_atendentes(), 65)
+        self._painel_gaveta = PainelGaveta()
+        self._painel_atendentes = PainelAtendentes()
+        painel_fechamento.addWidget(self._painel_gaveta, 35)
+        painel_fechamento.addWidget(self._painel_atendentes, 65)
         layout_conteudo.addLayout(painel_fechamento)
 
         rolagem = QScrollArea()
@@ -191,31 +175,6 @@ class HistoricoCaixaView(QWidget):
         rolagem.setFrameShape(QFrame.Shape.NoFrame)
         rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         layout_externo.addWidget(rolagem, 1)
-
-    def _montar_filtros(self) -> QHBoxLayout:
-        linha = QHBoxLayout()
-        linha.setSpacing(8)
-
-        self._layout_pills_operador = QHBoxLayout()
-        self._layout_pills_operador.setSpacing(8)
-        linha.addLayout(self._layout_pills_operador)
-        linha.addStretch()
-
-        frame_mes = QFrame()
-        frame_mes.setObjectName("relatoriosFiltroMes")
-        layout_mes = QHBoxLayout(frame_mes)
-        layout_mes.setContentsMargins(12, 4, 8, 4)
-        layout_mes.setSpacing(4)
-        icone = QLabel("📅")
-        icone.setObjectName("relatoriosFiltroMesIcone")
-        layout_mes.addWidget(icone)
-        self._seletor_mes = QComboBox()
-        self._seletor_mes.setObjectName("relatoriosComboMes")
-        self._popular_seletor_mes()
-        self._seletor_mes.currentIndexChanged.connect(self._carregar)
-        layout_mes.addWidget(self._seletor_mes)
-        linha.addWidget(frame_mes)
-        return linha
 
     def _montar_rodape_tabela(self) -> QFrame:
         rodape = QFrame()
@@ -232,61 +191,6 @@ class HistoricoCaixaView(QWidget):
         layout.addWidget(self._label_total_periodo)
         return rodape
 
-    def _montar_painel_gaveta(self) -> QFrame:
-        painel = QFrame()
-        painel.setObjectName("relatoriosPainel")
-        layout = QVBoxLayout(painel)
-        layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(10)
-
-        titulo = QLabel("FECHAMENTO DA GAVETA")
-        titulo.setObjectName("relatoriosPainelTitulo")
-        layout.addWidget(titulo)
-
-        self._label_gaveta_identificacao = QLabel("—")
-        self._label_gaveta_identificacao.setObjectName("relatoriosFormaNome")
-        self._label_gaveta_identificacao.setWordWrap(True)
-        layout.addWidget(self._label_gaveta_identificacao)
-
-        layout.addLayout(_linha_rotulo_valor("Total faturado", self, "_label_gaveta_faturado"))
-        layout.addLayout(_linha_rotulo_valor("Saldo apurado", self, "_label_gaveta_saldo"))
-        layout.addLayout(_linha_rotulo_valor("Diferença (quebra/sobra)", self, "_label_gaveta_diferenca"))
-        layout.addStretch()
-        return painel
-
-    def _montar_painel_atendentes(self) -> QFrame:
-        painel = QFrame()
-        painel.setObjectName("relatoriosPainel")
-        layout = QVBoxLayout(painel)
-        layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(14)
-
-        titulo = QLabel("PERFORMANCE POR ATENDENTE")
-        titulo.setObjectName("relatoriosPainelTitulo")
-        layout.addWidget(titulo)
-
-        self._layout_atendentes = QVBoxLayout()
-        self._layout_atendentes.setSpacing(10)
-        layout.addLayout(self._layout_atendentes)
-        layout.addStretch()
-        return painel
-
-    def _popular_seletor_mes(self) -> None:
-        # Mesmo padrão do Histórico Mensal: mês vigente primeiro, mais 11 pra
-        # trás, mesmo sem nenhum fechamento ainda naquele mês.
-        hoje = date.today()
-        self._seletor_mes.blockSignals(True)
-        self._seletor_mes.clear()
-        self._seletor_mes.addItem(f"{_MESES[hoje.month - 1]}/{hoje.year}", (hoje.year, hoje.month))
-        ano, mes = hoje.year, hoje.month
-        for _ in range(11):
-            mes -= 1
-            if mes == 0:
-                mes = 12
-                ano -= 1
-            self._seletor_mes.addItem(f"{_MESES[mes - 1]}/{ano}", (ano, mes))
-        self._seletor_mes.blockSignals(False)
-
     # ------------------------------------------------------------------
     # Carregamento / preenchimento
     # ------------------------------------------------------------------
@@ -294,47 +198,18 @@ class HistoricoCaixaView(QWidget):
     def atualizar(self) -> None:
         self._label_erro.setText("")
         self._aviso_impressao.limpar()
-        self._popular_pills_operador()
+        self._filtro.atualizar_operadores()
         self._carregar()
 
     def periodo_atual(self) -> str:
-        return self._seletor_mes.currentText()
+        return self._filtro.texto_periodo()
 
     def conectar_mudanca_periodo(self, callback: Callable[[int], None]) -> None:
-        self._seletor_mes.currentIndexChanged.connect(callback)
-
-    def _popular_pills_operador(self) -> None:
-        # Reconstrói do zero: um funcionário desativado entre duas visitas à
-        # tela ainda tem que aparecer, porque o histórico é dele mesmo assim.
-        selecionado = self._operador_selecionado
-        limpar_layout(self._layout_pills_operador)
-
-        opcoes: list[tuple[str, int | None]] = [("Todos", _TODOS_OS_OPERADORES)]
-        opcoes.extend(
-            (operador.nome, operador.id) for operador in self._funcionarios.listar_operadores_caixa()
-        )
-        if selecionado not in (valor for _, valor in opcoes):
-            selecionado = _TODOS_OS_OPERADORES
-
-        for nome, valor in opcoes:
-            pill = QPushButton(nome)
-            pill.setProperty("variante", "filtro-pill")
-            pill.setProperty("ativo", self._algum_operador_clicado and valor == selecionado)
-            pill.clicked.connect(lambda _=False, v=valor: self._selecionar_operador(v))
-            self._layout_pills_operador.addWidget(pill)
-            if valor == selecionado:
-                self._nome_operador_selecionado = nome
-        self._operador_selecionado = selecionado
-
-    def _selecionar_operador(self, operador_id: int | None) -> None:
-        self._operador_selecionado = operador_id
-        self._algum_operador_clicado = True
-        self._popular_pills_operador()
-        self._carregar()
+        self._filtro.conectar_mudanca_periodo(callback)
 
     def _carregar(self) -> None:
         self._label_erro.setText("")
-        ano_mes = self._seletor_mes.currentData()
+        ano_mes = self._filtro.ano_mes()
         if ano_mes is None:
             return
         ano, mes = ano_mes
@@ -344,7 +219,7 @@ class HistoricoCaixaView(QWidget):
             self._label_erro.setText(str(erro))
             return
 
-        funcionario_id = self._operador_selecionado
+        funcionario_id = self._filtro.operador_id()
         if funcionario_id is not None:
             fechamentos = [
                 caixa
@@ -357,12 +232,16 @@ class HistoricoCaixaView(QWidget):
         self._preencher_kpis()
 
         ids = [caixa.id for caixa in fechamentos]
-        self._preencher_gaveta(self._caixas.fechamento_da_gaveta_do_periodo(ids))
-        self._preencher_atendentes(self._caixas.ranking_por_atendente(ids))
+        self._painel_gaveta.preencher(self._caixas.fechamento_da_gaveta_do_periodo(ids))
+        self._painel_atendentes.preencher(self._caixas.ranking_por_atendente(ids))
 
     def _preencher_kpis(self) -> None:
         faturamentos = [_faturamento_total(resumo) for resumo in self._resumos.values()]
-        diferencas = [d for d in (_diferenca_total(resumo) for resumo in self._resumos.values()) if d is not None]
+        diferencas = [
+            diferenca
+            for diferenca in (resumo.diferenca_total for resumo in self._resumos.values())
+            if diferenca is not None
+        ]
 
         faturamento_periodo = sum(faturamentos, Decimal(0))
         ticket_medio = faturamento_periodo / len(faturamentos) if faturamentos else Decimal(0)
@@ -375,7 +254,7 @@ class HistoricoCaixaView(QWidget):
         tom_diferenca = "neutro" if diferenca_acumulada == 0 else ("positivo" if diferenca_acumulada > 0 else "negativo")
         self._card_diferenca.definir_valor(formatar_reais_com_sinal(diferenca_acumulada), tom=tom_diferenca)
 
-        self._card_operador.definir_valor(self._nome_operador_selecionado)
+        self._card_operador.definir_valor(self._filtro.nome_operador())
 
         self._label_turnos_fechados.setText(f"{len(self._fechamentos)} TURNOS FECHADOS")
         self._label_total_periodo.setText(formatar_reais(faturamento_periodo))
@@ -406,7 +285,7 @@ class HistoricoCaixaView(QWidget):
         operador = caixa.fechado_por.nome if caixa.fechado_por is not None else "—"
         resumo = self._resumos[caixa.id]
         faturamento = _faturamento_total(resumo)
-        diferenca_total = _diferenca_total(resumo)
+        diferenca_total = resumo.diferenca_total
         diferenca = "—" if diferenca_total is None else formatar_reais_com_sinal(diferenca_total)
         turno = "—" if caixa.numero_sequencial_dia is None else f"T{caixa.numero_sequencial_dia}"
         periodo = self._caixas.identificacao_turno(caixa).removeprefix("Caixa Turno - ")
@@ -490,28 +369,6 @@ class HistoricoCaixaView(QWidget):
         modal = _CancelamentosDialog(titulo, resumo, self)
         executar_modal(modal)
 
-    def _preencher_gaveta(self, gaveta: FechamentoGaveta) -> None:
-        self._label_gaveta_identificacao.setText(gaveta.identificacao)
-        self._label_gaveta_faturado.setText(formatar_reais(gaveta.total_faturado))
-        self._label_gaveta_saldo.setText(formatar_reais(gaveta.saldo_apurado))
-        if gaveta.diferenca is None:
-            self._label_gaveta_diferenca.setText("—")
-        else:
-            self._label_gaveta_diferenca.setText(formatar_reais_com_sinal(gaveta.diferenca))
-
-    def _preencher_atendentes(self, ranking: list[ItemRankingAtendente]) -> None:
-        limpar_layout(self._layout_atendentes)
-        if not ranking:
-            vazio = QLabel("Nenhuma venda vinculada a atendente neste período.")
-            vazio.setObjectName("relatoriosFormaNome")
-            self._layout_atendentes.addWidget(vazio)
-            return
-        for item in ranking:
-            self._layout_atendentes.addLayout(
-                _criar_linha_atendente(item.atendente_nome, item.valor_total, item.percentual)
-            )
-
-
 class _CancelamentosDialog(QDialog):
     """Modal com a auditoria de itens cancelados de um fechamento passado."""
 
@@ -538,50 +395,3 @@ def _faturamento_total(resumo: ResumoCaixa) -> Decimal:
     # Mesma regra da linha "Total" de `conferencia_pagamentos`.
     return resumo.total_dinheiro + resumo.total_maquininha + resumo.total_consumo_interno
 
-
-def _diferenca_total(resumo: ResumoCaixa) -> Decimal | None:
-    if resumo.diferenca_dinheiro is None:
-        return None
-    return resumo.diferenca_dinheiro + resumo.diferenca_maquininha
-
-
-def _linha_rotulo_valor(rotulo: str, dono: QWidget, atributo_label_valor: str) -> QHBoxLayout:
-    """Uma linha 'RÓTULO ... VALOR', guardando o QLabel do valor em `dono`
-    (via `setattr`) para `_preencher_gaveta` atualizar depois."""
-    linha = QHBoxLayout()
-    label_rotulo = QLabel(rotulo)
-    label_rotulo.setObjectName("relatoriosRodapeRotulo")
-    linha.addWidget(label_rotulo)
-    linha.addStretch()
-    label_valor = QLabel("—")
-    label_valor.setObjectName("relatoriosFormaValor")
-    linha.addWidget(label_valor)
-    setattr(dono, atributo_label_valor, label_valor)
-    return linha
-
-
-def _criar_linha_atendente(nome: str, valor: Decimal, percentual: Decimal) -> QVBoxLayout:
-    bloco = QVBoxLayout()
-    bloco.setSpacing(4)
-
-    topo = QHBoxLayout()
-    label_nome = QLabel(nome)
-    label_nome.setObjectName("relatoriosFormaNome")
-    topo.addWidget(label_nome)
-    topo.addStretch()
-    label_valor = QLabel(formatar_reais(valor))
-    label_valor.setObjectName("relatoriosFormaValor")
-    topo.addWidget(label_valor)
-    bloco.addLayout(topo)
-
-    barra = QProgressBar()
-    barra.setObjectName("relatoriosBarraForma")
-    barra.setRange(0, 100)
-    barra.setValue(min(100, max(0, int(percentual))))
-    barra.setTextVisible(False)
-    bloco.addWidget(barra)
-
-    label_percentual = QLabel(f"{percentual:.1f}%")
-    label_percentual.setObjectName("relatoriosFormaPercentual")
-    bloco.addWidget(label_percentual)
-    return bloco

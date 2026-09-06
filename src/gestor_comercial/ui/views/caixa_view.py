@@ -462,7 +462,7 @@ class CaixaView(QWidget):
         valor.setAlignment(Qt.AlignmentFlag.AlignRight)
         bloco_direita.addWidget(valor)
 
-        diferenca = self._diferenca_total(resumo)
+        diferenca = resumo.diferenca_total
         status = QLabel(self._texto_status_diferenca(diferenca))
         status.setObjectName(
             "caixaMiniCardValorNeutro" if diferenca is None
@@ -473,12 +473,6 @@ class CaixaView(QWidget):
         bloco_direita.addWidget(status)
         layout.addLayout(bloco_direita)
         return item
-
-    @staticmethod
-    def _diferenca_total(resumo: ResumoCaixa) -> Decimal | None:
-        if resumo.diferenca_dinheiro is None and resumo.diferenca_maquininha is None:
-            return None
-        return (resumo.diferenca_dinheiro or Decimal("0")) + (resumo.diferenca_maquininha or Decimal("0"))
 
     @staticmethod
     def _texto_status_diferenca(diferenca: Decimal | None) -> str:

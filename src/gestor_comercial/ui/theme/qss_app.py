@@ -907,6 +907,12 @@ def construir_qss_app(t: dict[str, str]) -> str:
       color: {t['acento_texto']};
     }}
 
+    /* A barra de filtro é um QWidget próprio (`FiltroPeriodoOperador`), e sem
+       esta regra ela herdaria o `QWidget {{ background: bg_marca }}` global e
+       pintaria um retângulo por trás das pílulas — mesmo caso do
+       `#secaoCancelamentos`. */
+    QWidget#relatoriosFiltro {{ background: transparent; }}
+
     /* Pílula do filtro de mês (ícone + combo sem chrome, dentro de um frame com borda) */
     QFrame#relatoriosFiltroMes {{
       background: {t['superficie_2']};

@@ -63,6 +63,22 @@ def formatar_reais_com_sinal(valor: Decimal | int | str) -> str:
     return formatar_reais(valor)
 
 
+def formatar_para_campo(valor: Decimal | None) -> str:
+    """`Decimal("12.5")` vira `'12,50'` — sem símbolo e sem separador de milhar.
+
+    É o que entra num `QLineEdit` que o usuário vai **editar** (preço e custo do
+    produto, valor da quitação de consumo): "R$" e ponto de milhar teriam que
+    ser removidos de novo na hora de ler o campo de volta. `None` vira campo
+    vazio, que é como o cadastro de produto novo abre.
+
+    Passa por `dinheiro()` como todo o resto do módulo: sem isso o campo
+    arredondaria meio-para-o-par e o rótulo ao lado, meio-para-cima.
+    """
+    if valor is None:
+        return ""
+    return f"{dinheiro(valor):.2f}".replace(".", ",")
+
+
 def _separar_milhares(valor: Decimal) -> str:
     """`Decimal("1234.50")` vira `'1.234,50'` — sem símbolo e sem sinal.
 

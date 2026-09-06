@@ -51,7 +51,7 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.pagamento_service import PagamentoService
-from gestor_comercial.ui.formatacao import formatar_reais
+from gestor_comercial.ui.formatacao import formatar_para_campo, formatar_reais
 from gestor_comercial.ui.rotulo_identidade import rotulo_identidade
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.modais import executar_modal
@@ -718,7 +718,7 @@ class _QuitarConsumoDialog(QDialog):
 
         formulario = QFormLayout()
 
-        self._campo_valor = QLineEdit(_formatar_campo(saldo))
+        self._campo_valor = QLineEdit(formatar_para_campo(saldo))
         formulario.addRow("Valor descontado do salário", self._campo_valor)
 
         self._campo_senha_gerente = QLineEdit()
@@ -750,5 +750,3 @@ def _iniciais(nome: str) -> str:
     return (partes[0][0] + partes[-1][0]).upper()
 
 
-def _formatar_campo(valor: Decimal) -> str:
-    return f"{valor:.2f}".replace(".", ",")

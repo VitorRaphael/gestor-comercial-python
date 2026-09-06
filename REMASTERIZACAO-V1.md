@@ -20,8 +20,8 @@
 
 ## 0. Onde paramos — 2026-09-06
 
-**Fases 0 a 5 concluídas. Parado no início da Fase 6.**
-Suíte: **775 passando, 0 `xfail`, 0 falhas** — de 727 ao fim da Fase 4.
+**Fases 0 a 6 concluídas. Falta só a Fase 7 (validação final).**
+Suíte: **799 passando, 0 `xfail`, 0 falhas** — de 775 ao fim da Fase 5.
 
 | Fase | Estado |
 |---|---|
@@ -30,55 +30,46 @@ Suíte: **775 passando, 0 `xfail`, 0 falhas** — de 727 ao fim da Fase 4.
 | 2 — Núcleo de dados e performance | ✅ concluída |
 | 3 — Utilitários compartilhados | ✅ concluída |
 | 4 — Ciclo de vida da UI (escopo enxuto) | ✅ concluída |
-| 5 — Higiene da UI | ✅ **concluída — 9 de 9 itens** |
-| **6 — Arquitetura da UI** | ⏸️ **próxima**, sem decisão pendente bloqueando |
-| 7 — Validação final | não iniciada |
+| 5 — Higiene da UI | ✅ concluída — 9 de 9 itens |
+| 6 — Arquitetura da UI | ✅ **concluída — só a duplicação real** |
+| **7 — Validação final** | ⏸️ **próxima**, sem decisão pendente bloqueando |
 
-### O que a Fase 5 fechou
+### O que a Fase 6 fechou
 
-Os 9 itens, todos com teste que **reprova quando a mudança é desfeita** —
-conferido revertendo cada uma e vendo a suíte ficar vermelha, não só vendo-a
-verde depois:
+A fase começou como "quebrar as 5 views gigantes" e a medição mudou o alvo. Uma
+varredura de **corpo de função** (pelo `ast.dump`, então o nome não conta) na
+camada de UI inteira acusou **8 cópias** — e as 8 estavam entre as duas telas de
+Relatórios. Nas cinco views gigantes: **nenhuma**.
 
 | Item | O que entrou | Prova |
 |---|---|---|
-| §3.11 `EstoqueView` | Removida de `main_window` (4 pontos), do arquivo e da fixture | `test_main_window.py` monta a janela — que **nenhum teste montava** — e compara destinos × cards do hub: devolver a tela fantasma deixa vermelho |
-| §3.2 modais | 29 sites via `executar_modal`, 2 laços `while` via `descartar_modal` | Varredura AST: `.exec()` cru numa tela reprova, e `while` sem descarte fora do laço também |
-| §3.3 tabelas | 6 views + `secao_cancelamentos` via `limpar_tabela`/`definir_celula` | Varredura AST + 4 testes de tela real (ver o achado abaixo) |
-| §3.14 tema | As 2 `lambda` viraram métodos ligados, com a guarda anti-laço preservada | Teste de premissa (a `lambda` sobrevive à morte da tela; o método ligado não) + varredura de adoção |
-| §3.10 miniaturas | Inicial na chave; cache descarta ao virar o tema | Coca-Cola e Xis Salada voltam a ter placeholders diferentes |
-| §3.12 código morto | Pacote `config/` vazio, 14 constantes planas, 3 métodos de repository, 2 constantes, bloco QSS sobrescrito, 6 seletores órfãos, changelog duplicado, 4 imports | QSS monta nos 2 temas e as paletas ficam espelhadas — chave removida a mais vira `KeyError` no teste, não no balcão |
-| §3.12 comentários | 3 comentários que mentiam, incluindo o que quebrava o boot | O ciclo de import virou teste: subir o import de `AuthService` para o topo reprova |
-| §3.15 cores inline | 20 `setStyleSheet` congelados no tema do boot → QSS global | Teste lê a cor efetiva da paleta antes e depois de alternar o tema |
-| Tipagem | 23 lacunas fechadas — 403 de 403 funções públicas tipadas | Varredura AST, com teste de premissa contra varredor que não acha nada |
+| Painéis do rodapé | `PainelGaveta` e `PainelAtendentes` em `ui/widgets/paineis_relatorio.py` | Teste de adoção nas 2 telas reais: cópia local de volta reprova |
+| Linha com barra | `linha_barra_proporcao` — existia 2x com 2 nomes (`_criar_linha_forma`/`_criar_linha_atendente`) | 3 testes, incluindo a saturação em 0–100 |
+| Barra de filtro | `FiltroPeriodoOperador` — dona do estado que as 2 telas duplicavam em 3 atributos cada | 5 testes: mês vigente primeiro, pílula sem destaque antes do 1º clique, volta pra "Todos" quando o operador some |
+| Campo editável | `formatar_para_campo()` — as 2 cópias de `_formatar_campo` | Passa por `dinheiro()`, como manda o §3.8 |
+| Diferença do turno | `ResumoCaixa.diferenca_total` — **3 regras divergentes** viraram 1 | Teste de premissa: as 2 contagens sempre viajam juntas |
+| Catraca | Varredura que reprova quando um corpo de função é recolado entre arquivos da UI | Testada com uma cópia injetada; e com teste de premissa contra varredor cego |
+| Bancada | `tools/comparar_telas.py` — paridade visual em PNG | 6 renderizações idênticas byte a byte ao código de antes |
 
-### 🔴 O que a Fase 5 quase quebrou: a seleção do usuário
+### 🔴 O que a Fase 6 encontrou: a mesma conta com três regras
 
-Trocar `setRowCount(len(dados))` por uma limpeza de verdade parecia mecânico. Não
-era. As views nunca zeravam a tabela antes de repopular, e **nesse caminho o Qt
-mantém a linha corrente** enquanto a contagem não encolhe — `cardapio_view` e
-`impressoras_view` leem `currentRow()` logo depois de repopular.
+"Diferença total do turno" era calculada em três lugares, com três critérios
+diferentes para o caso de faltar uma das duas contagens — e um deles somava
+`Decimal + None`, que estoura. Não dá para escrever um teste que pegue isso:
+as duas contagens sempre viajam juntas, então o caminho é **inalcançável
+hoje** (pôr a regra antiga de volta deixa a suíte inteira verde). Virou uma
+regra só em `ResumoCaixa.diferenca_total`, com um teste que trava a premissa e
+avisa se o fechamento parcial um dia existir. Detalhe no §6, Fase 6.
 
-Medido antes de trocar:
+### Por que as views gigantes continuam gigantes
 
-| Roteiro, linha 1 selecionada de 3 | `currentRow()` depois |
-|---|---|
-| `setRowCount(3)` — o que as views faziam | **1** |
-| `setRowCount(0)` + `setRowCount(3)` — a limpeza | **-1** |
-
-No balcão: o pai do Vitor seleciona um produto, clica em Editar, salva — e o
-produto sai selecionado sozinho, com Editar/Excluir/Combo apagando na cara dele.
-A troca cega ainda fazia a tela emitir `produto_selecionado(None)` no meio do
-próprio refresh.
-
-Por isso `limpar_tabela` ganhou `preservar_selecao`, que devolve a linha
-corrente **com os sinais bloqueados** — do lado de fora, indistinguível do
-`setRowCount` de antes. Os 4 testes de `test_selecao_sobrevive_ao_refresh.py`
-ficam vermelhos se alguém tirar o parâmetro.
+Porque a varredura mostrou que elas não duplicam nada — nem entre si, nem com o
+resto da UI. Quebrá-las seria mover ~4.500 linhas sem nenhum teste capaz de
+dizer se melhorou. Decisão registrada no §8, não pendência.
 
 ### Retomada
 
-Ler este bloco e a **Fase 6** no §6. Não há decisão pendente do Vitor
+Ler este bloco e a **Fase 7** no §6. Não há decisão pendente do Vitor
 bloqueando. O empacotamento continua aberto: falta testar o `.exe` numa máquina
 limpa de verdade (`docs/checklist-maquina-limpa.md`).
 
@@ -1091,7 +1082,7 @@ Nenhuma linha de `services/`, `repository/`, `domain/` ou `hardware/` alterada.
       sucesso sai por `return` de dentro dele
 - [x] 🟡 `limpar_tabela()`/`definir_celula()` nas views com tabela (§3.3) —
       6 views + `secao_cancelamentos`. **Não era mecânico:** ver o achado da
-      seleção no §0. `limpar_tabela` ganhou `preservar_selecao`
+      seleção logo abaixo. `limpar_tabela` ganhou `preservar_selecao`
 - [x] 🟡 Lambdas do tema → métodos ligados (§3.14), **com a guarda anti-laço
       preservada** e testada: se a guarda de `alternar_para` sumir, o teste da
       pílula não falha por asserção — estoura por recursão
@@ -1124,18 +1115,121 @@ Nenhuma linha de `services/`, `repository/`, `domain/` ou `hardware/` alterada.
       403**; as 23 que faltavam eram as sobrecargas de evento do Qt, os
       `session` do seed e 3 callbacks. Agora é invariante, não estado do dia
 
+> #### 🔴 O que a Fase 5 quase quebrou: a seleção do usuário
+> Trocar `setRowCount(len(dados))` por uma limpeza de verdade parecia mecânico.
+> Não era. As views nunca zeravam a tabela antes de repopular, e **nesse
+> caminho o Qt mantém a linha corrente** enquanto a contagem não encolhe —
+> `cardapio_view` e `impressoras_view` leem `currentRow()` logo depois de
+> repopular.
+>
+> Medido antes de trocar:
+>
+> | Roteiro, linha 1 selecionada de 3 | `currentRow()` depois |
+> |---|---|
+> | `setRowCount(3)` — o que as views faziam | **1** |
+> | `setRowCount(0)` + `setRowCount(3)` — a limpeza | **-1** |
+>
+> No balcão: o pai do Vitor seleciona um produto, clica em Editar, salva — e o
+> produto sai selecionado sozinho, com Editar/Excluir/Combo apagando na cara
+> dele. A troca cega ainda fazia a tela emitir `produto_selecionado(None)` no
+> meio do próprio refresh.
+>
+> Por isso `limpar_tabela` ganhou `preservar_selecao`, que devolve a linha
+> corrente **com os sinais bloqueados** — do lado de fora, indistinguível do
+> `setRowCount` de antes. Os 4 testes de `test_selecao_sobrevive_ao_refresh.py`
+> ficam vermelhos se alguém tirar o parâmetro.
+
 > **`gc.collect()` na destruição de telas pesadas: item removido.** Estava aqui
 > como "se a medição mostrar ganho". A medição existe agora
 > (`tools/medir_memoria.py`) e mostra o contrário: 300 modais custam +0,5 MB
 > pelo caminho real. Não há o que o `gc.collect()` recolha, e ele custa uma
 > pausa numa máquina fraca. Fica fora até alguma medição pedir.
 
-### Fase 6 — Arquitetura da UI
+### Fase 6 — Arquitetura da UI ✅ CONCLUÍDA (2026-09-06)
 
-- [ ] Quebrar views gigantes **só onde compensar** (`cardapio_view` 1.343,
-      `comanda_view` 953, `funcionarios_view` 759, `caixa_view` 744,
-      `impressoras_view` 744)
-- [ ] Camadas: **nada a fazer** — já está limpo (§3.13)
+> Escopo decidido pelo Vitor (§8): **só a duplicação real**. O critério de
+> "compensar" deixou de ser tamanho de arquivo e passou a ser duplicação
+> medida — e a medição mudou o alvo da fase.
+
+- [x] **Varredura de corpos de função em toda a camada de UI** — comparando o
+      `ast.dump` do corpo, então o nome não conta. Acusou **8 cópias**, todas
+      entre `dashboard_mensal_view` e `historico_caixa_view`, e **nenhuma** nas
+      cinco views gigantes que a fase ia quebrar
+- [x] **`ui/widgets/paineis_relatorio.py`** — `PainelGaveta`,
+      `PainelAtendentes` e `linha_barra_proporcao` (a função que existia duas
+      vezes com dois nomes: `_criar_linha_forma` e `_criar_linha_atendente`).
+      O `_linha_rotulo_valor` que gravava `QLabel` no dono via `setattr` sumiu:
+      virou detalhe interno do painel
+- [x] **`ui/widgets/filtro_periodo_operador.py`** — a barra de filtro passa a
+      ser dona do estado que as duas telas duplicavam em três atributos cada
+      (`_operador_selecionado`, `_algum_operador_clicado`,
+      `_nome_operador_selecionado`) e avisa por dois sinais separados
+      (`periodo_mudou`, `operador_mudou`)
+- [x] **`formatar_para_campo()` em `ui/formatacao.py`** — as 2 cópias de
+      `_formatar_campo` (cardápio e funcionários), agora passando por
+      `dinheiro()` como o resto do módulo
+- [x] **`ResumoCaixa.diferenca_total`** — as **três** regras divergentes da
+      mesma conta viraram uma. Ver o achado abaixo
+- [x] **`tools/comparar_telas.py`** — bancada de paridade visual: renderiza as
+      telas offscreen em PNG (escuro, claro e com operador filtrado) e compara
+      com outro commit. Sem dependência nova, fora de `src/`
+- [x] **24 testes novos** — `tests/ui/test_paineis_de_relatorio.py` (21) e
+      3 em `test_caixa_service.py`
+- [→] Quebrar as 5 views gigantes por tamanho — **não executado, de propósito**:
+      a varredura mostrou que elas não duplicam nada entre si. Ver §8
+- [x] Camadas: **nada a fazer** — já estava limpo (§3.13)
+
+**Resultado:** `799 passed` — de `775 passed`. Zero corpo de função duplicado
+na camada de UI. As duas views somadas caíram de **1.126 para 755 linhas**, com
+317 linhas de componente compartilhado no lugar.
+
+> #### A prova que a suíte não dava: as telas continuam idênticas
+> Refatoração de UI passa nos testes e ainda assim muda a tela — nenhum teste
+> compara pixel. As duas telas foram renderizadas offscreen com o código de
+> **antes** (worktree em `018588e`) e o de depois, em 6 combinações (as 2 telas
+> × tema escuro, tema claro e com operador filtrado):
+>
+> ```
+> dashboard-claro.png     idêntico    historico-claro.png     idêntico
+> dashboard-escuro.png    idêntico    historico-escuro.png    idêntico
+> dashboard-operador.png  idêntico    historico-operador.png  idêntico
+> ```
+>
+> **Byte a byte**, não "parecido". A bancada ficou versionada em
+> `tools/comparar_telas.py` — é ela que a Fase 7 usa para a paridade tela a
+> tela.
+
+> #### 🔴 O que esta fase descobriu: três regras para a mesma conta
+> "Diferença total do turno" (quebra + sobra) existia em **três** lugares, com
+> **três critérios diferentes** para quando falta uma das duas contagens:
+>
+> | Onde | Se só uma contagem existe |
+> |---|---|
+> | `caixa_service.fechamento_da_gaveta` (a gaveta impressa) | devolve `None` |
+> | `caixa_view` (a tela do Caixa) | trata a que falta como zero |
+> | `historico_caixa_view` (o Histórico Diário) | soma `Decimal + None` → **estoura** |
+>
+> As três davam o mesmo resultado na prática, porque as duas contagens sempre
+> viajam juntas: `fechar` recebe e grava as duas, e a migration `b7c9e2f14a03`
+> deixou as antigas com as duas nulas. **Conferido**: pôr a regra do Histórico
+> de volta deixa a suíte inteira verde — o defeito é inalcançável hoje.
+>
+> Por isso a correção não é um teste que pega o estouro (não há como), é
+> `ResumoCaixa.diferenca_total`: uma regra só, no lugar onde o dado mora, com
+> o critério mais conservador (sem as duas contagens, não há diferença a
+> afirmar). E `test_as_duas_contagens_do_fechamento_sempre_viajam_juntas`
+> **trava a premissa**: no dia em que o fechamento parcial existir, esse teste
+> cai e avisa que agora virou decisão de produto.
+
+> #### Por que as views gigantes ficaram como estão
+> A fase existia para "quebrar views gigantes só onde compensar". A varredura
+> respondeu onde: **em lugar nenhum delas**. `cardapio_view` (1.342),
+> `comanda_view` (949), `funcionarios_view` (754), `impressoras_view` (742) e
+> `caixa_view` (735) são grandes porque cada uma carrega a própria tela, os
+> próprios painéis e os próprios diálogos — nenhuma linha repetida entre elas.
+> Partir esses arquivos seria mover código sem nenhum teste capaz de dizer se
+> ficou melhor, no exato ponto do documento em que o risco é maior e o retorno,
+> estético. Fica registrado como decisão, não como pendência.
 
 ### Fase 7 — Validação final — FASE 4
 
@@ -1152,8 +1246,8 @@ Nenhuma linha de `services/`, `repository/`, `domain/` ou `hardware/` alterada.
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Testes verdes | 620/621 (1 falha) | **775, 0 xfail, 0 falhas** (Fase 5) |
-| Arquivos de teste de UI | 0 | **15** (Fase 5) |
+| Testes verdes | 620/621 (1 falha) | **799, 0 xfail, 0 falhas** (Fase 6) |
+| Arquivos de teste de UI | 0 | **17** (Fase 6) |
 | `MainWindow` coberta por teste | ❌ nenhum | ✅ **5 testes** (Fase 5) |
 | Testes marcados `xfail` | 7 (Fase 0) | ✅ **0** — reescritos (Fase 4) |
 | Caminhos de produção com `rollback()` | 0 | **todos** (Fase 1) |
@@ -1173,9 +1267,14 @@ Nenhuma linha de `services/`, `repository/`, `domain/` ou `hardware/` alterada.
 | Cópias do par `unpolish`/`polish` | 10 | ✅ **1** (Fase 5) |
 | Telas montadas no boot sem caminho até elas | 1 (`EstoqueView`) | ✅ **0** (Fase 5, §3.11) |
 | Funções públicas sem tipagem completa | 23 de 403 | ✅ **0 de 403** (Fase 5) |
+| Corpos de função duplicados na camada de UI | 8 (todos entre as 2 telas de Relatórios) | ✅ **0** (Fase 6) |
+| Regras diferentes para "diferença total do turno" | 3 | ✅ **1** (Fase 6) |
+| Cópias de `_formatar_campo` | 2 | ✅ **1** (Fase 6) |
+| Linhas nas 2 telas de Relatórios | 1.126 | **755** + 317 de componente compartilhado (Fase 6) |
+| Telas com paridade visual provada pixel a pixel | 0 | **2**, em 6 estados (Fase 6) |
 | "Constantes planas" de tema sem leitor | 14 de 22 | ✅ **bloco inteiro removido** (Fase 5) |
-| Linhas em `src/` | 17.697 | **18.634** (+937) — ver nota |
-| Linhas em `tests/` | 6.794 | **10.043** (+3.249) |
+| Linhas em `src/` | 17.697 | **18.596** (+899) — ver nota |
+| Linhas em `tests/` | 6.794 | **10.429** (+3.635) |
 
 > **Sobre `src/` ter crescido 829 linhas.** Uma faxina que aumenta o código
 > pede explicação. As cópias apagadas (10 de `_formatar_reais`, 4 de "limpar
@@ -1189,8 +1288,12 @@ Nenhuma linha de `services/`, `repository/`, `domain/` ou `hardware/` alterada.
 > A Fase 5 acrescentou só **+108 linhas** a `src/` — apagou uma tela inteira,
 > um pacote vazio, um bloco QSS morto e 22 constantes, e gastou o saldo em
 > `ui/widgets/estilo.py` e nas regras de QSS que substituíram os 20
-> `setStyleSheet`. `src/` tem hoje **92 arquivos**, um a menos que no início
-> da fase.
+> `setStyleSheet`.
+>
+> A Fase 6 **diminuiu** `src/` em 38 linhas mesmo criando dois módulos novos:
+> as duas telas de Relatórios encolheram 371 linhas somadas, e os componentes
+> que herdaram esse código ocupam 317 — a diferença é a duplicação que deixou
+> de existir. `src/` tem hoje **94 arquivos**.
 
 ### 7.2 Memória — o "depois" que corrigiu o "antes"
 
@@ -1299,6 +1402,15 @@ leituras muito mais baratas.
 | 2026-09-06 | Cache de miniaturas **não assina** o `ThemeController` (Fase 5) | O §3.10 pedia que os placeholders acompanhassem a troca de tema. Assinar o sinal criaria uma conexão permanente a um singleton, sem ninguém para desfazê-la — o próprio §3.14. Em vez disso o cache compara a paleta por identidade a cada miniatura pedida e descarta o que foi pintado com a anterior |
 | 2026-09-06 | Pares `unpolish`/`polish` unificados junto com o §3.15 (Fase 5) | Não estavam na lista dos 9 itens. Entraram porque o §3.15 precisava do mesmo par para trocar a propriedade de tom, e deixar nove cópias quase idênticas ao lado do utilitário novo seria criar exatamente o cheiro que esta remasterização existe para matar (§3.7, §3.8) |
 | 2026-09-06 | `PIN_MIN_DIGITOS = 4` **removida** com o resto do código morto (Fase 5) | ⚠️ Era uma regra de negócio que **nunca foi implementada**: nenhum ponto do app valida o tamanho mínimo do PIN. Removê-la não muda comportamento nenhum, mas apaga a intenção — se exigir 4 dígitos ainda for desejado, é decisão de produto e entra como validação de verdade, não como constante sem leitor |
+
+| 2026-09-06 | **Fase 6 no escopo "só a duplicação real"** — decisão do Vitor | O critério da fase era "quebrar views gigantes só onde compensar", e a varredura de corpos de função respondeu onde compensa: as 8 cópias da camada de UI estão todas entre as duas telas de Relatórios, e **nenhuma** nas cinco views grandes. Partir aquelas cinco moveria ~4.500 linhas sem nenhum teste capaz de dizer se ficou melhor — risco máximo, retorno estético |
+| 2026-09-06 | Estado do filtro passou a morar no componente, não nas telas | `FiltroPeriodoOperador` é dono de `_operador_selecionado`, `_algum_operador_clicado` e `_nome_operador_selecionado` — três atributos que cada tela mantinha em paralelo. O Dashboard nem usava o terceiro; ganhou de graça, sem mudar o que aparece |
+| 2026-09-06 | Dois sinais (`periodo_mudou` / `operador_mudou`), não um só | Um sinal único de "filtro mudou" seria mais simples e mudaria comportamento: `RelatoriosView` assina só a troca de **período** para o subtítulo da aba, e passaria a ser chamada também na troca de operador. O contrato de zero-regressão (§4) vale para detalhe assim |
+| 2026-09-06 | A barra de filtro virou `QWidget` com `objectName` + regra de fundo transparente | Um `QWidget` sem `objectName` herda o `QWidget { background: bg_marca }` global e pinta um retângulo por trás das pílulas — o mesmo tropeço já documentado em `SecaoCancelamentos`. Junto, `setContentsMargins(0,0,0,0)`: layout aninhado nasce sem margem, layout instalado em widget herda a do estilo |
+| 2026-09-06 | **`ResumoCaixa.diferenca_total`**: as 3 regras da mesma conta viraram 1 | Gaveta impressa exigia as duas contagens, tela do Caixa tratava a que faltasse como zero, Histórico Diário somava `Decimal + None` (estoura). Vence o critério conservador: sem as duas contagens não há diferença a afirmar. **Nenhum teste pega a divergência** — ela é inalcançável hoje (as duas contagens sempre viajam juntas), e pôr a regra antiga de volta deixa a suíte inteira verde. Por isso a proteção é o teste de premissa, que cai no dia em que o fechamento parcial existir |
+| 2026-09-06 | `formatar_para_campo` passa por `dinheiro()` | As duas cópias de `_formatar_campo` usavam `f"{valor:.2f}"` — meio para o par, a mesma divergência com o cupom que o §3.8 corrigiu no resto do módulo. Para valor gravado (Numeric(10,2)) o resultado é idêntico; a mudança tira a segunda política de arredondamento de dentro do módulo que existe para ter só uma |
+| 2026-09-06 | Bancada de paridade visual versionada em `tools/comparar_telas.py` | A fase mexeu na montagem de duas telas inteiras e a suíte não compara pixel. Renderizar offscreen e comparar PNG com o commit anterior provou o que teste nenhum provava — e é a ferramenta que a Fase 7 usa na paridade tela a tela. Mesmo critério do `medir_memoria.py`: sem dependência nova, fora de `src/` |
+| 2026-09-06 | Varredura de corpos duplicados virou teste, não relatório | Foi ela que redefiniu o escopo da fase; sem virar catraca, a Fase 6 valeria só no dia em que foi escrita. Compara o `ast.dump` do corpo (nome não conta — era assim que `_criar_linha_forma`/`_criar_linha_atendente` passavam) e ignora funções com menos de 4 comandos, para não acusar delegação de uma linha |
 
 ### Decisões pendentes do Vitor
 

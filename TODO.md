@@ -5,8 +5,8 @@
 > **2026-09-06 — Remasterização da V1.0 em andamento.** A faxina final antes da
 > produção (memória, integridade de dados, duplicação, código morto) tem plano
 > próprio em [`REMASTERIZACAO-V1.md`](REMASTERIZACAO-V1.md), com 8 fases e
-> contrato de zero-regressão. Suíte: **775 passando, 0 `xfail`, 0 falhas**.
-> **Fases 0 a 5 concluídas; a próxima é a Fase 6 (Arquitetura da UI)**, sem
+> contrato de zero-regressão. Suíte: **799 passando, 0 `xfail`, 0 falhas**.
+> **Fases 0 a 6 concluídas; falta só a Fase 7 (validação final)**, sem
 > decisão pendente bloqueando — o estado completo está no §0 do
 > [`REMASTERIZACAO-V1.md`](REMASTERIZACAO-V1.md).
 >
@@ -38,6 +38,15 @@
 >   — a peça que compõe todas as outras —, e a troca das tabelas **teria
 >   apagado a seleção do usuário** (editar um produto o deixaria sem seleção,
 >   com os botões apagando) se não tivesse sido medida antes de aplicar.
+> - **Fase 6** — arquitetura da UI. A fase ia quebrar as cinco views gigantes;
+>   a medição mudou o alvo: uma varredura de corpo de função na camada inteira
+>   achou **8 cópias, todas entre o Histórico Diário e o Dashboard Mensal**, e
+>   nenhuma nas views grandes. Os painéis de gaveta e de atendentes e a barra
+>   de filtro viraram componentes compartilhados, e a **mesma conta de
+>   "diferença do turno", que existia com três regras diferentes** (uma delas
+>   capaz de estourar), virou `ResumoCaixa.diferenca_total`. As duas telas
+>   foram renderizadas antes e depois, em dois temas: **idênticas byte a byte**
+>   (`tools/comparar_telas.py`).
 >
 > **A conclusão desconfortável das Fases 3 e 4:** os três achados de memória do
 > diagnóstico — o vazamento dos modais, o das tabelas e os +40 MB da linha de

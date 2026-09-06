@@ -1251,3 +1251,49 @@ def test_fechamento_da_gaveta_usa_identificacao_de_turno(uow, caixas, gerente):
 
     gaveta = caixas.fechamento_da_gaveta(caixa.id)
     assert gaveta.identificacao.startswith("Caixa Turno - Noite")
+
+
+# ----------------------------------------------------------------------
+# ResumoCaixa.diferenca_total -- regra única do sistema (Fase 6)
+# ----------------------------------------------------------------------
+
+
+def test_a_diferenca_total_soma_as_duas_contagens(uow, caixas, gerente, caixa_aberto):
+    comanda = _nova_comanda(uow, caixa_aberto, gerente)
+    _novo_pagamento(uow, comanda, FormaPagamento.DINHEIRO, "100.00")
+    _novo_pagamento(uow, comanda, FormaPagamento.CREDITO, "50.00")
+    # Conta 5 a mais na gaveta e 2 a menos na maquininha.
+    caixas.fechar(caixa_aberto.id, Decimal("205.00"), Decimal("48.00"))
+
+    resumo = caixas.resumo(caixa_aberto.id)
+
+    assert resumo.diferenca_dinheiro == Decimal("5.00")
+    assert resumo.diferenca_maquininha == Decimal("-2.00")
+    assert resumo.diferenca_total == Decimal("3.00")
+
+
+def test_turno_sem_conferencia_nao_tem_diferenca_a_afirmar(caixas, caixa_aberto):
+    """Zero diria "fechou certinho"; `None` diz "ninguém contou ainda". A tela
+    do Caixa e o Histórico dependem dessa distinção para escolher entre o
+    traço e o número colorido."""
+    assert caixas.resumo(caixa_aberto.id).diferenca_total is None
+
+
+def test_as_duas_contagens_do_fechamento_sempre_viajam_juntas(
+    uow, caixas, gerente, caixa_aberto
+):
+    """Premissa que permitiu unificar as três regras divergentes de "diferença
+    total" numa só (§8, Fase 6): não existe fechamento parcial.
+
+    Se um dia passar a existir — fechar só a gaveta e deixar a maquininha para
+    depois —, este teste cai, e é o aviso de que a regra de `diferenca_total`
+    precisa de decisão de produto, não de refatoração.
+    """
+    antes = caixas.resumo(caixa_aberto.id)
+    assert (antes.valor_contado_dinheiro is None) is (antes.valor_contado_maquininha is None)
+
+    caixas.fechar(caixa_aberto.id, Decimal("100.00"), Decimal("0.00"))
+    depois = caixas.resumo(caixa_aberto.id)
+
+    assert depois.valor_contado_dinheiro is not None
+    assert depois.valor_contado_maquininha is not None

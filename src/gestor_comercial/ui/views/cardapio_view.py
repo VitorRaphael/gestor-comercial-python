@@ -60,7 +60,7 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 from gestor_comercial.services.imagem_service import processar_imagem_produto, remover_thumbnail
-from gestor_comercial.ui.formatacao import formatar_reais
+from gestor_comercial.ui.formatacao import formatar_para_campo, formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
@@ -1002,12 +1002,12 @@ class _ProdutoDialog(QDialog):
         self._erro_nome = _criar_rotulo_erro()
         formulario.addRow("", self._erro_nome)
 
-        self._campo_preco = QLineEdit(_formatar_campo(preco_inicial))
+        self._campo_preco = QLineEdit(formatar_para_campo(preco_inicial))
         formulario.addRow("Preço", self._campo_preco)
         self._erro_preco = _criar_rotulo_erro()
         formulario.addRow("", self._erro_preco)
 
-        self._campo_custo = QLineEdit(_formatar_campo(custo_inicial))
+        self._campo_custo = QLineEdit(formatar_para_campo(custo_inicial))
         self._campo_custo.setPlaceholderText("Opcional, padrão 0,00")
         formulario.addRow("Custo", self._campo_custo)
 
@@ -1315,12 +1315,6 @@ def _criar_celula_margem(percentual: float) -> QWidget:
     rotulo.setStyleSheet("font-size: 12px; font-weight: 600;")
     layout.addWidget(rotulo)
     return celula
-
-
-def _formatar_campo(valor: Decimal | None) -> str:
-    if valor is None:
-        return ""
-    return f"{valor:.2f}".replace(".", ",")
 
 
 def _criar_rotulo_erro() -> QLabel:
