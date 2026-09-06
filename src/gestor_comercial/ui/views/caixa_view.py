@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -65,6 +66,12 @@ _TIPO_BADGE = {
     TipoMovimento.REFORCO: "reforco",
     TipoMovimento.DESPESA: "despesa",
 }
+
+# Largura da coluna de resumo (saldo, recebimentos e ajustes). Vive aqui porque
+# são dois donos: o cartão de saldo, que dita a largura dos três, e a rolagem
+# que os envolve — sem os mesmos limites nos dois, a coluna muda de tamanho.
+_LARGURA_MIN_RESUMO = 340
+_LARGURA_MAX_RESUMO = 400
 
 # Formas de recebimento mostradas no card "Recebimentos", nesta ordem.
 _FORMAS_RECEBIMENTO = [
@@ -124,7 +131,7 @@ class CaixaView(QWidget):
 
         corpo = QHBoxLayout()
         corpo.setSpacing(16)
-        corpo.addLayout(self._montar_coluna_esquerda(), 0)
+        corpo.addWidget(self._montar_coluna_esquerda(), 0)
         corpo.addLayout(self._montar_coluna_direita(), 1)
         layout_externo.addLayout(corpo, 1)
 
@@ -167,20 +174,51 @@ class CaixaView(QWidget):
         cabecalho.addWidget(self._botao_fechar, alignment=Qt.AlignmentFlag.AlignVCenter)
         return cabecalho
 
-    def _montar_coluna_esquerda(self) -> QVBoxLayout:
-        coluna = QVBoxLayout()
+    def _montar_coluna_esquerda(self) -> QScrollArea:
+        """Resumo do turno (saldo, recebimentos, ajustes), dentro de uma rolagem.
+
+        Os três cartões somam altura fixa e, num monitor de 768px — a máquina do
+        food truck —, pedem mais do que a página oferece. Um `QVBoxLayout` sem
+        rolagem, nesse caso, **não corta: espreme**, e as linhas de
+        "Recebimentos" saíam com 6px de 16px, cortadas ao meio. É o mesmo
+        defeito que a Fase 7 encontrou na Configurações, com o mesmo remédio.
+
+        A coluna da direita fica de fora de propósito: lá quem cede altura é a
+        tabela de movimentos, que já rola sozinha — envolver as duas criaria
+        rolagem dentro de rolagem.
+        """
+        conteudo = QWidget()
+        conteudo.setObjectName("caixaResumoConteudo")
+        coluna = QVBoxLayout(conteudo)
+        coluna.setContentsMargins(0, 0, 0, 0)
         coluna.setSpacing(16)
 
         coluna.addWidget(self._montar_card_saldo())
         coluna.addWidget(self._montar_card_recebimentos())
         coluna.addWidget(self._montar_card_ajustes())
         coluna.addStretch()
-        return coluna
+
+        rolagem = QScrollArea()
+        rolagem.setObjectName("caixaRolagemResumo")
+        rolagem.setWidget(conteudo)
+        rolagem.setWidgetResizable(True)
+        rolagem.setFrameShape(QFrame.Shape.NoFrame)
+        rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # A largura da coluna era ditada pelos limites do cartão de saldo; a
+        # rolagem no meio interrompe essa herança, então ela repete os mesmos
+        # limites — mais a largura da própria barra. Sem essa reserva o viewport
+        # nasce menor que o mínimo do cartão (326 contra 340 medidos aqui) e,
+        # com a barra horizontal desligada, a lateral direita do cartão é
+        # cortada: troca-se um corte por outro.
+        barra = rolagem.verticalScrollBar().sizeHint().width()
+        rolagem.setMinimumWidth(_LARGURA_MIN_RESUMO + barra)
+        rolagem.setMaximumWidth(_LARGURA_MAX_RESUMO + barra)
+        return rolagem
 
     def _montar_card_saldo(self) -> QFrame:
         card, layout = _criar_card()
-        card.setMinimumWidth(340)
-        card.setMaximumWidth(400)
+        card.setMinimumWidth(_LARGURA_MIN_RESUMO)
+        card.setMaximumWidth(_LARGURA_MAX_RESUMO)
 
         layout.addWidget(_rotulo_card("SALDO ESPERADO NA GAVETA"))
 

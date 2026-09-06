@@ -76,12 +76,16 @@ máquina sem fonte instalada.
 
 ### O que continua aberto (não é da remasterização)
 
-- **`.exe` em máquina limpa de verdade** — `docs/checklist-maquina-limpa.md`.
-- **Tela de Caixa a 768px**: o cartão "Recebimentos" corta as linhas no meio.
-  **Não é regressão** — o código de `b22da75` corta exatamente igual (provado
-  com a bancada rodada nos dois lados a 1366×738). É defeito anterior à
-  faxina, mesmo remédio da Configurações, e por isso ficou de fora: mexer nele
-  agora seria mudança de layout sem paridade contra a qual comparar. Ver §8.
+- **`.exe` em máquina limpa de verdade** — `docs/checklist-maquina-limpa.md`,
+  e depois a validação com o pai do Vitor.
+
+### O que veio depois da remasterização
+
+- ✅ **Tela de Caixa a 768px — corrigida em 2026-09-06** (§9). O cartão
+  "Recebimentos" cortava as quatro linhas ao meio, e **não era regressão**:
+  `b22da75` cortava igual. Ficou de fora da faxina porque mexer no layout
+  durante a comparação tiraria a paridade contra a qual comparar; foi o
+  primeiro item assim que ela fechou. Suíte: **801**.
 
 ---
 
@@ -1339,6 +1343,7 @@ da fase que os corrigiu.
 > dela. Fica registrado no §8 como o próximo item de layout — o remédio é o
 > mesmo da Configurações, mas aplicá-lo agora seria mudar uma tela no exato
 > momento em que o valor do documento é dizer o que mudou e o que não mudou.
+> **Corrigido em 2026-09-06, logo depois desta fase — ver §9.**
 
 ---
 
@@ -1519,7 +1524,7 @@ leituras muito mais baratas.
 | 2026-09-06 | `comparar_cupons.py` reaproveita o cenário de `comparar_telas.py` | Um seed próprio seria uma segunda versão do mesmo dia de operação, livre para divergir daquele — a duplicação que a Fase 6 passou a fase inteira caçando. As duas bancadas comparam o mesmo sistema no mesmo estado |
 | 2026-09-06 | **Configurações ganhou `QScrollArea`** (regressão da Fase 2, achada na Fase 7) | A seção "Cópia de Segurança" empurrou o conteúdo além da altura da página, e `QVBoxLayout` sem rolagem espreme em vez de cortar: os botões de Senhas e Acesso foram a 14px sem rótulo. É correção de regressão da própria remasterização, então entra dentro dela |
 | 2026-09-06 | O teste do aperto mede em **fração do que a tela pede**, não em pixels fixos | A suíte roda em `offscreen`, sem fonte: com um número absoluto o conteúdo caberia, o aperto não aconteceria e o teste passaria com o bug de pé. Metade do `sizeHint` da própria tela reprova em qualquer máquina |
-| 2026-09-06 | **Cartão "Recebimentos" da tela de Caixa a 768px fica de fora** | A bancada a 1366×738 mostra as linhas cortadas ao meio — e mostra **igual em `b22da75`**: é defeito anterior à faxina, não regressão. O remédio é o mesmo da Configurações, mas aplicá-lo aqui seria mudar uma tela justamente no documento cujo valor é separar o que mudou do que não mudou. Fica como primeiro item de layout depois da remasterização |
+| 2026-09-06 | **Cartão "Recebimentos" da tela de Caixa a 768px fica de fora** | A bancada a 1366×738 mostra as linhas cortadas ao meio — e mostra **igual em `b22da75`**: é defeito anterior à faxina, não regressão. O remédio é o mesmo da Configurações, mas aplicá-lo aqui seria mudar uma tela justamente no documento cujo valor é separar o que mudou do que não mudou. Fica como primeiro item de layout depois da remasterização — **feito em 2026-09-06, §9** |
 
 ### Decisões pendentes do Vitor
 
@@ -1536,3 +1541,74 @@ foram executados lá.
 
 ~~4. `journal_mode = WAL`~~ — **decidido em 2026-09-06**: adotado, com backup
 por `VACUUM INTO` e checkpoint no fechamento. Ver §8.
+
+---
+
+## 9. Depois da remasterização — 2026-09-06
+
+> A faxina fechou com um defeito de layout **anterior** a ela documentado e de
+> pé (§8, última linha): o cartão "Recebimentos" da tela de Caixa cortava as
+> linhas ao meio num monitor de 768px. Ficou de fora de propósito — mudar uma
+> tela durante a comparação tiraria a paridade contra a qual comparar. Com o
+> documento fechado, a paridade já foi prestada, e o defeito passou a ser
+> simplesmente o próximo item. Esta seção é o que veio **depois** da fase 7.
+
+### 9.1 O cartão "Recebimentos" espremido ✅ CORRIGIDO
+
+Reproduzido com a bancada a **1366×738** (o monitor de 768px com a janela
+maximizada, descontada a barra de tarefas — a máquina do food truck):
+
+```
+janela 1366x738  tela 1106x682 (sizeHint 1051x753)
+  ESPREMIDO h= 6 hint=16  caixaFormaNome   'Dinheiro'   ... e mais 20 rótulos
+```
+
+A página oferece **682px** e a tela pede **753**. É o mesmo mecanismo da
+Configurações: `QVBoxLayout` sem rolagem **não corta, espreme** — as quatro
+linhas de "Recebimentos" caem de 16px para **6px**, nome e valor cortados ao
+meio, e os cinco "Ajustes do turno" para 12px.
+
+**A correção** é a `QScrollArea` da Configurações, aplicada só na **coluna de
+resumo** (saldo, recebimentos, ajustes). A coluna da direita fica de fora de
+propósito: lá quem cede altura é a tabela de movimentos, que já rola sozinha, e
+envolver as duas criaria rolagem dentro de rolagem.
+
+**O que a medição mudou no caminho.** A primeira versão trocou um corte por
+outro: com a barra de rolagem visível, o viewport nasce com **326px** para um
+cartão cujo mínimo é **340**, e — com a barra horizontal desligada — a lateral
+direita do cartão sai cortada. A coluna passou a reservar a largura da própria
+barra (`_LARGURA_MIN/MAX_RESUMO + barra`), e os dois limites viraram constantes
+porque agora têm dois donos: o cartão de saldo e a rolagem que o envolve.
+
+| | Antes | Depois |
+|---|---|---|
+| Linhas de "Recebimentos" a 1366×738 | 6px de 16px | **16px, inteiras** |
+| Rótulos espremidos na coluna | 21 | **0** |
+| Viewport × mínimo do cartão | 326 < 340 (cortava) | **340 = 340** |
+
+### 9.2 Como foi conferido
+
+- **Teste** — `test_linhas_de_recebimentos_nao_encolhem_quando_a_pagina_e_baixa`
+  entrou em `tests/ui/test_telas_cabem_na_tela.py`, ao lado do teste da
+  Configurações, e com a mesma régua: a moldura aperta pela **metade do que a
+  própria tela pede**, não num número fixo de pixels, senão a suíte sem banco
+  de fontes não reprovaria. Conferido **desfazendo a correção**: com o
+  `caixa_view.py` de antes, 8 de 8 linhas reprovam.
+- **Suíte** — `801 passed` (de 800), nenhum teste tocado.
+- **Paridade** — as 24 renderizações da Fase 7, rodadas em 1280×800 **e** em
+  1366×738: **22 idênticas byte a byte** nos dois tamanhos; diferem só
+  `caixa-claro` e `caixa-escuro`, que é a tela corrigida. A coluna da direita
+  desloca 14px por causa da barra reservada, e é por isso que a diferença
+  ocupa a largura do corpo em vez de só a coluna.
+- **Bancada** — `tools/comparar_telas.py` ganhou `--tamanho LxA`. O 768px era
+  reproduzido editando a constante na mão; agora é um argumento, e o tamanho em
+  que os dois defeitos apareceram fica registrado no próprio comando.
+
+### 9.3 Decisões
+
+| Data | Decisão | Motivo |
+|---|---|---|
+| 2026-09-06 | Rolagem **só na coluna de resumo**, não na tela inteira | A coluna da direita é uma tabela que rola sozinha; envolver as duas poria uma rolagem dentro da outra, e o que estoura a altura é a coluna de altura fixa |
+| 2026-09-06 | A rolagem **reserva a largura da barra** | Sem a reserva o viewport fica menor que o mínimo do cartão (326 contra 340) e a lateral direita é cortada — trocar corte de cima por corte de lado não é correção. Custa 14px de largura da tabela de movimentos, que reflui |
+| 2026-09-06 | Barra de rolagem fica com o **visual padrão do Qt** | É o mesmo da Configurações e do Histórico. Estilizá-la só aqui criaria uma terceira aparência de rolagem; estilizá-la global é mudança de tema para todas as telas, e não é o que este item pede |
+| 2026-09-06 | `--tamanho` na bancada em vez de editar `TAMANHO` | Os dois defeitos de aperto (Configurações e Caixa) só existem numa altura específica. Ou o tamanho é argumento do comando, ou a reprodução depende de alguém lembrar de editar a constante |

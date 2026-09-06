@@ -17,6 +17,9 @@ fica fora de `src/`, então não entra no `.exe`.
 
     python tools/comparar_telas.py --comparar C:\\tmp\\antes C:\\tmp\\depois
 
+    # a janela do food truck: monitor de 768px com a janela maximizada
+    python tools/comparar_telas.py C:\\tmp\\depois --tamanho 1366x738
+
 A janela renderizada é a `MainWindow` de verdade, não a view solta: assim a
 paridade cobre também a sidebar, a barra de usuário e a barra da Central de
 Loja, que são montadas por ela. A navegação usa os mesmos pontos de entrada da
@@ -47,6 +50,10 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+# Tamanho padrão da janela. `--tamanho LxA` troca por outro: a altura é o que
+# separa uma tela folgada de uma espremida, e a classe de máquina do food truck
+# é o monitor de 768px (1366x738 com a janela maximizada, descontada a barra de
+# tarefas). Foi assim que a Fase 7 achou a Configurações espremida.
 TAMANHO = (1280, 800)
 OPERADOR = "Joana"
 
@@ -254,7 +261,7 @@ def _registrar_fontes(app) -> None:
         app.setFont(QFont("Segoe UI", 9))
 
 
-def renderizar(destino: Path) -> list[Path]:
+def renderizar(destino: Path, tamanho: tuple[int, int] = TAMANHO) -> list[Path]:
     from PySide6.QtWidgets import QApplication, QPushButton
 
     app = QApplication.instance() or QApplication([])
@@ -276,7 +283,7 @@ def renderizar(destino: Path) -> list[Path]:
         servicos["impressao"],
         servicos["funcionarios"],
     )
-    janela.resize(*TAMANHO)
+    janela.resize(*tamanho)
     janela.show()
 
     destino.mkdir(parents=True, exist_ok=True)
@@ -401,7 +408,11 @@ def main() -> int:
     if not argumentos:
         print(__doc__)
         return 2
-    for caminho in renderizar(Path(argumentos[0])):
+    tamanho = TAMANHO
+    if "--tamanho" in argumentos:
+        largura, _, altura = argumentos[argumentos.index("--tamanho") + 1].partition("x")
+        tamanho = (int(largura), int(altura))
+    for caminho in renderizar(Path(argumentos[0]), tamanho):
         print(caminho)
     return 0
 

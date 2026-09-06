@@ -63,7 +63,16 @@
 >   monitor de 768px, o da máquina do food truck. Corrigido com `QScrollArea` e
 >   travado por teste. Também ficou registrado um defeito **anterior** à faxina,
 >   que não foi mexido de propósito: o cartão "Recebimentos" da tela de Caixa
->   corta as linhas na mesma altura de tela (§8 da remasterização).
+>   cortava as linhas na mesma altura de tela (§8 da remasterização).
+>
+> **2026-09-06, depois da remasterização** — esse cartão foi o primeiro item da
+> fila e está **corrigido** (§9 da remasterização): a coluna de resumo do Caixa
+> ganhou a mesma `QScrollArea` da Configurações, com a largura da barra
+> reservada, para a lateral do cartão não ser cortada no lugar do topo. Teste
+> próprio, suíte em **801**, e as 24 renderizações da bancada conferidas em
+> 1280×800 e em 1366×738: **22 idênticas byte a byte**, diferindo só a tela
+> corrigida. A bancada ganhou `--tamanho LxA` para o monitor de 768px virar
+> caso reproduzível.
 >
 > **A conclusão desconfortável das Fases 3 e 4:** os três achados de memória do
 > diagnóstico — o vazamento dos modais, o das tabelas e os +40 MB da linha de

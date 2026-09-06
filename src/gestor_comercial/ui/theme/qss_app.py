@@ -612,6 +612,9 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QLabel#caixaTitulo {{ color: {t['texto']}; font-size: 22px; font-weight: 800; background: transparent; }}
     QLabel#caixaSubtitulo {{ color: {t['texto_fraco']}; font-size: 12px; background: transparent; }}
 
+    QScrollArea#caixaRolagemResumo {{ background: transparent; border: none; }}
+    QScrollArea#caixaRolagemResumo > QWidget > QWidget {{ background: transparent; }}
+
     QFrame#caixaCard {{
       background: {t['superficie']};
       border: 1px solid {t['borda']};
