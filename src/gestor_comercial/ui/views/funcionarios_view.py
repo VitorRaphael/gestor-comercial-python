@@ -51,6 +51,7 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.pagamento_service import PagamentoService
+from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.rotulo_identidade import rotulo_identidade
 from gestor_comercial.ui.theme.controller import ThemeController
 
@@ -238,7 +239,7 @@ class FuncionariosView(QWidget):
 
         self._kpi_cadastrados.definir_valor(str(len(self._funcionarios)))
         self._kpi_ativos.definir_valor(f"{len(ativos)}/{len(self._funcionarios)}")
-        self._kpi_consumo.definir_valor(_formatar_reais(consumo_total))
+        self._kpi_consumo.definir_valor(formatar_reais(consumo_total))
         self._kpi_pendencia.definir_valor(str(com_pendencia))
 
     def _funcionarios_filtrados(self) -> list[Funcionario]:
@@ -472,7 +473,7 @@ class _LinhaFuncionario(QFrame):
         coluna_consumo = QVBoxLayout()
         coluna_consumo.setSpacing(2)
         coluna_consumo.setAlignment(Qt.AlignmentFlag.AlignRight)
-        valor = QLabel(_formatar_reais(saldo))
+        valor = QLabel(formatar_reais(saldo))
         valor.setObjectName("funcionariosLinhaConsumoValor")
         valor.setAlignment(Qt.AlignmentFlag.AlignRight)
         coluna_consumo.addWidget(valor)
@@ -596,7 +597,7 @@ class _PainelDetalheFuncionario(QFrame):
         self._label_nome.setText(funcionario.nome)
         self._label_cargo.setText((funcionario.cargo or "Sem cargo definido").upper())
 
-        self._label_consumo_valor.setText(_formatar_reais(saldo))
+        self._label_consumo_valor.setText(formatar_reais(saldo))
 
         self._label_status.setText("Ativo" if funcionario.ativo else "Inativo")
         acesso = "Total" if (funcionario.cargo in _CARGOS_ACESSO_TOTAL) else "Restrito"
@@ -715,7 +716,7 @@ class _QuitarConsumoDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        layout.addWidget(QLabel(f"Consumo atual: {_formatar_reais(saldo)}"))
+        layout.addWidget(QLabel(f"Consumo atual: {formatar_reais(saldo)}"))
 
         formulario = QFormLayout()
 
@@ -749,10 +750,6 @@ def _iniciais(nome: str) -> str:
     if len(partes) == 1:
         return partes[0][0].upper()
     return (partes[0][0] + partes[-1][0]).upper()
-
-
-def _formatar_reais(valor: Decimal) -> str:
-    return f"R$ {valor:.2f}".replace(".", ",")
 
 
 def _formatar_campo(valor: Decimal) -> str:

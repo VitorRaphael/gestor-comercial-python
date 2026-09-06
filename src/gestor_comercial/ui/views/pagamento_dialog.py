@@ -29,6 +29,7 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 from gestor_comercial.services.pagamento_service import PagamentoService, ResumoPagamento
+from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
 
 _ROTULOS_FORMA = {
@@ -128,12 +129,12 @@ class PagamentoDialog(QDialog):
             troco = resumo.troco
 
         linhas = [
-            f"Total da conta: {_formatar_reais(total_conta)}",
-            f"Total pago: {_formatar_reais(total_pago)}",
-            f"Restante: {_formatar_reais(restante)}",
+            f"Total da conta: {formatar_reais(total_conta)}",
+            f"Total pago: {formatar_reais(total_pago)}",
+            f"Restante: {formatar_reais(restante)}",
         ]
         if troco is not None:
-            linhas.append(f"Troco: {_formatar_reais(troco)}")
+            linhas.append(f"Troco: {formatar_reais(troco)}")
         self._label_resumo.setText("\n".join(linhas))
         self._campo_valor.setText(f"{restante:.2f}")
 
@@ -176,7 +177,3 @@ class PagamentoDialog(QDialog):
         if resumo.comanda_fechada:
             self.comanda_fechada = True
             self.accept()
-
-
-def _formatar_reais(valor: Decimal) -> str:
-    return f"R$ {valor:.2f}".replace(".", ",")

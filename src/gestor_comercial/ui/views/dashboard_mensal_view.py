@@ -40,6 +40,7 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 from gestor_comercial.services.funcionario_service import FuncionarioService
+from gestor_comercial.ui.formatacao import formatar_reais, formatar_reais_com_sinal
 from gestor_comercial.ui.widgets.kpi_card import CardKpi
 from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
 from gestor_comercial.ui.theme.controller import ThemeController
@@ -353,13 +354,13 @@ class DashboardMensalView(QWidget):
         self._preencher_atendentes(ranking_atendentes)
 
     def _preencher(self, resumo: ResumoMensal) -> None:
-        self._cards["faturamento"].definir_valor(_formatar_reais(resumo.faturamento_bruto))
+        self._cards["faturamento"].definir_valor(formatar_reais(resumo.faturamento_bruto))
         self._cards["faturamento"].definir_sub_rotulo("Mês corrente")
         self._cards["turnos"].definir_valor(str(resumo.turnos_fechados))
-        self._cards["ticket_medio"].definir_valor(_formatar_reais(resumo.ticket_medio))
+        self._cards["ticket_medio"].definir_valor(formatar_reais(resumo.ticket_medio))
         self._cards["ticket_medio"].definir_sub_rotulo(f"{_contar_comandas(resumo)} comandas")
         self._cards["cancelamentos"].definir_valor(f"{resumo.cancelamentos_quantidade} un")
-        self._cards["cancelamentos"].definir_sub_rotulo(_formatar_reais(resumo.cancelamentos_valor))
+        self._cards["cancelamentos"].definir_sub_rotulo(formatar_reais(resumo.cancelamentos_valor))
 
         self._preencher_formas_pagamento(resumo)
         self._preencher_ranking(resumo)
@@ -374,14 +375,14 @@ class DashboardMensalView(QWidget):
                     item.percentual,
                 )
             )
-        self._label_total_formas.setText(_formatar_reais(resumo.faturamento_bruto))
+        self._label_total_formas.setText(formatar_reais(resumo.faturamento_bruto))
 
     def _preencher_ranking(self, resumo: ResumoMensal) -> None:
         _limpar_layout(self._layout_ranking)
         maior_valor = max((item.valor_total for item in resumo.ranking_produtos), default=Decimal(0))
         if resumo.ranking_produtos:
             lider = resumo.ranking_produtos[0]
-            self._label_indicador_ranking.setText(f"↗ {_formatar_reais(lider.valor_total)}")
+            self._label_indicador_ranking.setText(f"↗ {formatar_reais(lider.valor_total)}")
         else:
             self._label_indicador_ranking.setText("")
 
@@ -402,12 +403,12 @@ class DashboardMensalView(QWidget):
 
     def _preencher_gaveta(self, gaveta: FechamentoGaveta) -> None:
         self._label_gaveta_identificacao.setText(gaveta.identificacao)
-        self._label_gaveta_faturado.setText(_formatar_reais(gaveta.total_faturado))
-        self._label_gaveta_saldo.setText(_formatar_reais(gaveta.saldo_apurado))
+        self._label_gaveta_faturado.setText(formatar_reais(gaveta.total_faturado))
+        self._label_gaveta_saldo.setText(formatar_reais(gaveta.saldo_apurado))
         if gaveta.diferenca is None:
             self._label_gaveta_diferenca.setText("—")
         else:
-            self._label_gaveta_diferenca.setText(_formatar_reais_com_sinal(gaveta.diferenca))
+            self._label_gaveta_diferenca.setText(formatar_reais_com_sinal(gaveta.diferenca))
 
     def _preencher_atendentes(self, ranking: list[ItemRankingAtendente]) -> None:
         _limpar_layout(self._layout_atendentes)
@@ -440,7 +441,7 @@ def _criar_linha_forma(nome: str, valor: Decimal, percentual: Decimal) -> QVBoxL
     label_nome.setObjectName("relatoriosFormaNome")
     topo.addWidget(label_nome)
     topo.addStretch()
-    label_valor = QLabel(_formatar_reais(valor))
+    label_valor = QLabel(formatar_reais(valor))
     label_valor.setObjectName("relatoriosFormaValor")
     topo.addWidget(label_valor)
     bloco.addLayout(topo)
@@ -495,7 +496,7 @@ def _criar_linha_ranking(
     label_qtd.setMinimumHeight(18)
     topo.addWidget(label_qtd)
 
-    label_valor = QLabel(_formatar_reais(valor_total))
+    label_valor = QLabel(formatar_reais(valor_total))
     label_valor.setObjectName("relatoriosRankValor")
     label_valor.setFixedWidth(90)
     label_valor.setMinimumHeight(18)
@@ -527,13 +528,6 @@ def _linha_rotulo_valor(rotulo: str, dono: QWidget, atributo_label_valor: str) -
     return linha
 
 
-def _formatar_reais_com_sinal(valor: Decimal) -> str:
-    if valor == 0:
-        return "—"
-    sinal = "-" if valor < 0 else ""
-    return f"{sinal}R$ {abs(valor):.2f}".replace(".", ",")
-
-
 def _limpar_layout(layout: QVBoxLayout) -> None:
     # `takeAt` só tira o item do LAYOUT — o widget continua filho visível do
     # container até o `deleteLater()` agendado realmente rodar no próximo
@@ -562,7 +556,3 @@ _TITULOS_CARD = {
 }
 
 _ALINHAR_DIREITA = Qt.AlignmentFlag.AlignRight
-
-
-def _formatar_reais(valor: Decimal) -> str:
-    return f"R$ {valor:.2f}".replace(".", ",")

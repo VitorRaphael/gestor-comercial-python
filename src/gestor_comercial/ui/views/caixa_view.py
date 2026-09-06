@@ -42,6 +42,7 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 from gestor_comercial.services.impressao_service import ImpressaoService
+from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
@@ -366,9 +367,9 @@ class CaixaView(QWidget):
         self._preencher_card_ajustes(resumo)
 
     def _preencher_card_saldo(self, resumo: ResumoCaixa) -> None:
-        self._label_saldo.setText(_formatar_reais(resumo.saldo_esperado))
+        self._label_saldo.setText(formatar_reais(resumo.saldo_esperado))
         total_recebido = resumo.total_dinheiro + resumo.total_maquininha
-        self._label_recebido.setText(_formatar_reais(total_recebido))
+        self._label_recebido.setText(formatar_reais(total_recebido))
         self._label_comandas.setText(str(resumo.quantidade_comandas))
 
     def _preencher_card_recebimentos(self, resumo: ResumoCaixa) -> None:
@@ -383,7 +384,7 @@ class CaixaView(QWidget):
         for forma, _rotulo in _FORMAS_RECEBIMENTO:
             valor = valores[forma]
             label_valor, barra = self._barras_forma[forma]
-            label_valor.setText(_formatar_reais(valor))
+            label_valor.setText(formatar_reais(valor))
             percentual = int((valor / maior) * 100) if maior > 0 else 0
             barra.setValue(percentual)
 
@@ -398,7 +399,7 @@ class CaixaView(QWidget):
         label = self._labels_ajuste[chave]
         label.setObjectName("caixaAjusteValorNegativo" if negativo else "caixaAjusteValor")
         prefixo = "-" if negativo and valor != 0 else ""
-        label.setText(f"{prefixo}{_formatar_reais(valor)}")
+        label.setText(f"{prefixo}{formatar_reais(valor)}")
         label.style().unpolish(label)
         label.style().polish(label)
 
@@ -456,7 +457,7 @@ class CaixaView(QWidget):
         bloco_direita.setSpacing(2)
         resumo = self._caixa_service.resumo(caixa.id)
         total_faturado = resumo.total_dinheiro + resumo.total_maquininha + resumo.total_consumo_interno
-        valor = QLabel(_formatar_reais(total_faturado))
+        valor = QLabel(formatar_reais(total_faturado))
         valor.setObjectName("caixaMiniCardTitulo")
         valor.setAlignment(Qt.AlignmentFlag.AlignRight)
         bloco_direita.addWidget(valor)
@@ -485,7 +486,7 @@ class CaixaView(QWidget):
             return "—"
         if diferenca == 0:
             return "sem diferença"
-        return _formatar_reais(diferenca)
+        return formatar_reais(diferenca)
 
     def _preencher_linha(self, linha: int, movimento: MovimentoCaixa) -> None:
         quando = movimento.registrado_em.strftime("%d/%m %H:%M")
@@ -497,7 +498,7 @@ class CaixaView(QWidget):
 
         sai_da_gaveta = movimento.tipo in (TipoMovimento.SANGRIA, TipoMovimento.DESPESA)
         prefixo = "- " if sai_da_gaveta else ""
-        item_valor = QTableWidgetItem(f"{prefixo}{_formatar_reais(movimento.valor)}")
+        item_valor = QTableWidgetItem(f"{prefixo}{formatar_reais(movimento.valor)}")
         item_valor.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         item_valor.setForeground(_cor_perigo() if sai_da_gaveta else _cor_texto())
         self._tabela.setItem(linha, 3, item_valor)
@@ -738,7 +739,3 @@ def _limpar_layout(layout: QLayout) -> None:
         widget = item.widget()
         if widget is not None:
             widget.deleteLater()
-
-
-def _formatar_reais(valor: Decimal) -> str:
-    return f"R$ {valor:.2f}".replace(".", ",")

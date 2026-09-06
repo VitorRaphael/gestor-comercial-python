@@ -37,6 +37,7 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
 
 _COLUNAS_GRADE = 8
@@ -45,11 +46,6 @@ _ESPACAMENTO = 14
 _FILTROS = ("todas", "livres", "ocupadas", "fechando")
 _ROTULOS_FILTRO = {"todas": "TODAS", "livres": "LIVRES", "ocupadas": "OCUPADAS", "fechando": "FECHANDO"}
 _ROTULOS_TAG = {"livre": "LIVRE", "ocupada": "OCUPADA", "fechando": "FECHANDO"}
-
-
-def _formatar_reais(valor: Decimal) -> str:
-    texto = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"R$ {texto}"
 
 
 @dataclass
@@ -98,7 +94,7 @@ class _CartaoMesa(QFrame):
         if resumo.status == "livre":
             layout.addStretch()
         else:
-            valor = QLabel(_formatar_reais(resumo.valor))
+            valor = QLabel(formatar_reais(resumo.valor))
             valor.setObjectName("mesaCartaoValor")
             valor.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(valor)
@@ -411,7 +407,7 @@ class MesasView(QWidget):
         fechando = sum(1 for r in self._resumos if r.status == "fechando")
         total_aberto = sum((r.valor for r in self._resumos if r.status != "livre"), Decimal("0"))
 
-        self._label_total_aberto.setText(_formatar_reais(total_aberto))
+        self._label_total_aberto.setText(formatar_reais(total_aberto))
         self._mini_stats["livre"].setText(str(livres))
         self._mini_stats["ocupada"].setText(str(ocupadas))
         self._mini_stats["fechando"].setText(str(fechando))
@@ -456,7 +452,7 @@ class MesasView(QWidget):
 
         layout.addStretch()
 
-        valor = QLabel(_formatar_reais(resumo.valor))
+        valor = QLabel(formatar_reais(resumo.valor))
         valor.setObjectName("comandaListaValor")
         layout.addWidget(valor)
         return linha

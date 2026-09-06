@@ -58,6 +58,7 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 from gestor_comercial.services.imagem_service import processar_imagem_produto, remover_thumbnail
+from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
 from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
@@ -245,7 +246,7 @@ class CardapioView(QWidget):
             preco_medio = Decimal("0")
 
         self._kpi_margem_media.definir_valor(f"{margem_media:.0f}%")
-        self._kpi_preco_medio.definir_valor(_formatar_reais(preco_medio))
+        self._kpi_preco_medio.definir_valor(formatar_reais(preco_medio))
 
     def _mostrar_erro(self, mensagem: str) -> None:
         self._label_erro.setText(mensagem)
@@ -623,8 +624,8 @@ class _ProdutosPainel(QFrame):
         for linha, produto in enumerate(self._produtos):
             self.tabela.setCellWidget(linha, 0, _criar_celula_produto(produto))
             self.tabela.setCellWidget(linha, 1, _criar_badge_tipo(produto.is_combo))
-            self.tabela.setItem(linha, 2, QTableWidgetItem(_formatar_reais(produto.preco)))
-            self.tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(produto.custo)))
+            self.tabela.setItem(linha, 2, QTableWidgetItem(formatar_reais(produto.preco)))
+            self.tabela.setItem(linha, 3, QTableWidgetItem(formatar_reais(produto.custo)))
             self.tabela.setCellWidget(linha, 4, _criar_celula_margem(_margem_percentual(produto)))
             self.tabela.setCellWidget(linha, 5, _criar_badge_status(produto.ativo))
 
@@ -1311,10 +1312,6 @@ def _criar_celula_margem(percentual: float) -> QWidget:
     rotulo.setStyleSheet("font-size: 12px; font-weight: 600;")
     layout.addWidget(rotulo)
     return celula
-
-
-def _formatar_reais(valor: Decimal) -> str:
-    return f"R$ {valor:.2f}".replace(".", ",")
 
 
 def _formatar_campo(valor: Decimal | None) -> str:

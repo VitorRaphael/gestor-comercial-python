@@ -58,6 +58,7 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.impressao_service import ImpressaoService
+from gestor_comercial.ui.formatacao import formatar_reais, formatar_reais_com_sinal
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.comprovante_dialog import (
     ComprovanteFechamentoDialog,
@@ -364,17 +365,17 @@ class HistoricoCaixaView(QWidget):
         ticket_medio = faturamento_periodo / len(faturamentos) if faturamentos else Decimal(0)
         diferenca_acumulada = sum(diferencas, Decimal(0))
 
-        self._card_faturamento.definir_valor(_formatar_reais(faturamento_periodo))
+        self._card_faturamento.definir_valor(formatar_reais(faturamento_periodo))
         self._card_faturamento.definir_sub_rotulo(f"{len(self._fechamentos)} turnos")
-        self._card_ticket.definir_valor(_formatar_reais(ticket_medio))
+        self._card_ticket.definir_valor(formatar_reais(ticket_medio))
 
         tom_diferenca = "neutro" if diferenca_acumulada == 0 else ("positivo" if diferenca_acumulada > 0 else "negativo")
-        self._card_diferenca.definir_valor(_formatar_reais_com_sinal(diferenca_acumulada), tom=tom_diferenca)
+        self._card_diferenca.definir_valor(formatar_reais_com_sinal(diferenca_acumulada), tom=tom_diferenca)
 
         self._card_operador.definir_valor(self._nome_operador_selecionado)
 
         self._label_turnos_fechados.setText(f"{len(self._fechamentos)} TURNOS FECHADOS")
-        self._label_total_periodo.setText(_formatar_reais(faturamento_periodo))
+        self._label_total_periodo.setText(formatar_reais(faturamento_periodo))
 
     def _preencher_tabela(self) -> None:
         self._tabela.setRowCount(len(self._fechamentos))
@@ -403,7 +404,7 @@ class HistoricoCaixaView(QWidget):
         resumo = self._resumos[caixa.id]
         faturamento = _faturamento_total(resumo)
         diferenca_total = _diferenca_total(resumo)
-        diferenca = "—" if diferenca_total is None else _formatar_reais_com_sinal(diferenca_total)
+        diferenca = "—" if diferenca_total is None else formatar_reais_com_sinal(diferenca_total)
         turno = "—" if caixa.numero_sequencial_dia is None else f"T{caixa.numero_sequencial_dia}"
         periodo = self._caixas.identificacao_turno(caixa).removeprefix("Caixa Turno - ")
         sequencial = f"{periodo} · {turno}"
@@ -411,7 +412,7 @@ class HistoricoCaixaView(QWidget):
         self._tabela.setItem(linha, 0, QTableWidgetItem(caixa.aberto_em.strftime("%d/%m")))
         self._tabela.setItem(linha, 1, QTableWidgetItem(sequencial))
         self._tabela.setItem(linha, 2, QTableWidgetItem(operador))
-        self._tabela.setItem(linha, 3, QTableWidgetItem(_formatar_reais(faturamento)))
+        self._tabela.setItem(linha, 3, QTableWidgetItem(formatar_reais(faturamento)))
 
         item_diferenca = QTableWidgetItem(diferenca)
         if diferenca_total is not None and diferenca_total != 0:
@@ -488,12 +489,12 @@ class HistoricoCaixaView(QWidget):
 
     def _preencher_gaveta(self, gaveta: FechamentoGaveta) -> None:
         self._label_gaveta_identificacao.setText(gaveta.identificacao)
-        self._label_gaveta_faturado.setText(_formatar_reais(gaveta.total_faturado))
-        self._label_gaveta_saldo.setText(_formatar_reais(gaveta.saldo_apurado))
+        self._label_gaveta_faturado.setText(formatar_reais(gaveta.total_faturado))
+        self._label_gaveta_saldo.setText(formatar_reais(gaveta.saldo_apurado))
         if gaveta.diferenca is None:
             self._label_gaveta_diferenca.setText("—")
         else:
-            self._label_gaveta_diferenca.setText(_formatar_reais_com_sinal(gaveta.diferenca))
+            self._label_gaveta_diferenca.setText(formatar_reais_com_sinal(gaveta.diferenca))
 
     def _preencher_atendentes(self, ranking: list[ItemRankingAtendente]) -> None:
         _limpar_layout_vertical(self._layout_atendentes)
@@ -595,7 +596,7 @@ def _criar_linha_atendente(nome: str, valor: Decimal, percentual: Decimal) -> QV
     label_nome.setObjectName("relatoriosFormaNome")
     topo.addWidget(label_nome)
     topo.addStretch()
-    label_valor = QLabel(_formatar_reais(valor))
+    label_valor = QLabel(formatar_reais(valor))
     label_valor.setObjectName("relatoriosFormaValor")
     topo.addWidget(label_valor)
     bloco.addLayout(topo)
@@ -611,14 +612,3 @@ def _criar_linha_atendente(nome: str, valor: Decimal, percentual: Decimal) -> QV
     label_percentual.setObjectName("relatoriosFormaPercentual")
     bloco.addWidget(label_percentual)
     return bloco
-
-
-def _formatar_reais(valor: Decimal) -> str:
-    return f"R$ {valor:.2f}".replace(".", ",")
-
-
-def _formatar_reais_com_sinal(valor: Decimal) -> str:
-    if valor == 0:
-        return "—"
-    sinal = "-" if valor < 0 else ""
-    return f"{sinal}R$ {abs(valor):.2f}".replace(".", ",")

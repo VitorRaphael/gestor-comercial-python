@@ -5,8 +5,10 @@
 > **2026-09-06 — Remasterização da V1.0 em andamento.** A faxina final antes da
 > produção (memória, integridade de dados, duplicação, código morto) tem plano
 > próprio em [`REMASTERIZACAO-V1.md`](REMASTERIZACAO-V1.md), com 8 fases e
-> contrato de zero-regressão. Suíte: **658 passando + 7 `xfail`** que travam os
-> vazamentos de memória até a Fase 4 corrigi-los.
+> contrato de zero-regressão. Suíte: **706 passando + 7 `xfail`** — e a Fase 3
+> descobriu que esses 7 medem a coisa errada: ver a nota da Fase 3 abaixo.
+> **Paramos no início da Fase 4**, aguardando decisão de escopo — o estado
+> completo está no §0 do [`REMASTERIZACAO-V1.md`](REMASTERIZACAO-V1.md).
 >
 > - **Fase 0** — a camada `ui/`, que não tinha nenhum teste, ganhou rede (`tests/ui/`).
 > - **Fase 1** — `rollback()` passou a existir em produção (`@transacional`) e
@@ -16,6 +18,14 @@
 >   eliminação dos N+1: **Dashboard Mensal caiu de 2.502 para 217 consultas**.
 >   Também consertou uma FK apontando para a tabela errada que só existia no
 >   banco migrado — invisível para a suíte, quebra em produção.
+> - **Fase 3** — quatro utilitários compartilhados (`ui/formatacao.py`,
+>   `layout_utils`, `modais`, `tabelas`) + 48 testes. O dinheiro passou a
+>   aparecer como **`R$ 1.234,50`** nas 10 telas, acabando com a divergência em
+>   que a tela de Mesas mostrava um formato e as outras nove, outro.
+>   **A fase também derrubou dois achados do diagnóstico:** as tabelas não
+>   vazam e os modais só vazam por um caminho que o app não percorre — as
+>   medições originais rodaram sem laço de eventos, e sem laço `deleteLater()`
+>   nunca sai do papel. A Fase 4 caiu de 🔴 para 🟡.
 
 > **2026-08-28 — Refatoração Usuario/Funcionario:** `Funcionario` (Fases 1-3 abaixo)
 > foi cindida em `Usuario` (login/PIN, tela de login) e `Funcionario` (atendimento,

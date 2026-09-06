@@ -1,7 +1,7 @@
 ---
 project: gestor-comercial-python
 domain: PDV desktop offline (food truck do pai do Vitor)
-status: Remasterização da V1 em andamento (Fases 0-2 concluídas em 2026-09-06) — plano em REMASTERIZACAO-V1.md; 658 testes verdes + 7 xfail que travam vazamentos de memória até a Fase 4. Fase 5 (Empacotamento) permanece aberta: falta testar o .exe em máquina limpa de verdade
+status: Remasterização da V1 — Fases 0-3 concluídas em 2026-09-06, PARADA no início da Fase 4 aguardando decisão de escopo do Vitor. Onde paramos e o porquê: §0 do REMASTERIZACAO-V1.md. Suíte: 706 verdes + 7 xfail. A Fase 3 derrubou o §3.3, rebaixou o §3.2 e o §3.9 (as medições de vazamento rodaram sem laço de eventos, e sem laço deleteLater nunca sai do papel), então os 7 xfail medem a coisa errada. Empacotamento continua aberto: falta testar o .exe em máquina limpa de verdade
 local: C:\Vitor Raphael\Códigos\Gestor Comercial Python
 repo: https://github.com/VitorRaphael/gestor-comercial-python
 ---

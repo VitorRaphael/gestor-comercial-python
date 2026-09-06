@@ -18,6 +18,61 @@
 
 ---
 
+## 0. Onde paramos — 2026-09-06
+
+**Fases 0, 1, 2 e 3 concluídas. Parado no início da Fase 4, aguardando decisão
+de escopo.** Suíte: **706 passando + 7 `xfail`, 0 falhas**.
+
+| Fase | Estado |
+|---|---|
+| 0 — Rede de segurança | ✅ concluída |
+| 1 — Integridade de dados | ✅ concluída |
+| 2 — Núcleo de dados e performance | ✅ concluída |
+| 3 — Utilitários compartilhados | ✅ concluída |
+| **4 — Ciclo de vida da UI** | ⏸️ **parada aqui — 0 de 9 itens** |
+| 5 — Higiene da UI · 6 — Arquitetura da UI · 7 — Validação | não iniciadas |
+
+### Por que a Fase 4 está parada, e não só "não começou"
+
+A Fase 3 derrubou dois dos achados que a Fase 4 existia para corrigir. As
+medições originais do §3.2 e do §3.3 rodaram **sem laço de eventos**, e sem laço
+um `deleteLater()` legítimo fica pendente para sempre — indistinguível de
+vazamento. Remedido com `app.exec()` rodando, o §3.3 **não reproduz** e o §3.2
+só reproduz por um caminho que nenhum dos 31 sites do app percorre. O §3.9 foi
+remedido depois e ficou pela metade: o hook errado é real, o "para sempre" não.
+
+Consequência: **o critério de pronto da Fase 4 é inalcançável como está
+escrito.** Os 7 `xfail(strict=True)` exercitam a API crua do Qt
+(`tabela.setCellWidget(...)`, `CancelamentoDialog(...)` + `reject()`) sem passar
+por utilitário nenhum — nenhuma correção feita nas *views* muda o que eles medem.
+
+### O que sobrou de defeito real na Fase 4
+
+| Item | Vale? |
+|---|---|
+| Unificar cópias de `_limpar_layout` (§3.7) | 🟢 **Sim** — `caixa_view` e `mesas_view` ainda carregam a versão sem `setParent(None)`, o mesmo bug de texto sobreposto já corrigido duas vezes noutros arquivos. É o único item que conserta algo que o usuário vê |
+| `closeEvent` → `done()` nos 2 diálogos de PIN (§3.9) | 🟢 **Sim** — 3 linhas, hook errado confirmado por medição |
+| Reescrever os 7 `xfail` | 🔴 **Obrigatório** antes de qualquer correção, senão a fase não fecha |
+| `executar_modal()` nos 31 sites (§3.2) | 🟡 Virou padronização |
+| Limpeza de tabela nas 6 views (§3.3) | 🟡 Perdeu a justificativa; sobra determinismo de repaint |
+| Lambdas do tema (§3.14) | 🟡 Latente — só vira vazamento se alguém recriar uma tela |
+| Medir RSS (§2.3) | ⚪ Vale como linha de base, não como "depois" de correção |
+
+### Recomendação registrada (decisão do Vitor pendente — §8)
+
+**Fase 4 enxuta: §3.7 + §3.9 + reescrever os 7 `xfail`.** É o que conserta
+defeito de verdade e devolve à fase um critério de pronto alcançável. Os 31 + 6
+sites de `executar_modal`/`limpar_tabela` migrariam para a **Fase 5 (Higiene)**,
+onde padronização é o objetivo declarado — em vez de ficarem na fase que existe
+para blindar memória.
+
+### Retomada
+
+Ler este bloco, depois o quadro da **Fase 3** no §6 (é onde estão as medições
+que mudaram tudo) e as **decisões pendentes** no fim do §8.
+
+---
+
 ## 1. Correção de premissas do briefing
 
 O briefing desta remasterização descrevia uma stack que **não é a deste
@@ -143,10 +198,29 @@ de produção real."*
 Session em `PendingRollbackError` permanente — sem rollback, o app fica inútil
 até reiniciar o processo. A mesma correção resolve os dois.
 
-### 3.2 🔴 Os 31 modais nunca são destruídos
+### 3.2 🟡 Os 31 modais nunca são destruídos — ⚠️ **achado corrigido na Fase 3**
 
-**Severidade: ALTA.** ✅ **provado.** É o vazamento dominante de memória — e é
-exatamente o que o briefing suspeitava, só que em Qt.
+> #### ⚠️ Correção (2026-09-06, Fase 3): a medição não reproduz pelo caminho real
+> Este achado foi remedido com PySide6 6.11.2 e um **laço de eventos rodando de
+> verdade** (`app.exec()`), nas plataformas `offscreen` e `windows`:
+>
+> | Cenário | Diálogos presos |
+> |---|---|
+> | 30 construídos e fechados com `reject()`, **sem `exec()`** | **30** |
+> | 30 abertos com `exec()` — **o caminho real do app** | **0** |
+>
+> O vazamento existe, mas só no caminho que a bancada de medição percorria.
+> Abrir de verdade, com `exec()`, já libera o diálogo — e todos os 31 sites do
+> app abrem com `exec()`. A severidade cai de 🔴 ALTA para 🟡, e o
+> `+40,8 MB de RSS` da tabela abaixo **não é atribuível aos modais**.
+>
+> `ui/widgets/modais.py` foi entregue mesmo assim (Fase 3): passou a ser
+> garantia explícita em vez de dependência de um detalhe de implementação do
+> Qt, e é barato o bastante para valer numa máquina que fica semanas ligada.
+> O que muda é a **prioridade** da Fase 4, não a existência do utilitário.
+
+**Severidade original: ALTA.** ✅ provado *pela bancada*, ❌ **não reproduzido**
+pelo caminho de produção. O texto abaixo é o achado como foi escrito.
 
 ```python
 modal = CancelamentoDialog(titulo, self)   # parent = a view
@@ -204,10 +278,31 @@ def executar_modal(modal: QDialog) -> int:
 `while modal.exec() == Accepted:`, **reaproveitando o mesmo modal** entre
 iterações. Ali o descarte fica **fora** do `while`.
 
-### 3.3 🔴 `setCellWidget` não destrói o widget anterior no PySide6
+### 3.3 🟢 `setCellWidget` não destrói o widget anterior — ❌ **achado derrubado na Fase 3**
 
-**Severidade: ALTA.** ✅ **provado** — e é mais frequente que o §3.2, porque
-dispara a cada `atualizar()` de tela, não a cada clique do usuário.
+> #### ❌ Correção (2026-09-06, Fase 3): com laço de eventos, não vaza
+> Escrever o teste de premissa da Fase 3 derrubou este achado. Medido com
+> PySide6 6.11.2 e `app.exec()` rodando:
+>
+> | Cenário | Widgets vivos | Esperado se vazasse |
+> |---|---|---|
+> | `setCellWidget` 50x na mesma célula | **1** | 50 |
+> | `setRowCount(0)` por 20 ciclos | **0** | 20 |
+> | `CardapioView.atualizar()` 21 vezes | **78 → 78** | 78 → 1.638 |
+>
+> O Qt agenda a destruição do ocupante anterior e recolhe no ciclo seguinte. A
+> medição original rodou **sem laço de eventos** — e sem laço um `deleteLater()`
+> legítimo fica pendente para sempre e é indistinguível de um vazamento. É a
+> mesma causa raiz da correção do §3.2.
+>
+> `ui/widgets/tabelas.py` foi entregue (Fase 3), mas o que ele dá é
+> **determinismo**, não correção de vazamento: o widget antigo sai da árvore no
+> ato, antes do próximo repaint, em vez de continuar filho do viewport na
+> geometria velha. É a mesma garantia do §3.7 — que ali já custou dois bugs
+> visuais reais.
+
+**Severidade original: ALTA.** ✅ provado *sem laço de eventos*, ❌ **derrubado**
+com o laço rodando. O texto abaixo é o achado como foi escrito.
 
 Ao contrário do Qt em C++, no PySide6 substituir o widget de uma célula **não
 libera o antigo**, e `setRowCount(0)` também não:
@@ -364,9 +459,11 @@ importando dele.
 **Cuidado:** `mesas_view.py:421-424` usa `while layout.count() > 1` porque o
 último item é um stretch fixo — o helper genérico precisa preservar isso.
 
-### 3.8 🟠 Dez cópias de `_formatar_reais` — e uma delas diverge
+### 3.8 ✅ Dez cópias de `_formatar_reais` — e uma delas diverge — **RESOLVIDO (Fase 3)**
 
 **Severidade: MÉDIA (bug visível ao usuário).** ✅ **provado.**
+**Resolvido em 2026-09-06:** `ui/formatacao.py`, formato `R$ 1.234,50` nas 10
+telas. Ver a Fase 3 no §6 e as decisões no §8.
 
 Nove cópias idênticas de `_formatar_reais(valor: Decimal) -> str`:
 `caixa_view:743` · `cardapio_view:1316` · `comanda_view:952` ·
@@ -391,9 +488,32 @@ separador em todas as outras. Isso é visível para o usuário final.
 > correto em português), mas isso muda a aparência de 9 telas. É decisão sua,
 > não minha.
 
-### 3.9 🟠 PIN do gerente fica em texto claro na memória para sempre
+### 3.9 🟠 PIN do gerente fica em texto claro na memória — ⚠️ **metade corrigida**
 
-**Severidade: ALTA.** 🔍 verificado. `ui/widgets/gerente_pin_dialog.py:72-76`
+> #### ⚠️ Correção (2026-09-06): o hook errado é real, o "para sempre" não
+> Remedido pelo caminho real de `main_window._abrir_caixa`, com `app.exec()`
+> rodando e um espião no `closeEvent`:
+>
+> ```
+> Cancelar : PIN no campo logo após exec() = '1234' | closeEvent disparou? False
+> Entrar   : PIN no campo logo após exec() = '1234' | closeEvent disparou? False
+> após 20 aberturas: 0 diálogos vivos na janela | campos de PIN com texto: 0
+> ```
+>
+> **Confirmado:** `closeEvent` nunca dispara em `accept()`/`reject()`, então
+> aquele `_campo_pin.clear()` é código morto e o PIN continua no campo depois
+> do `exec()`. A correção proposta (`done()`) está certa.
+>
+> **Derrubado:** o "para sempre" dependia do §3.2, que a Fase 3 rebaixou. Como o
+> diálogo *é* destruído quando a referência sai de escopo, o PIN vive alguns
+> milissegundos, não a sessão inteira. Severidade cai de ALTA para MÉDIA.
+>
+> **Ressalva honesta:** nem `clear()` nem a destruição **zeram** a memória — as
+> duas só soltam a referência, e o `str` do PIN ainda passa por `_confirmar()` e
+> por `validar_pin_gerente()` como objeto Python comum. O ganho é real e barato
+> (3 linhas), mas é higiene, não blindagem criptográfica.
+
+**Severidade original: ALTA.** 🔍 verificado. `ui/widgets/gerente_pin_dialog.py:72-76`
 
 O código **já declara a intenção** de limpar o segredo:
 
@@ -415,8 +535,9 @@ def done(self, resultado: int) -> None:  # noqa: N802 - override Qt
     super().done(resultado)
 ```
 
-Aplicar idêntico em `loja_pin_dialog.py:74-78`. Necessário **mas não
-suficiente** — sem o §3.2 o widget continua vivo.
+Aplicar idêntico em `loja_pin_dialog.py:74-78`. ~~Necessário **mas não
+suficiente** — sem o §3.2 o widget continua vivo.~~ **Suficiente:** com o §3.2
+rebaixado, o widget já morre sozinho; o que falta é só o hook certo.
 
 ### 3.10 🟠 Cache de miniaturas: teto OK, chave errada
 
@@ -758,24 +879,96 @@ Dashboard Mensal: **2.502 → 217 consultas** e **960 → 108 ms**.
 > ficam vermelhos** sem as correções desta fase. Os 2 que passam nos dois lados
 > são de conteúdo — travam o que a otimização não podia mudar.
 
-### Fase 3 — Utilitários compartilhados
+### Fase 3 — Utilitários compartilhados ✅ CONCLUÍDA (2026-09-06)
 
-- [ ] `ui/formatacao.py` — centralizar as 10 cópias de `_formatar_reais` + as 2
-      com sinal (§3.8) — **decidir o formato antes** (§8)
-- [ ] `ui/widgets/layout_utils.py` — helper único de limpeza (§3.7)
-- [ ] `ui/widgets/modais.py` — `executar_modal()` (§3.2)
-- [ ] `ui/widgets/tabelas.py` — limpeza de tabela que destrói cell widgets (§3.3)
-- [ ] Testes de unidade dos quatro
+- [x] **`ui/formatacao.py`** — as 10 cópias de `_formatar_reais` e as 2 com sinal
+      viraram uma (§3.8). Formato adotado: **`R$ 1.234,50`**, com separador de
+      milhar — decisão do Vitor. A aplicação nas 10 telas entrou nesta mesma
+      fase, a pedido dele, em vez de esperar a Fase 5
+- [x] **`ui/widgets/layout_utils.py`** — `limpar_layout()` na versão corrigida
+      (`setParent(None)` + `deleteLater()` + sub-layouts recursivos), com
+      `manter_ao_final=` para o stretch fixo de `mesas_view` (§3.7)
+- [x] **`ui/widgets/modais.py`** — `executar_modal()` e `descartar_modal()` (§3.2)
+- [x] **`ui/widgets/tabelas.py`** — `limpar_tabela()` e `definir_celula()` (§3.3)
+- [x] **48 testes** dos quatro: `test_formatacao.py` (26), `test_tabelas.py` (7),
+      `test_layout_utils.py` (8), `test_modais.py` (7)
+- [x] Fixture `assentar` em `tests/ui/conftest.py` — o helper que os dois
+      arquivos de vazamento copiavam, agora num lugar só **e com o
+      `sendPostedEvents(DeferredDelete)` que faltava nas duas cópias**
 
-### Fase 4 — Ciclo de vida da UI 🔴
+**Resultado:** `706 passed, 7 xfailed` — de `658 passed, 7 xfailed`.
+Nenhuma linha de `services/`, `repository/`, `domain/` ou `hardware/` alterada.
 
-- [ ] `executar_modal()` nos 31 sites (§3.2)
-- [ ] Limpeza de tabela nas 6 views com tabela (§3.3)
-- [ ] `closeEvent` → `done()` nos dois diálogos de PIN (§3.9)
-- [ ] Unificar as cópias de `_limpar_layout` (§3.7)
-- [ ] Lambdas do tema → métodos ligados (§3.14), **mantendo a guarda anti-laço**
-- [ ] **`tests/ui/test_vazamento_*.py` passam a verde** ← critério de pronto
-- [ ] Medir RSS com o roteiro do §2.3 e registrar o "depois"
+> #### 🔴 O que esta fase descobriu: §3.2 e §3.3 não sobrevivem ao laço de eventos
+> Escrever o teste de premissa das tabelas derrubou o §3.3 e obrigou a remedir o
+> §3.2. As duas medições originais rodaram **sem laço de eventos**, e é isso que
+> muda tudo: sem laço, `deleteLater()` nunca sai do papel, e um objeto
+> legitimamente agendado para destruição é indistinguível de um vazado.
+>
+> | Cenário, com `app.exec()` rodando | Vivos | Se vazasse |
+> |---|---|---|
+> | `setCellWidget` 50x na mesma célula | **1** | 50 |
+> | `setRowCount(0)` por 20 ciclos | **0** | 20 |
+> | `CardapioView.atualizar()` 21 vezes | **78 → 78** | 78 → 1.638 |
+> | 30 diálogos com `reject()` **sem `exec()`** | **30** | 30 |
+> | 30 diálogos com `exec()` — **o caminho do app** | **0** | 30 |
+>
+> Conferido em `offscreen` e em `windows`, PySide6 6.11.2. O único cenário que
+> ainda vaza é o que **nenhum dos 31 sites do app percorre**.
+>
+> Isso rebaixa a Fase 4 de 🔴 para 🟡 e muda o critério de pronto dela — os 7
+> `xfail(strict=True)` da Fase 0 **não podem ficar verdes como estão escritos**,
+> porque medem a API crua do Qt (`tabela.setCellWidget(...)`,
+> `CancelamentoDialog(...)` + `reject()`) sem passar por utilitário nenhum.
+> Nenhuma correção feita nas *views* muda o que eles medem. Ver a Fase 4.
+
+> #### A lição, para a próxima medição de memória
+> `QApplication.processEvents()` **não** despacha `DeferredDelete`. O Qt segura
+> esses eventos até o laço em que foram agendados terminar — e num teste não
+> existe laço nenhum. Toda medição de vazamento em Qt precisa de
+> `sendPostedEvents(None, QEvent.Type.DeferredDelete)` (é o que a fixture
+> `assentar` faz agora) ou de um `app.exec()` de verdade. Sem isso a medição
+> acusa vazamento onde só há destruição adiada.
+
+> #### Decisões tomadas dentro da fase
+> **Sinal do negativo unificado.** `formatar_reais(-12)` agora devolve
+> `-R$ 12,00`, não `R$ -12,00`. A tela do Caixa mostrava as duas formas ao mesmo
+> tempo: `-R$ 12,00` na linha de sangria (sinal montado à mão) e `R$ -12,00` na
+> diferença de fechamento. Ganhou a que já era maioria.
+>
+> **Arredondamento passa por `dinheiro()`.** `f"{valor:.2f}"` usa o padrão do
+> Python (meio para o par) e arredondaria `R$ 0,005` para `R$ 0,00`, enquanto o
+> cupom impresso — que já chamava `dinheiro()` — imprimiria `0,01`. Um centavo
+> de divergência entre a tela e o papel na mão do cliente. Agora os dois usam a
+> mesma política, e `test_a_tela_e_o_cupom_mostram_o_mesmo_numero` tranca isso.
+>
+> **`descartar_modal()` checa `isValid()` antes do `deleteLater()`.** A chamada
+> mora num `finally`; num objeto já destruído ela levanta `RuntimeError` e
+> substituiria a exceção original — o operador veria um estouro de shiboken no
+> lugar da mensagem de verdade, ou o app cairia no balcão por causa da
+> *limpeza*. Cai direto no RNF "zero travamentos".
+
+### Fase 4 — Ciclo de vida da UI 🟡 ⏸️ **PARADA AQUI** (0 de 9)
+
+> Rebaixada de 🔴 pela Fase 3, e **bloqueada por decisão de escopo**. O porquê,
+> o que sobrou de defeito real e a recomendação estão no **§0 — Onde paramos**;
+> a decisão pendente está no fim do §8. Não comece por esta lista sem ler o §0.
+
+- [ ] 🔴 **Reescrever os 7 `xfail(strict=True)` antes de qualquer correção** —
+      como estão, exercitam a API crua do Qt e **nunca poderiam ficar verdes**
+      por mudança nenhuma feita nas views. Ver o quadro da Fase 3
+- [ ] ⏳ **Decidir o escopo com o Vitor** (§0) — Fase 4 enxuta ou completa
+- [ ] 🟢 Unificar as cópias de `_limpar_layout` (§3.7) — **o único item que
+      conserta algo que o usuário vê**: `caixa_view` e `mesas_view` ainda têm a
+      versão sem `setParent(None)`
+- [ ] 🟢 `closeEvent` → `done()` nos dois diálogos de PIN (§3.9) — 3 linhas,
+      hook errado confirmado por medição
+- [ ] 🟡 `executar_modal()` nos 31 sites (§3.2) — padronização
+- [ ] 🟡 Limpeza de tabela nas 6 views com tabela (§3.3) — determinismo
+- [ ] 🟡 Lambdas do tema → métodos ligados (§3.14), **mantendo a guarda anti-laço**
+- [ ] ⚪ Medir RSS com o roteiro do §2.3 — agora como linha de base
+- [ ] **`tests/ui/test_vazamento_*.py` passam a verde** ← critério de pronto,
+      **inalcançável até o primeiro item ser feito**
 
 ### Fase 5 — Higiene da UI
 
@@ -811,21 +1004,21 @@ Dashboard Mensal: **2.502 → 217 consultas** e **960 → 108 ms**.
 
 | Métrica | Antes | Depois |
 |---|---|---|
-| Testes verdes | 620/621 (1 falha) | **658 + 7 xfail, 0 falhas** (Fase 2) |
-| Arquivos de teste de UI | 0 | **4** (Fase 2) |
+| Testes verdes | 620/621 (1 falha) | **706 + 7 xfail, 0 falhas** (Fase 3) |
+| Arquivos de teste de UI | 0 | **7** (Fase 3) |
 | Caminhos de produção com `rollback()` | 0 | **todos** (Fase 1) |
 | `PRAGMA foreign_keys` no app real | 0 | ✅ **1** (Fase 1) |
 | Índices em FK | 0 de 20 | ✅ **20 de 20** (Fase 2) |
 | Desvios entre schema migrado e `domain/` | 1 (`alembic check` falhava) | ✅ **0** (Fase 2) |
 | `journal_mode` | `delete` | ✅ **WAL** (Fase 2) |
 | `synchronous` (resiliência a queda de energia) | `FULL` | ✅ **`FULL`, intocado** |
-| Widgets na tabela do Cardápio após 20 recargas | 138 → **1.338** | _a preencher (Fase 4)_ |
+| Widgets na tabela do Cardápio após 20 recargas | 138 → **1.338** (medido sem laço de eventos) | **78 → 78** — nunca cresceu (Fase 3, §3.3) |
 | RSS do shell montado | 154,5 MB | _a preencher_ |
 | RSS após 300 modais | 195,3 MB (+40,8) | _a preencher_ |
-| Modais vivos após 300 aberturas | 300 | **0** (meta) |
-| Cell widgets vivos após 50 refreshes | 50 | **0** (meta) |
+| Modais vivos após 300 aberturas | 300 (medido sem `exec()`) | **0** — já era 0 pelo caminho real (Fase 3, §3.2) |
+| Cell widgets vivos após 50 refreshes | 50 (medido sem laço de eventos) | **1** — o da célula (Fase 3, §3.3) |
 | Linhas em `src/` | 17.697 | _a preencher_ |
-| Cópias de `_formatar_reais` | 10 (+2 com sinal) | 1 (+1) (meta) |
+| Cópias de `_formatar_reais` | 10 (+2 com sinal) | ✅ **1 (+1)** (Fase 3) |
 | Cópias de "limpar layout" | 4–6 | 1 (meta) |
 
 ### 7.1 Consultas por tela — Fase 2
@@ -879,14 +1072,26 @@ leituras muito mais baratas.
 | 2026-09-06 | FK de `quitacoes_consumo` corrigida na Fase 2, fora do escopo original | A Fase 1 ligou o `PRAGMA foreign_keys` e com isso **ativou** um desvio de schema que dormia desde `d23a4f888a77`. Fechar a fase sabendo disso seria entregar uma quebra de produção invisível para a suíte (§3.5) |
 | 2026-09-06 | Contagem de FKs corrigida de 38 para 20 | `PRAGMA foreign_key_list` sobre o schema real, em vez de contar linhas de `grep`. O achado ("zero índices") continua inteiro; só o denominador estava errado |
 | 2026-09-06 | 5 `.md` de refatoração → `docs/historico/` com README de aviso | Documentação que contradiz o código convida a uma "limpeza" que quebra o app; arquivar preserva o porquê das decisões sem poluir a raiz (§3.12) |
+| 2026-09-06 | **Formato monetário: `R$ 1.234,50`** (Fase 3) — decisão do Vitor | Vence a fórmula que era minoria (só `mesas_view` a usava) porque é a correta em português, é a que o cupom impresso já usava, e porque num turno bom o food truck passa de mil reais — `R$ 1234,50` era o caso comum, não a exceção. Muda a aparência de 9 telas, de propósito (§3.8) |
+| 2026-09-06 | Aplicação nas 10 telas feita **dentro da Fase 3**, não na Fase 5 | Pedido do Vitor. O utilitário sozinho não corrige nada: enquanto as views não importarem dele, a divergência que o usuário vê continua na tela |
+| 2026-09-06 | Sinal do negativo unificado em `-R$ 12,00` | A tela do Caixa mostrava as duas convenções ao mesmo tempo — `-R$ 12,00` na sangria e `R$ -12,00` na diferença. Venceu a que já era maioria e a que `formatar_reais_com_sinal` já usava |
+| 2026-09-06 | `ui/formatacao.py` chama `dinheiro()` antes de formatar | Sem isso a tela arredondaria meio-para-o-par (padrão do Python) e o cupom meio-para-cima — `R$ 0,00` na tela contra `0,01` no papel na mão do cliente. Um teste tranca a igualdade dos dois |
+| 2026-09-06 | Separador de milhar **duplicado** em `ui/formatacao` e `formatador_cupom.moeda`, guardado por teste | Unificar exigiria a UI importar um módulo de cupom, ou mexer no formatador durante a fase cujo critério de pronto é impressão byte a byte idêntica (§7). São 1 linha em cada lado, e `test_a_tela_e_o_cupom_mostram_o_mesmo_numero` impede a divergência |
+| 2026-09-06 | **§3.3 derrubado** e **§3.2 rebaixado** (Fase 3) | Remedidos com `app.exec()` rodando, em `offscreen` e em `windows`: as tabelas não vazam (78 → 78 widgets em 21 refreshes) e os modais só vazam pelo caminho `reject()` sem `exec()`, que nenhum dos 31 sites percorre. As medições originais rodaram sem laço de eventos, e sem laço `deleteLater()` nunca sai do papel |
+| 2026-09-06 | **§3.9 rebaixado de ALTA para MÉDIA** | O hook errado (`closeEvent` em vez de `done()`) foi confirmado por medição e continua valendo correção. O "PIN para sempre na memória" dependia do §3.2 e caiu junto com ele: o diálogo é destruído ao sair de escopo (§3.9) |
+| 2026-09-06 | `modais.py` e `tabelas.py` entregues mesmo com os achados corrigidos | O que entregam deixou de ser correção de vazamento e passou a ser garantia explícita/determinismo — barato, testado, e independe de detalhe de implementação do Qt. Quem decide se vale aplicar nos 37 sites é a Fase 4, com o achado já corrigido na mesa |
 
 ### Decisões pendentes do Vitor
 
-1. **Formato monetário** (§3.8) — *bloqueia a Fase 3*: `R$ 1234,50` (9 telas
-   hoje) ou `R$ 1.234,50` (tela de Mesas)? Recomendo o segundo; muda a
-   aparência de 9 telas.
-2. **`EstoqueView`** (§3.11) — *bloqueia a Fase 5*: remover até a fase de
+1. **`EstoqueView`** (§3.11) — *bloqueia a Fase 5*: remover até a fase de
    Estoque começar, ou manter como placeholder consciente e documentado?
+2. **Escopo da Fase 4** — *bloqueia a Fase 4*. Com o §3.3 derrubado, o §3.2
+   rebaixado e o §3.9 rebaixado, aplicar os utilitários nos 31 + 6 sites virou
+   padronização, não correção de vazamento. Recomendação registrada no §0:
+   **Fase 4 enxuta (§3.7 + §3.9 + reescrever os 7 `xfail`)**, empurrando os
+   31 + 6 sites para a Fase 5. Aceitar, ou fazer a Fase 4 inteira como está?
 
-~~3. `journal_mode = WAL`~~ — **decidido em 2026-09-06**: adotado, com backup
+~~3. Formato monetário~~ — **decidido em 2026-09-06**: `R$ 1.234,50`. Ver §8.
+
+~~4. `journal_mode = WAL`~~ — **decidido em 2026-09-06**: adotado, com backup
 por `VACUUM INTO` e checkpoint no fechamento. Ver §8.

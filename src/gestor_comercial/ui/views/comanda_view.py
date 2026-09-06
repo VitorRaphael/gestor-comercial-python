@@ -51,6 +51,7 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.impressao_service import ImpressaoService
+from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
@@ -343,7 +344,7 @@ class ComandaView(QWidget):
         self._ajustar_altura_tabela(self._tabela_lancados)
 
         total = self._comanda_service.calcular_total(self._comanda.id)
-        self._label_total.setText(_formatar_reais(total))
+        self._label_total.setText(formatar_reais(total))
 
         aberta = self._comanda.status is StatusComanda.ABERTA
         em_conferencia = self._comanda.status is StatusComanda.EM_CONFERENCIA
@@ -443,9 +444,9 @@ class ComandaView(QWidget):
         tabela.setCellWidget(linha, 0, self._criar_celula_produto(imagem_path, nome_produto, descricao))
 
         for coluna, texto in (
-            (1, _formatar_reais(preco_unit)),
+            (1, formatar_reais(preco_unit)),
             (2, str(quantidade)),
-            (3, _formatar_reais(total_item)),
+            (3, formatar_reais(total_item)),
         ):
             item_valor = QTableWidgetItem(texto)
             item_valor.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -947,7 +948,3 @@ class _FecharConferenciaDialog(QDialog):
     def resultado(self) -> tuple[Decimal | None, Decimal | None]:
         taxa = _TAXA_SERVICO_PADRAO if self._marcar_taxa_servico.isChecked() else None
         return taxa, None
-
-
-def _formatar_reais(valor: Decimal) -> str:
-    return f"R$ {valor:.2f}".replace(".", ",")

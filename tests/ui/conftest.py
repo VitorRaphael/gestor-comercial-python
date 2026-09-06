@@ -14,11 +14,13 @@ trocar.
 
 from __future__ import annotations
 
+import gc
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 
 from gestor_comercial.services.caixa_service import CaixaService
@@ -38,6 +40,31 @@ def qapp():
     app = QApplication.instance() or QApplication([])
     yield app
     app.processEvents()
+
+
+@pytest.fixture
+def assentar(qapp):
+    """Dá ao Qt e ao Python toda chance de liberar o que puder ser liberado.
+
+    Todo teste de vazamento precisa disto antes de contar objetos: sem
+    assentar, um `deleteLater()` legítimo ainda estaria pendente na fila e o
+    teste acusaria vazamento onde não há. Com isso, o que sobrar sobrou de
+    verdade.
+
+    O `sendPostedEvents(DeferredDelete)` explícito não é redundante com o
+    `processEvents()`: o Qt segura os eventos de destruição adiada até o laço
+    de eventos em que foram agendados terminar, e num teste **não existe** laço
+    de eventos rodando — sem o empurrão, `deleteLater()` nunca sairia do papel.
+    """
+
+    def _assentar() -> None:
+        gc.collect()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()
+        gc.collect()
+        qapp.processEvents()
+
+    return _assentar
 
 
 @pytest.fixture

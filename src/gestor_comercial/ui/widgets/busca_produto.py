@@ -11,7 +11,6 @@ não pode depender do mouse com as mãos ocupadas no caixa.
 from __future__ import annotations
 
 import unicodedata
-from decimal import Decimal
 
 from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QIcon
@@ -24,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from gestor_comercial.domain.produto import Produto
+from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
 
 _TAMANHO_MINIATURA = 40
@@ -146,7 +146,7 @@ class BuscaProdutoWidget(QWidget):
     def _filtrar(self, termo: str) -> None:
         self._lista_resultados.clear()
         for produto in filtrar_produtos(self._produtos_ativos, termo):
-            texto = f"{produto.nome} — {_formatar_reais(produto.preco)} — {produto.categoria.nome}"
+            texto = f"{produto.nome} — {formatar_reais(produto.preco)} — {produto.categoria.nome}"
             if produto.is_combo:
                 texto += "  [COMBO]"
             item = QListWidgetItem(texto)
@@ -158,7 +158,3 @@ class BuscaProdutoWidget(QWidget):
             self._lista_resultados.addItem(item)
         if self._lista_resultados.count() > 0:
             self._lista_resultados.setCurrentRow(0)
-
-
-def _formatar_reais(valor: Decimal) -> str:
-    return f"R$ {valor:.2f}".replace(".", ",")
