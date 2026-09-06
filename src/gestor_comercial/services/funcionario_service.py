@@ -17,10 +17,12 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.services.transacao import transacional
 
 CARGOS_VALIDOS = [cargo.value for cargo in CargoFuncionario]
 
 
+@transacional
 class FuncionarioService:
     """Cadastro, edição, (des)ativação e exclusão de funcionários de atendimento."""
 

@@ -57,6 +57,7 @@ from gestor_comercial.services.caixa_service import (
 from gestor_comercial.services.comanda_service import ComandaService
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
 from gestor_comercial.services.exceptions import RecursoNaoEncontradoError
+from gestor_comercial.services.transacao import transacional
 
 # Nome do grupo cujos itens não têm para onde ir. Aparece na tela do operador
 # junto com o motivo, para ele saber qual categoria configurar.
@@ -101,6 +102,7 @@ class _GrupoDeImpressao:
     motivos: list[str] = field(default_factory=list)
 
 
+@transacional
 class ImpressaoService:
     """Roteia e imprime comanda de produção, recibo do cliente e fechamento (§3.12)."""
 

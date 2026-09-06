@@ -31,6 +31,7 @@ from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.services.transacao import transacional
 
 SENHA_MASTER_PADRAO = "050727"
 SENHA_OPERACIONAL_PADRAO = "26407200"
@@ -39,6 +40,7 @@ SENHA_LOGIN_PADRAO = "26407200"
 MASCARA = "••••••••"
 
 
+@transacional
 class LojaConfigService:
     """Bootstrap e regras do módulo "Senhas e Acesso"."""
 

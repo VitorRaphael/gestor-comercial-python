@@ -22,8 +22,10 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.services.transacao import transacional
 
 
+@transacional
 class ComandaService:
     """Abertura, itens, total, fechamento e cancelamento de comanda."""
 

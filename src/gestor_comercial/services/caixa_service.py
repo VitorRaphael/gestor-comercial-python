@@ -31,6 +31,7 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
     TurnoAnteriorPendenteError,
 )
+from gestor_comercial.services.transacao import transacional
 
 FORMAS_MAQUININHA = (FormaPagamento.CREDITO, FormaPagamento.DEBITO, FormaPagamento.PIX)
 
@@ -202,6 +203,7 @@ class ItemRankingAtendente:
     percentual: Decimal
 
 
+@transacional
 class CaixaService:
     """Abertura/fechamento do caixa, movimentos da gaveta e conferência (§3.9, §3.10)."""
 

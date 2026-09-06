@@ -31,6 +31,7 @@ from gestor_comercial.repository.unit_of_work import UnitOfWork
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
 from gestor_comercial.services.exceptions import RecursoNaoEncontradoError, RegraDeNegocioError
+from gestor_comercial.services.transacao import transacional
 
 # Abaixo de 20 colunas não cabe nem o nome do item; acima de 96 não existe
 # bobina térmica comum. É uma cerca contra digitação errada, não uma regra fiscal.
@@ -47,6 +48,7 @@ _ID_USB = re.compile(r"(0[xX])?[0-9a-fA-F]{1,4}")
 _CARACTERES_PROIBIDOS_EM_ARQUIVO = re.compile(r'[<>:"/\\|?*\s]+')
 
 
+@transacional
 class CardapioService:
     """CRUD de categoria, produto, combo e impressora."""
 

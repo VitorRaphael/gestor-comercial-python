@@ -1,14 +1,40 @@
 import os
+import sqlite3
 from pathlib import Path
 from typing import Generic, TypeVar
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 # GESTOR_COMERCIAL_DB permite apontar pra outro arquivo sem tocar no código —
 # usado pra testar migration em banco descartável e pra apontar o .exe pra um
 # caminho fixo na máquina do food truck.
 DB_PATH = Path(os.environ.get("GESTOR_COMERCIAL_DB", Path.home() / ".gestor_comercial" / "gestor_comercial.db"))
+
+
+@event.listens_for(Engine, "connect")
+def _configurar_conexao_sqlite(conexao_dbapi, _registro) -> None:
+    """Liga a checagem de chave estrangeira em toda conexão SQLite.
+
+    O SQLite nasce com `PRAGMA foreign_keys` **desligado** e a configuração vale
+    por conexão, não fica gravada no arquivo — então não adianta ligar uma vez.
+    Sem isto, as 38 `ForeignKey` declaradas no `domain/` são decorativas: o
+    banco aceita item apontando para produto inexistente, pagamento de comanda
+    apagada, e o problema só aparece semanas depois como relatório que não
+    fecha. Ver `REMASTERIZACAO-V1.md` §3.5.
+
+    O listener é registrado na classe `Engine` (e não numa instância) de
+    propósito: assim vale também para os engines que a suíte de testes cria por
+    conta própria, e o teste passa a rodar sob as mesmas regras da produção.
+    """
+    if not isinstance(conexao_dbapi, sqlite3.Connection):
+        return
+    cursor = conexao_dbapi.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
 
 
 class Base(DeclarativeBase):

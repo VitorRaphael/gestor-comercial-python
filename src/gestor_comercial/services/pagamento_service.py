@@ -24,6 +24,7 @@ from gestor_comercial.services.comanda_service import ComandaService
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
 from gestor_comercial.services.exceptions import RegraDeNegocioError
 from gestor_comercial.services.funcionario_service import FuncionarioService
+from gestor_comercial.services.transacao import transacional
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,7 @@ class ExtratoConsumo:
     quitacoes: list[QuitacaoConsumo]
 
 
+@transacional
 class PagamentoService:
     """Pagamento parcial/múltiplo, troco e quitação de consumo interno (§3.7, §3.8)."""
 

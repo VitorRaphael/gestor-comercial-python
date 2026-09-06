@@ -32,6 +32,7 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
+from gestor_comercial.services.transacao import transacional
 
 TAMANHO_SALT_BYTES = 16
 PIN_MIN_DIGITOS = 4
@@ -41,6 +42,7 @@ PIN_MAX_DIGITOS = 8
 _PERFIS_GERENCIAIS = {PerfilUsuario.ADMIN, PerfilUsuario.GERENTE}
 
 
+@transacional
 class AuthService:
     """Hash de PIN, sessão do usuário logado e CRUD de usuários de login."""
 

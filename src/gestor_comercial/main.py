@@ -92,31 +92,36 @@ def main() -> int:
     # Um único UnitOfWork por processo (ver docstring de UnitOfWork): app
     # desktop de usuário único, sem servidor, então a Session dele serve de
     # cache e evita reabrir conexão a cada clique.
-    uow = UnitOfWork()
-    auth_service = AuthService(uow)
-    comanda_service = ComandaService(uow, auth_service)
-    cardapio_service = CardapioService(uow, auth_service)
-    caixa_service = CaixaService(uow, auth_service)
-    funcionario_service = FuncionarioService(uow, auth_service)
-    pagamento_service = PagamentoService(uow, auth_service, comanda_service, funcionario_service)
-    # Sem `abrir_driver` explícito: em produção vale o driver ESC/POS de
-    # verdade. Quem troca isso por um driver falso é a suíte de testes.
-    impressao_service = ImpressaoService(uow, auth_service)
+    #
+    # `with` e não `uow = UnitOfWork()`: o `__exit__` desfaz o que estiver
+    # pendente e fecha a Session mesmo se algo estourar depois daqui — antes
+    # ele nunca rodava, porque ninguém usava o UnitOfWork como context manager
+    # (ver REMASTERIZACAO-V1.md §3.1).
+    with UnitOfWork() as uow:
+        auth_service = AuthService(uow)
+        comanda_service = ComandaService(uow, auth_service)
+        cardapio_service = CardapioService(uow, auth_service)
+        caixa_service = CaixaService(uow, auth_service)
+        funcionario_service = FuncionarioService(uow, auth_service)
+        pagamento_service = PagamentoService(
+            uow, auth_service, comanda_service, funcionario_service
+        )
+        # Sem `abrir_driver` explícito: em produção vale o driver ESC/POS de
+        # verdade. Quem troca isso por um driver falso é a suíte de testes.
+        impressao_service = ImpressaoService(uow, auth_service)
 
-    janela = MainWindow(
-        auth_service,
-        comanda_service,
-        cardapio_service,
-        caixa_service,
-        pagamento_service,
-        impressao_service,
-        funcionario_service,
-    )
-    janela.showMaximized()
+        janela = MainWindow(
+            auth_service,
+            comanda_service,
+            cardapio_service,
+            caixa_service,
+            pagamento_service,
+            impressao_service,
+            funcionario_service,
+        )
+        janela.showMaximized()
 
-    codigo_saida = app.exec()
-    uow.fechar()
-    return codigo_saida
+        return app.exec()
 
 
 if __name__ == "__main__":
