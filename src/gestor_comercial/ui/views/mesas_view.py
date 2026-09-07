@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.enums import StatusComanda, StatusMesa
 from gestor_comercial.domain.mesa import Mesa
@@ -107,6 +108,7 @@ class _CartaoMesa(QFrame):
                 nome.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 layout.addWidget(nome)
 
+    @nao_deixa_escapar()
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (override Qt)
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicado.emit()
@@ -133,6 +135,7 @@ class _BarraProgresso(QWidget):
         self._percentual = max(0.0, min(100.0, percentual))
         self._reposicionar()
 
+    @nao_deixa_escapar()
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (override Qt)
         super().resizeEvent(event)
         self._reposicionar()

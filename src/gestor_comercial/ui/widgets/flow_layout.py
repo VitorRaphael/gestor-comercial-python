@@ -12,6 +12,8 @@ from __future__ import annotations
 from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import QLayout, QLayoutItem, QWidget
 
+from gestor_comercial.core.resilience import nao_deixa_escapar
+
 
 class FlowLayout(QLayout):
     def __init__(self, parent: QWidget | None = None, margin: int = 0, spacing: int = 12) -> None:
@@ -25,38 +27,48 @@ class FlowLayout(QLayout):
         while self.count():
             self.takeAt(0)
 
+    @nao_deixa_escapar()
     def addItem(self, item: QLayoutItem) -> None:  # noqa: N802 (override Qt)
         self._items.append(item)
 
+    @nao_deixa_escapar(retorno=0)
     def count(self) -> int:  # noqa: N802 (override Qt)
         return len(self._items)
 
+    @nao_deixa_escapar()
     def itemAt(self, index: int) -> QLayoutItem | None:  # noqa: N802 (override Qt)
         if 0 <= index < len(self._items):
             return self._items[index]
         return None
 
+    @nao_deixa_escapar()
     def takeAt(self, index: int) -> QLayoutItem | None:  # noqa: N802 (override Qt)
         if 0 <= index < len(self._items):
             return self._items.pop(index)
         return None
 
+    @nao_deixa_escapar(retorno=Qt.Orientation(0))
     def expandingDirections(self) -> Qt.Orientations:  # noqa: N802 (override Qt)
         return Qt.Orientation(0)
 
+    @nao_deixa_escapar(retorno=True)
     def hasHeightForWidth(self) -> bool:  # noqa: N802 (override Qt)
         return True
 
+    @nao_deixa_escapar(retorno=0)
     def heightForWidth(self, width: int) -> int:  # noqa: N802 (override Qt)
         return self._organizar(QRect(0, 0, width, 0), medir_apenas=True)
 
+    @nao_deixa_escapar()
     def setGeometry(self, rect: QRect) -> None:  # noqa: N802 (override Qt)
         super().setGeometry(rect)
         self._organizar(rect, medir_apenas=False)
 
+    @nao_deixa_escapar(retorno=QSize(0, 0))
     def sizeHint(self) -> QSize:  # noqa: N802 (override Qt)
         return self.minimumSize()
 
+    @nao_deixa_escapar(retorno=QSize(0, 0))
     def minimumSize(self) -> QSize:  # noqa: N802 (override Qt)
         tamanho = QSize()
         for item in self._items:

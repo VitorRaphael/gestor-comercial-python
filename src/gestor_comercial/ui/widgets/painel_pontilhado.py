@@ -13,6 +13,8 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPaintEvent
 from PySide6.QtWidgets import QFrame, QWidget
 
+from gestor_comercial.core.resilience import nao_deixa_escapar
+
 
 class PainelPontilhado(QFrame):
     _ESPACAMENTO_PX = 28
@@ -22,6 +24,7 @@ class PainelPontilhado(QFrame):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
+    @nao_deixa_escapar()
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
         super().paintEvent(event)
         painter = QPainter(self)

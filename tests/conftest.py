@@ -38,6 +38,33 @@ PIN_LOGIN = SENHA_LOGIN_PADRAO
 
 
 @pytest.fixture
+def escudo_isolado():
+    """Devolve `sys.excepthook`, `sys.stderr` e o logger do app ao estado original.
+
+    Sem isto um teste de escudo contaminaria todo o resto da suíte: o
+    `excepthook` é global do interpretador, e o espelho do `stderr` faria o
+    pytest capturar saída duas vezes. Mora aqui, e não ao lado de um dos dois
+    arquivos, porque `tests/unit/test_resiliencia.py` e `tests/ui/test_caos.py`
+    precisam do mesmo isolamento — ver `Mitigação de Falhas.md` §4.
+    """
+    import logging
+    import sys
+
+    from gestor_comercial.core import resilience
+
+    hook_original = sys.excepthook
+    stderr_original = sys.stderr
+    logger = logging.getLogger(resilience.NOME_LOGGER)
+    handlers_originais = list(logger.handlers)
+    logger.handlers.clear()
+    yield
+    logger.handlers.clear()
+    logger.handlers.extend(handlers_originais)
+    sys.excepthook = hook_original
+    sys.stderr = stderr_original
+
+
+@pytest.fixture
 def session():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

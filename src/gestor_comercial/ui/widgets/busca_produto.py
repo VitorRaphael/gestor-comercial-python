@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.domain.produto import Produto
 from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
@@ -85,6 +86,7 @@ class BuscaProdutoWidget(QWidget):
         self._filtrar("")
         self._campo_busca.setFocus()
 
+    @nao_deixa_escapar(retorno=False)
     def eventFilter(self, obj: QWidget, evento: QEvent) -> bool:
         if obj is self._campo_busca and evento.type() == QEvent.Type.KeyPress:
             tecla = evento.key()

@@ -18,7 +18,7 @@ selecionável, card de consumo do detalhe).
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -51,7 +51,11 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.pagamento_service import PagamentoService
-from gestor_comercial.ui.formatacao import formatar_para_campo, formatar_reais
+from gestor_comercial.ui.formatacao import (
+    formatar_para_campo,
+    formatar_reais,
+    safe_decimal,
+)
 from gestor_comercial.ui.rotulo_identidade import rotulo_identidade
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.modais import executar_modal
@@ -391,10 +395,9 @@ class FuncionariosView(QWidget):
         modal = _QuitarConsumoDialog(funcionario.nome, saldo, self)
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-        try:
-            valor, senha_gerente = modal.resultado()
-        except InvalidOperation:
-            self._label_erro.setText("Valor inválido. Informe um valor em reais, como 20.00.")
+        valor, senha_gerente = modal.resultado()
+        if valor is None:
+            self._label_erro.setText("Valor inválido. Informe um valor em reais, como 20,00.")
             return
 
         self._label_erro.setText("")
@@ -735,8 +738,8 @@ class _QuitarConsumoDialog(QDialog):
         botoes.rejected.connect(self.reject)
         layout.addWidget(botoes)
 
-    def resultado(self) -> tuple[Decimal, str]:
-        valor = Decimal(self._campo_valor.text().strip().replace(",", "."))
+    def resultado(self) -> tuple[Decimal | None, str]:
+        valor = safe_decimal(self._campo_valor.text(), padrao=None)
         senha_gerente = self._campo_senha_gerente.text().strip()
         return valor, senha_gerente
 

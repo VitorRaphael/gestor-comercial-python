@@ -58,6 +58,16 @@ def _registrar_fonte_marca() -> None:
 
 
 def main() -> int:
+    # PRIMEIRA linha de tudo, antes do Qt e antes do banco: daqui pra frente
+    # qualquer estouro vira registro em `~/.gestor_comercial/logs/gestor.log`.
+    # Ver `core/resilience.py` e `Mitigação de Falhas.md` §1.1 — sem isto, um
+    # defeito no food truck não derruba o programa, ele **evapora**: o `.exe` é
+    # empacotado com `console=False` e o traceback do Qt não tem para onde ir.
+    from gestor_comercial.core.resilience import caminho_do_log, instalar_escudo
+
+    logger = instalar_escudo()
+    logger.info("Boot do Gestor Comercial")
+
     app = QApplication(sys.argv)
     _registrar_fonte_marca()
 
@@ -69,6 +79,7 @@ def main() -> int:
         _aplicar_migrations()
         _rodar_seed()
     except Exception as erro:  # banco não sobe -> nada no app funciona
+        logger.exception("Falha ao preparar o banco no boot")
         QMessageBox.critical(
             None,
             "Erro ao iniciar",
@@ -98,42 +109,60 @@ def main() -> int:
     # pendente e fecha a Session mesmo se algo estourar depois daqui — antes
     # ele nunca rodava, porque ninguém usava o UnitOfWork como context manager
     # (ver REMASTERIZACAO-V1.md §3.1).
-    with UnitOfWork() as uow:
-        auth_service = AuthService(uow)
-        comanda_service = ComandaService(uow, auth_service)
-        cardapio_service = CardapioService(uow, auth_service)
-        caixa_service = CaixaService(uow, auth_service)
-        funcionario_service = FuncionarioService(uow, auth_service)
-        pagamento_service = PagamentoService(
-            uow, auth_service, comanda_service, funcionario_service
+    # A terceira peça do escudo (`Mitigação de Falhas.md` §1.2). As outras duas
+    # — `sys.excepthook` e o espelho do `stderr` — só valem DENTRO do laço de
+    # eventos: lá o Qt segue rodando depois do erro. Aqui fora não há laço
+    # nenhum, então um estouro ao montar os services ou as views encerra o
+    # processo de verdade, e é o único caso em que a janela some (ou nunca
+    # aparece). Este `try` é o que troca esse sumiço por uma mensagem.
+    try:
+        with UnitOfWork() as uow:
+            auth_service = AuthService(uow)
+            comanda_service = ComandaService(uow, auth_service)
+            cardapio_service = CardapioService(uow, auth_service)
+            caixa_service = CaixaService(uow, auth_service)
+            funcionario_service = FuncionarioService(uow, auth_service)
+            pagamento_service = PagamentoService(
+                uow, auth_service, comanda_service, funcionario_service
+            )
+            # Sem `abrir_driver` explícito: em produção vale o driver ESC/POS de
+            # verdade. Quem troca isso por um driver falso é a suíte de testes.
+            impressao_service = ImpressaoService(uow, auth_service)
+
+            janela = MainWindow(
+                auth_service,
+                comanda_service,
+                cardapio_service,
+                caixa_service,
+                pagamento_service,
+                impressao_service,
+                funcionario_service,
+            )
+            janela.showMaximized()
+
+            codigo = app.exec()
+
+            # Com `journal_mode=WAL` (§8) as últimas transações ficam num arquivo
+            # `-wal` ao lado do banco. O checkpoint aqui empurra tudo para dentro
+            # do `.db` antes de o processo morrer, para o arquivo principal estar
+            # sempre completo com o programa fechado. Depois disto, copiar o
+            # `.db` é seguro. Ver `repository/backup.py`.
+            from gestor_comercial.repository.backup import consolidar_wal
+
+            consolidar_wal(uow.session)
+
+            logger.info("Encerramento normal, código %s", codigo)
+            return codigo
+    except Exception as erro:
+        logger.exception("Falha fatal fora do laço de eventos")
+        QMessageBox.critical(
+            None,
+            "Erro ao iniciar",
+            "O programa não conseguiu abrir. Nenhum dado foi perdido — o "
+            "registro técnico está em:\n\n"
+            f"{caminho_do_log()}\n\n{erro}",
         )
-        # Sem `abrir_driver` explícito: em produção vale o driver ESC/POS de
-        # verdade. Quem troca isso por um driver falso é a suíte de testes.
-        impressao_service = ImpressaoService(uow, auth_service)
-
-        janela = MainWindow(
-            auth_service,
-            comanda_service,
-            cardapio_service,
-            caixa_service,
-            pagamento_service,
-            impressao_service,
-            funcionario_service,
-        )
-        janela.showMaximized()
-
-        codigo = app.exec()
-
-        # Com `journal_mode=WAL` (§8) as últimas transações ficam num arquivo
-        # `-wal` ao lado do banco. O checkpoint aqui empurra tudo para dentro do
-        # `.db` antes de o processo morrer, para o arquivo principal estar
-        # sempre completo com o programa fechado. Depois disto, copiar o `.db`
-        # é seguro. Ver `repository/backup.py`.
-        from gestor_comercial.repository.backup import consolidar_wal
-
-        consolidar_wal(uow.session)
-
-        return codigo
+        return 1
 
 
 if __name__ == "__main__":

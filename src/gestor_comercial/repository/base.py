@@ -33,6 +33,17 @@ def _configurar_conexao_sqlite(conexao_dbapi, _registro) -> None:
     banco recém-criado (primeiro boot, e cada banco novo da suíte) já nascer em
     WAL.
 
+    **`busy_timeout=5000`** — quando uma conexão encontra o banco travado por
+    outra, o SQLite desiste **na hora** e levanta
+    `sqlite3.OperationalError: database is locked`. Não é espera curta: é zero
+    espera. Com o timeout, ela passa a tentar de novo por até 5 segundos antes
+    de desistir — e como todo bloqueio real aqui dura milissegundos (o WAL já
+    tirou leitura do caminho da escrita), na prática o erro deixa de existir. É
+    o par que faltava do WAL: um resolve leitor contra escritor, este resolve
+    escritor contra escritor — o backup do fechamento de caixa rodando enquanto
+    a última comanda ainda grava, e, no backlog, o App Mobile do Atendente.
+    Vale por conexão e não fica gravado no arquivo, igual ao `foreign_keys`.
+
     **O que NÃO é configurado aqui, de propósito: `synchronous`.** Todo guia de
     WAL sugere baixar para `NORMAL`, e é uma armadilha para este projeto:
     `NORMAL` protege contra o app morrer, mas **não** contra a energia cair no
@@ -50,6 +61,7 @@ def _configurar_conexao_sqlite(conexao_dbapi, _registro) -> None:
     cursor = conexao_dbapi.cursor()
     try:
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA busy_timeout=5000")
         # Banco em memória (a suíte usa `sqlite:///:memory:`) não tem arquivo
         # onde manter um WAL; o SQLite recusa a troca e devolve "memory". Pedir
         # assim mesmo é inofensivo, mas o `if` deixa a intenção explícita.

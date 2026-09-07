@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QMouseEvent
 
+from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.domain.enums import TipoConexaoImpressora
 from gestor_comercial.domain.impressora import COLUNAS_PADRAO, Impressora
 from gestor_comercial.services.cardapio_service import (
@@ -526,6 +527,7 @@ class _CelulaSelecionavel(QWidget):
         super().__init__(parent)
         self._tabela = tabela
 
+    @nao_deixa_escapar()
     def mousePressEvent(self, evento: QMouseEvent) -> None:  # noqa: N802 (override Qt)
         indice = self._tabela.indexAt(self.pos())
         if indice.isValid():
@@ -563,9 +565,12 @@ class _LinhaCategoria(QFrame):
 
         self._aplicar_estado()
 
+    @nao_deixa_escapar(retorno=QSize(0, 0))
+
     def sizeHint(self) -> QSize:
         return QSize(super().sizeHint().width(), 40)
 
+    @nao_deixa_escapar()
     def mousePressEvent(self, evento: QMouseEvent) -> None:  # noqa: N802 (override Qt)
         if evento.button() == Qt.MouseButton.LeftButton:
             self._marcada = not self._marcada

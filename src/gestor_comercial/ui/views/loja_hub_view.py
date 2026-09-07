@@ -13,6 +13,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.ui.widgets.flow_layout import FlowLayout
 
 # (rótulo, subtítulo, glifo do ícone)
@@ -62,6 +63,7 @@ class _CardModulo(QFrame):
         bloco_texto.addWidget(sub)
         layout.addLayout(bloco_texto, 1)
 
+    @nao_deixa_escapar()
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (override Qt)
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicado.emit()

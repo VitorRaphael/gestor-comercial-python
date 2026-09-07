@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QKeySequence, QResizeEvent, QShortcut
@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.domain.categoria import Categoria
 from gestor_comercial.domain.combo_item import ComboItem
 from gestor_comercial.domain.produto import Produto
@@ -60,7 +61,12 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 from gestor_comercial.services.imagem_service import processar_imagem_produto, remover_thumbnail
-from gestor_comercial.ui.formatacao import formatar_para_campo, formatar_reais
+from gestor_comercial.services.dinheiro import ZERO
+from gestor_comercial.ui.formatacao import (
+    formatar_para_campo,
+    formatar_reais,
+    safe_decimal,
+)
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
@@ -176,6 +182,7 @@ class CardapioView(QWidget):
             grade.addWidget(card)
         return grade
 
+    @nao_deixa_escapar(retorno=False)
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802 - override Qt
         if event.type() == QEvent.Type.FocusIn:
             if obj is self._painel_categorias.lista:
@@ -299,6 +306,7 @@ class _BarraMargem(QWidget):
         self._percentual = max(0.0, min(100.0, percentual))
         self._reposicionar()
 
+    @nao_deixa_escapar()
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (override Qt)
         super().resizeEvent(event)
         self._reposicionar()
@@ -1057,14 +1065,8 @@ class _ProdutoDialog(QDialog):
         else:
             _limpar_erro(self._campo_nome, self._erro_nome)
 
-        preco_valido = True
-        try:
-            preco = Decimal(self._campo_preco.text().strip().replace(",", "."))
-            if preco <= 0:
-                preco_valido = False
-        except InvalidOperation:
-            preco_valido = False
-        if not preco_valido:
+        preco = safe_decimal(self._campo_preco.text(), padrao=None)
+        if preco is None or preco <= 0:
             _marcar_erro(self._campo_preco, self._erro_preco, "Informe um preço válido, maior que zero.")
             foco = foco or self._campo_preco
             valido = False
@@ -1118,10 +1120,15 @@ class _ProdutoDialog(QDialog):
         self._preview_imagem.setPixmap(pixmap)
 
     def resultado(self) -> tuple[str, Decimal, Decimal, int, str | None, str | None]:
+        # Só é chamado depois de `_validar()` aprovar o preço, então o `or ZERO`
+        # é cinto de segurança e não regra: se alguém inverter a ordem um dia, o
+        # produto nasce com preço zero e visível na tela, em vez de o clique
+        # morrer sem explicação.
         nome = self._campo_nome.text().strip()
-        preco = Decimal(self._campo_preco.text().strip().replace(",", "."))
-        texto_custo = self._campo_custo.text().strip()
-        custo = Decimal(texto_custo.replace(",", ".")) if texto_custo else Decimal("0")
+        preco = safe_decimal(self._campo_preco.text(), padrao=None) or ZERO
+        # Custo em branco é legítimo (produto sem custo cadastrado ainda), e é
+        # por isso que este usa o padrão zero em vez de `None`.
+        custo = safe_decimal(self._campo_custo.text()) or ZERO
         categoria_id = self._seletor_categoria.currentData()
         descricao = self._campo_descricao.text().strip() or None
         return nome, preco, custo, categoria_id, descricao, self._imagem_path_processada

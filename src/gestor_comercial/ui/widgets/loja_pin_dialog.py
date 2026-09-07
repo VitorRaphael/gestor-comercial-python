@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.exceptions import AcessoNegadoError, NaoAutorizadoError
 from gestor_comercial.ui.theme.controller import ThemeController
@@ -69,6 +70,7 @@ class LojaPinDialog(QDialog):
             return
         self.accept()
 
+    @nao_deixa_escapar()
     def done(self, resultado: int) -> None:  # noqa: N802 - override Qt
         # Limpa o PIN digitado da memória do widget antes de descartar o
         # modal — não há motivo pra ele sobreviver no heap do Celeron.

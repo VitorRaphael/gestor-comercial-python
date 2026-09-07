@@ -9,7 +9,7 @@ aqui só se mostra o erro que o service levantar.
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -42,7 +42,7 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 from gestor_comercial.services.impressao_service import ImpressaoService
-from gestor_comercial.ui.formatacao import formatar_reais
+from gestor_comercial.ui.formatacao import formatar_reais, safe_decimal
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.layout_utils import limpar_layout
@@ -52,6 +52,8 @@ from gestor_comercial.ui.widgets.estilo import repolir
 from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
 
 _COLUNAS_MOVIMENTOS = ["Quando", "Tipo", "Descrição", "Valor"]
+
+_ERRO_VALOR = "Valor inválido. Informe um valor em reais, como 50,00."
 
 _ROTULOS_TIPO_MOVIMENTO = {
     TipoMovimento.SANGRIA: "Sangria",
@@ -545,10 +547,9 @@ class CaixaView(QWidget):
         modal = _ValorDialog("Abrir caixa", "Valor de abertura", self)
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-        try:
-            valor = modal.valor()
-        except InvalidOperation:
-            self._label_erro.setText("Valor inválido. Informe um valor em reais, como 50.00.")
+        valor = modal.valor()
+        if valor is None:
+            self._label_erro.setText(_ERRO_VALOR)
             return
 
         self._label_erro.setText("")
@@ -565,10 +566,9 @@ class CaixaView(QWidget):
         modal = _FecharCaixaDialog(self)
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-        try:
-            valor_contado_dinheiro, valor_contado_maquininha, observacao = modal.resultado()
-        except InvalidOperation:
-            self._label_erro.setText("Valor inválido. Informe um valor em reais, como 50.00.")
+        valor_contado_dinheiro, valor_contado_maquininha, observacao = modal.resultado()
+        if valor_contado_dinheiro is None or valor_contado_maquininha is None:
+            self._label_erro.setText(_ERRO_VALOR)
             return
 
         self._label_erro.setText("")
@@ -608,10 +608,9 @@ class CaixaView(QWidget):
         modal = _MovimentoDialog(_ROTULOS_TIPO_MOVIMENTO[tipo], self)
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-        try:
-            valor, descricao = modal.resultado()
-        except InvalidOperation:
-            self._label_erro.setText("Valor inválido. Informe um valor em reais, como 50.00.")
+        valor, descricao = modal.resultado()
+        if valor is None:
+            self._label_erro.setText(_ERRO_VALOR)
             return
 
         self._label_erro.setText("")
@@ -645,8 +644,9 @@ class _ValorDialog(QDialog):
         botoes.rejected.connect(self.reject)
         layout.addWidget(botoes)
 
-    def valor(self) -> Decimal:
-        return Decimal(self._campo_valor.text().strip().replace(",", "."))
+    def valor(self) -> Decimal | None:
+        """`None` quando o campo não é um valor legível — ver `safe_decimal`."""
+        return safe_decimal(self._campo_valor.text(), padrao=None)
 
 
 class _MovimentoDialog(QDialog):
@@ -675,8 +675,8 @@ class _MovimentoDialog(QDialog):
         botoes.rejected.connect(self.reject)
         layout.addWidget(botoes)
 
-    def resultado(self) -> tuple[Decimal, str | None]:
-        valor = Decimal(self._campo_valor.text().strip().replace(",", "."))
+    def resultado(self) -> tuple[Decimal | None, str | None]:
+        valor = safe_decimal(self._campo_valor.text(), padrao=None)
         descricao = self._campo_descricao.text().strip() or None
         return valor, descricao
 
@@ -711,12 +711,15 @@ class _FecharCaixaDialog(QDialog):
         botoes.rejected.connect(self.reject)
         layout.addWidget(botoes)
 
-    def resultado(self) -> tuple[Decimal, Decimal, str | None]:
-        valor_contado_dinheiro = Decimal(
-            self._campo_valor_contado_dinheiro.text().strip().replace(",", ".")
+    def resultado(self) -> tuple[Decimal | None, Decimal | None, str | None]:
+        # `padrao=None` nos dois: num fechamento de caixa, ler "não consegui
+        # entender o que ele contou" como "ele contou zero" inventaria uma
+        # diferença de caixa do tamanho do turno.
+        valor_contado_dinheiro = safe_decimal(
+            self._campo_valor_contado_dinheiro.text(), padrao=None
         )
-        valor_contado_maquininha = Decimal(
-            self._campo_valor_contado_maquininha.text().strip().replace(",", ".")
+        valor_contado_maquininha = safe_decimal(
+            self._campo_valor_contado_maquininha.text(), padrao=None
         )
         observacao = self._campo_observacao.text().strip() or None
         return valor_contado_dinheiro, valor_contado_maquininha, observacao

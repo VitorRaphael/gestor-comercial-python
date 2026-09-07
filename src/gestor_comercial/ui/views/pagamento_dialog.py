@@ -8,8 +8,6 @@ o resumo (total/pago/restante/troco) é atualizado na tela.
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
-
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -29,7 +27,7 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 from gestor_comercial.services.pagamento_service import PagamentoService, ResumoPagamento
-from gestor_comercial.ui.formatacao import formatar_reais
+from gestor_comercial.ui.formatacao import formatar_reais, safe_decimal
 from gestor_comercial.ui.theme.controller import ThemeController
 
 _ROTULOS_FORMA = {
@@ -140,10 +138,11 @@ class PagamentoDialog(QDialog):
         self._label_erro.setText("")
 
         forma = self._combo_forma.currentData()
-        try:
-            valor = Decimal(self._campo_valor.text().strip().replace(",", "."))
-        except InvalidOperation:
-            self._label_erro.setText("Valor inválido. Informe um valor em reais, como 50.00.")
+        # `padrao=None`: aqui um campo ilegível lido como zero registraria um
+        # pagamento de R$ 0,00 e daria a conta por paga.
+        valor = safe_decimal(self._campo_valor.text(), padrao=None)
+        if valor is None:
+            self._label_erro.setText("Valor inválido. Informe um valor em reais, como 50,00.")
             return
 
         pin_gerente = None

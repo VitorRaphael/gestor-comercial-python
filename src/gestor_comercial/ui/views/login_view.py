@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.domain.usuario import Usuario
 from gestor_comercial.services.auth_service import AuthService, PIN_MAX_DIGITOS
 from gestor_comercial.services.exceptions import NaoAutorizadoError
@@ -80,6 +81,7 @@ class _LogoIsometrico(QWidget):
         self._escura = QColor(escura)
         self.update()
 
+    @nao_deixa_escapar()
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -548,6 +550,7 @@ class LoginView(QWidget):
     # Teclado físico
     # ------------------------------------------------------------------
 
+    @nao_deixa_escapar()
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (override Qt)
         super().showEvent(event)
         # Chamado toda vez que esta tela volta a ficar visível (abertura do
@@ -555,6 +558,7 @@ class LoginView(QWidget):
         # um clique manual antes.
         self.setFocus()
 
+    @nao_deixa_escapar()
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 (override Qt)
         texto = event.text()
         if texto.isdigit():
