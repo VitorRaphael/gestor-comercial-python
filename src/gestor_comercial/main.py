@@ -39,6 +39,14 @@ def _aplicar_migrations() -> None:
     from alembic.config import Config
 
     config = Config(str(_RAIZ_PROJETO / "alembic.ini"))
+    # O `alembic.ini` manda o progresso das migrations para o `stderr`, e o
+    # espelho do escudo transformaria cada uma daquelas linhas informativas num
+    # ERROR no log do app — 17 delas num boot saudável, afogando qualquer erro
+    # de verdade. Esta bandeira pede a `migrations/env.py` que cale o progresso
+    # **só quando quem chama é o boot**; pela linha de comando o Vitor continua
+    # vendo tudo. Se a migration falhar, o `except` de `main()` registra a
+    # exceção inteira, que é a informação que importa.
+    config.attributes["boot_do_app"] = True
     command.upgrade(config, "head")
 
 

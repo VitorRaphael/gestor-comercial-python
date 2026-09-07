@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -279,3 +280,86 @@ def test_instalar_escudo_nao_empilha_desvios(tmp_path, escudo_isolado):
 
     assert sys.stderr is primeiro
     assert not isinstance(primeiro._original, resilience._DesvioDeStderr)
+
+
+# ----------------------------------------------------------------------
+# A caixa-preta sobrevive ao boot inteiro
+# ----------------------------------------------------------------------
+
+
+def test_migrations_nao_desligam_o_log(tmp_path, escudo_isolado, monkeypatch):
+    """O `fileConfig` do Alembic não pode calar o logger do app.
+
+    `main.py` roda `alembic upgrade` em todo boot, DEPOIS de `instalar_escudo()`.
+    O `logging.config.fileConfig` do Python vem com `disable_existing_loggers=True`
+    por padrão: ele marca `disabled = True` em todo logger já existente que não
+    esteja nomeado no `.ini`. Com isso, o arquivo de log ficava com a linha "Boot
+    do Gestor Comercial" e **mais nada, pelo turno inteiro** — o silêncio exato
+    que esta etapa existe para acabar.
+
+    Medido em 2026-09-07, antes da correção em `migrations/env.py`:
+    `disabled` era `False` antes do upgrade e `True` depois.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    import gestor_comercial
+
+    raiz = Path(gestor_comercial.__file__).resolve().parents[2]
+    banco = tmp_path / "boot.db"
+    monkeypatch.setenv("GESTOR_COMERCIAL_DB", str(banco))
+
+    destino = tmp_path / "logs" / "gestor.log"
+    logger = resilience.configurar_log(destino)
+    logger.info("Boot do Gestor Comercial")
+
+    config = Config(str(raiz / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{banco}")
+    command.upgrade(config, "head")
+
+    assert logging.getLogger(resilience.NOME_LOGGER).disabled is False, (
+        "o `fileConfig` do Alembic desligou o logger do app — o log do PDV "
+        "morreria logo depois do boot (ver `migrations/env.py`)"
+    )
+
+    logger.error("erro depois das migrations")
+    conteudo = destino.read_text(encoding="utf-8")
+    assert "Boot do Gestor Comercial" in conteudo
+    assert "erro depois das migrations" in conteudo
+
+
+def test_boot_saudavel_nao_enche_o_log_de_erro_falso(tmp_path, escudo_isolado, monkeypatch):
+    """Um boot sem problema nenhum tem que deixar o log quase vazio.
+
+    O `alembic.ini` manda o progresso das migrations para o `stderr`, e o espelho
+    do escudo registrava cada uma daquelas 17 linhas informativas como ERROR. Num
+    `.exe` recém-instalado isso era o log inteiro — e quem fosse procurar um erro
+    de verdade acharia 17 que não existem. Log que mente é pior que log nenhum,
+    porque ensina a ignorá-lo.
+
+    A correção está em `main._aplicar_migrations` (bandeira `boot_do_app`) e em
+    `migrations/env.py`; pela linha de comando o progresso continua aparecendo.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    import gestor_comercial
+
+    raiz = Path(gestor_comercial.__file__).resolve().parents[2]
+    banco = tmp_path / "boot.db"
+    monkeypatch.setenv("GESTOR_COMERCIAL_DB", str(banco))
+
+    destino = tmp_path / "logs" / "gestor.log"
+    logger = resilience.instalar_escudo(destino, mostrar_modal=lambda _c: None)
+    logger.info("Boot do Gestor Comercial")
+
+    config = Config(str(raiz / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{banco}")
+    config.attributes["boot_do_app"] = True
+    command.upgrade(config, "head")
+    sys.stderr.flush()
+
+    conteudo = destino.read_text(encoding="utf-8") if destino.exists() else ""
+    assert "ERROR" not in conteudo, (
+        "boot saudável deixou linha de ERROR no log:\n" + conteudo
+    )

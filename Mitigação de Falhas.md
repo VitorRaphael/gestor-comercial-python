@@ -34,14 +34,18 @@ caos verdes.
 | 4 — SQLite: `busy_timeout` | ✅ concluída |
 | 5 — `safe_decimal` | ✅ concluída |
 
-Suíte: **883 passando** (baseline 801 + 82 novos), 0 falhas.
+Suíte: **885 passando** (baseline 801 + 84 novos), 0 falhas.
 
 ```
 $ .venv/Scripts/python.exe -m pytest -q          # baseline, antes de tocar em nada
 801 passed in 28.01s
 $ .venv/Scripts/python.exe -m pytest -q          # com as 7 fases fechadas
-883 passed in 28.84s
+885 passed in 31.96s
 ```
+
+E a prova que só o programa rodando de verdade podia dar (§7): dois boots
+completos, com migrations, seed, services e janela — o primeiro achou dois
+defeitos na própria blindagem.
 
 | Item | Estado |
 |---|---|
@@ -518,7 +522,76 @@ coisa que um PDV fechado.
 
 ---
 
-## 5. Restrições respeitadas
+## 5. A prova final: o app rodando de verdade
+
+Com as 7 fases fechadas e a suíte verde, rodei o `main()` inteiro num banco
+descartável — migrations, seed, services, `MainWindow`, teardown — para conferir
+a única coisa que teste nenhum tinha conferido: **o que fica escrito no log
+depois de um boot de verdade.**
+
+Achou dois defeitos na própria blindagem. Nenhum dos dois apareceria em teste de
+unidade, porque os dois dependem de `main.py` rodar inteiro, na ordem real.
+
+### 5.1 ✅ A caixa-preta morria logo depois de nascer
+
+O primeiro boot deixou **uma linha** no log: `Boot do Gestor Comercial`. Nada
+mais — nem o `Encerramento normal` que vem logo depois. Medindo:
+
+```
+$ ... upgrade head
+antes das migrations -> disabled: False
+DEPOIS das migrations -> disabled: True
+```
+
+`main.py` roda `alembic upgrade` em todo boot, e o `env.py` do Alembic chama
+`logging.config.fileConfig`, que vem com **`disable_existing_loggers=True` por
+padrão**: ele marca `disabled = True` em todo logger já existente que não esteja
+nomeado no `.ini` — inclusive o nosso, ligado poucas linhas antes.
+
+Ou seja: a Fase 1 inteira, que a auditoria elegeu como o item nº 1 da etapa,
+estava **morta a partir do segundo segundo de operação**. Toda a evidência que
+ela existe para produzir — o `paintEvent` contido, o cupom que não saiu, a
+exceção do clique — nunca chegaria ao disco.
+
+Corrigido em `migrations/env.py` com `disable_existing_loggers=False`, e trancado
+por `test_migrations_nao_desligam_o_log`.
+
+### 5.2 ✅ Um boot saudável escrevia 17 erros que não existiam
+
+Com o log vivo de novo, o boot seguinte gravou isto:
+
+```
+INFO     Boot do Gestor Comercial
+ERROR    [stderr] INFO  [alembic.runtime.migration] Running upgrade  -> 1eb3a1232a49, schema inicial V1
+ERROR    [stderr] INFO  [alembic.runtime.migration] Running upgrade 1eb3a1232a49 -> a6108ce87d55, campos de auditoria...
+... (17 linhas)
+INFO     Encerramento normal, código 0
+```
+
+O `alembic.ini` manda o progresso das migrations para o `stderr`, e o espelho do
+escudo — que existe justamente para nada se perder — registrava cada linha
+informativa como **ERROR**. Num `.exe` recém-instalado, isso era o log inteiro.
+
+Não é cosmético. Log que mente é pior que log nenhum: quem abrisse o arquivo
+procurando o defeito de ontem acharia 17 erros que nunca aconteceram, e
+aprenderia a ignorar o arquivo. A caixa-preta perde a serventia no dia em que
+deixa de ser lida.
+
+Corrigido com uma bandeira `boot_do_app` que `main._aplicar_migrations` passa ao
+Alembic: no boot do PDV o progresso fica em silêncio, pela linha de comando
+continua aparecendo inteiro. Trancado por
+`test_boot_saudavel_nao_enche_o_log_de_erro_falso`.
+
+**O log de um boot saudável, agora:**
+
+```
+2026-09-07 11:22:07 INFO     Boot do Gestor Comercial
+2026-09-07 11:22:08 INFO     Encerramento normal, código 0
+```
+
+---
+
+## 6. Restrições respeitadas
 
 - **Só stdlib**: `sys`, `logging`, `traceback`, `sqlite3`, `decimal`, `pathlib`.
   Sem Sentry, sem watchdog, sem daemon externo.
@@ -530,7 +603,7 @@ coisa que um PDV fechado.
 
 ---
 
-## 6. Registro de decisões
+## 7. Registro de decisões
 
 | Data | Decisão | Porquê |
 |---|---|---|
@@ -549,3 +622,5 @@ coisa que um PDV fechado.
 | 2026-09-07 | O cupom guardado tem **commit próprio** | Dos cinco caminhos de impressão só um commitava. O registro de que algo não saiu no papel não pode depender de qual botão foi apertado |
 | 2026-09-07 | Painel da fila na tela de Impressoras (fora do roteiro) | Sem onde reimprimir, o aviso "o cupom ficou salvo na fila" seria promessa vazia |
 | 2026-09-07 | Trava de reentrância na espera da UI | ✅ Medido: evento postado por código atravessa o `ExcludeUserInputEvents`. Sem a trava, a pilha de esperas aninhadas cresceria sem fim |
+| 2026-09-07 | `disable_existing_loggers=False` no `env.py` | ✅ §5.1 — o padrão do Python desligava a caixa-preta em todo boot, logo depois de ela ser ligada. A Fase 1 inteira estava morta a partir do 2º segundo |
+| 2026-09-07 | Bandeira `boot_do_app` silencia o progresso do Alembic | ✅ §5.2 — 17 linhas informativas viravam ERROR num boot saudável. Log que mente ensina a ser ignorado, e aí não serve para nada |

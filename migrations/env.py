@@ -11,8 +11,30 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
+#
+# `disable_existing_loggers=False` NÃO é enfeite, e o padrão do Python (`True`)
+# é um defeito grave neste projeto. `main.py` roda `alembic upgrade` em TODO
+# boot, e este `fileConfig` acontece depois de `instalar_escudo()` já ter ligado
+# a caixa-preta. Com o padrão, o `fileConfig` marca `disabled = True` em todo
+# logger que já existia e não esteja nomeado no `alembic.ini` — inclusive o
+# `gestor_comercial`. Resultado: o arquivo de log ficava com a linha "Boot do
+# Gestor Comercial" e **mais nada, pelo turno inteiro**. Exatamente o silêncio
+# que a etapa de Mitigação de Falhas existe para acabar.
+#
+# Medido em 2026-09-07: `disabled` era `False` antes do upgrade e `True` depois.
+# Trancado por `tests/unit/test_resiliencia.py::test_migrations_nao_desligam_o_log`.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
+
+# `boot_do_app` é posto por `main._aplicar_migrations`. Silencia o progresso das
+# migrations quando quem está rodando é o PDV abrindo — aquelas linhas vão para o
+# `stderr`, e o espelho do escudo as registraria como ERROR num boot saudável.
+# Pela linha de comando (`alembic upgrade`) a bandeira não existe e o progresso
+# continua aparecendo normalmente.
+if config.attributes.get("boot_do_app"):
+    import logging
+
+    logging.getLogger("alembic").setLevel(logging.WARNING)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
