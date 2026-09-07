@@ -21,8 +21,8 @@
 
 ## 0. Onde estamos — 2026-09-07
 
-Auditoria **concluída**. Fases **0, 1, 2, 2b, 4 e 5 fechadas**. Falta a **Fase 3**
-(fila de contingência da impressora + saída da thread da UI).
+Auditoria e implementação **concluídas**. As 7 fases fechadas, os 6 testes de
+caos verdes.
 
 | Fase | Estado |
 |---|---|
@@ -30,17 +30,17 @@ Auditoria **concluída**. Fases **0, 1, 2, 2b, 4 e 5 fechadas**. Falta a **Fase 
 | 1 — Caixa-preta: log rotativo | ✅ concluída |
 | 2 — Escudo global | ✅ concluída |
 | **2b — Blindagem dos overrides virtuais** | ✅ concluída — *não estava no plano; o §1.6 obrigou* |
-| 3 — Impressora: fila + thread | ⬜ **pendente** |
+| 3 — Impressora: fila + thread | ✅ concluída |
 | 4 — SQLite: `busy_timeout` | ✅ concluída |
 | 5 — `safe_decimal` | ✅ concluída |
 
-Suíte: **854 passando** (baseline 801 + 53 novos), 0 falhas.
+Suíte: **883 passando** (baseline 801 + 82 novos), 0 falhas.
 
 ```
 $ .venv/Scripts/python.exe -m pytest -q          # baseline, antes de tocar em nada
 801 passed in 28.01s
-$ .venv/Scripts/python.exe -m pytest -q          # depois das fases 1, 2, 2b, 4 e 5
-854 passed in 27.70s
+$ .venv/Scripts/python.exe -m pytest -q          # com as 7 fases fechadas
+883 passed in 28.84s
 ```
 
 | Item | Estado |
@@ -61,7 +61,7 @@ reconstruirmos nada por cima.
 | # | Pilar | Situação | Onde |
 |---|---|---|---|
 | 1 | Escudo global anti-crash | ❌ **Não existia** — zero `sys.excepthook`, zero `logging` no projeto inteiro → ✅ Fases 1, 2 e 2b | `core/resilience.py` |
-| 2 | Isolamento da impressora | 🟡 **Parcial** — fronteira, timeouts e `ErroDeImpressao` prontos; **não há fila de contingência** | `hardware/impressora_escpos.py`, `services/impressao_service.py` |
+| 2 | Isolamento da impressora | 🟡 Parcial — fronteira, timeouts e `ErroDeImpressao` prontos; faltava a fila de contingência → ✅ Fase 3 | `domain/fila_impressao.py`, `services/impressao_service.py` |
 | 3 | Blindagem do SQLite | 🟡 Parcial — `WAL` e `foreign_keys` prontos; faltava `busy_timeout` → ✅ Fase 4 | `repository/base.py:16-59` |
 | 3b | Backup atômico | ✅ **Pronto, e melhor que o pedido** — `VACUUM INTO` + rotação | `repository/backup.py` |
 | 4 | Sanitização de entradas | 🟡 Parcial — as **9** conversões estavam guardadas, mas por convenção repetida e não por função única → ✅ Fase 5 | `ui/formatacao.py` |
@@ -387,7 +387,7 @@ minha varredura manual tinha perdido — o `done()` dos dois diálogos de PIN.
 
 ---
 
-### Fase 3 — Impressora: fila de contingência + saída da thread da UI  `[ ]` ⬅ *pendente*
+### Fase 3 — Impressora: fila de contingência + saída da thread da UI  `[x]`
 
 1. **Tabela** `fila_impressao_pendente` (migration Alembic), guardando o
    `Documento` já montado (JSON dos `BlocoTexto`), a impressora de destino, o
@@ -402,8 +402,45 @@ minha varredura manual tinha perdido — o `done()` dos dois diálogos de PIN.
    §1.4. Nenhuma `Session` cruza fronteira de thread — o que atravessa é
    `list[BlocoTexto]`, imutável.
 
-**Pronto quando:** com a impressora apontada para uma COM inexistente, a UI não
-congela, a venda conclui e a linha aparece na fila.
+✅ **Feito.** O corte do §1.4 funcionou como previsto, e a parte mais importante
+é o que **não** precisou mudar: `hardware/impressora_escpos.py` sempre leu a
+impressora por `getattr`, com a docstring dizendo que isso "permite testar com um
+objeto qualquer que tenha os campos certos". O desacoplamento já estava pronto
+antes de existir motivo para usá-lo — bastou criar o retrato
+(`ParametrosImpressora`) e passá-lo no lugar da entidade.
+
+O que ficou:
+
+- **`fila_impressao_pendente`** (migration `e5a1c9b73d24`) guarda o **documento
+  montado** em JSON, não o id da comanda. Três motivos na docstring da entidade;
+  o principal é que reimprimir tem que sair igual ao que teria saído na hora, e
+  remontar semanas depois pegaria preço novo e item cancelado depois. Teto de 200
+  cupons, descartando os mais antigos: a fila é rede de contingência, não
+  histórico, e o alvo é um Celeron.
+- **A thread** roda só a conversa com o cabo. O que atravessa é
+  `ParametrosImpressora` + `list[BlocoTexto]`, os dois `frozen=True`, sem uma
+  referência de ORM. Um teste próprio tranca isso
+  (`test_o_que_atravessa_para_a_thread_nao_tem_vinculo_com_o_banco`), porque é a
+  garantia mais fácil de perder numa refatoração distraída.
+- **A espera** (`aguardar_repintando`) é injetada pela UI — `services/` não
+  importa Qt. Ela existe por um motivo específico do Windows: thread principal
+  parada em `join()` faz o sistema desenhar "Não Está Respondendo" por cima do
+  PDV, e no balcão isso é indistinguível de travamento.
+- **O painel na tela de Impressoras**, com Reimprimir e Descartar. Não estava no
+  roteiro, mas sem ele o aviso "o cupom ficou salvo na fila para reimpressão"
+  seria promessa vazia — não haveria onde reimprimir. Some quando a fila está
+  vazia, que é o dia normal.
+
+Duas emendas que a implementação obrigou:
+
+1. **O commit da fila é separado.** Dos cinco caminhos de impressão só
+   `imprimir_comanda` commitava; o cupom guardado não pode depender de qual botão
+   o operador apertou. Isso mudou a contagem de commits de um teste existente,
+   que foi atualizado com o porquê.
+2. **Trava de reentrância na espera.** `ExcludeUserInputEvents` segura a entrada
+   do operador, mas foi **medido** que evento postado por código atravessa a
+   exclusão. Da segunda espera aninhada em diante o bombeamento é desligado, para
+   a pilha não crescer sem fim.
 
 ---
 
@@ -463,12 +500,12 @@ digita estão em [`tests/unit/test_safe_decimal.py`](tests/unit/test_safe_decima
 ## 4. Testes de caos
 
 Os três do roteiro, mais três que a auditoria mostrou serem necessários.
-**5 de 6 verdes**; o C2 depende da Fase 3.
+**6 de 6 verdes.**
 
 | # | Cenário | Esperado | Estado |
 |---|---|---|---|
 | C1 | `1 / 0` dentro do clique de um botão | App vivo, linha no log, 1 modal — **e o clique seguinte ainda funciona** | ✅ |
-| C2 | Imprimir com a porta COM inexistente | UI **não congela**, venda conclui, cupom na fila | ⬜ Fase 3 |
+| C2 | Driver pendurado numa porta que não responde | Chamada **volta**, venda conclui, cupom na fila | ✅ |
 | C3 | Letras em campo de valor | Campo marcado, sem exceção | ✅ |
 | C4 | Mesmo defeito disparando 200× | 1 modal (anti-repique), 200 linhas de log | ✅ |
 | C5 | Exceção no boot, antes do `app.exec()` | Modal de erro **em vez de** janela que nunca abre | ✅ |
@@ -508,3 +545,7 @@ coisa que um PDV fechado.
 | 2026-09-07 | O espelho do `stderr` **espelha**, não substitui | Substituir obrigaria a escolher entre ver o traceback no terminal em dev e ter evidência em disco no `.exe` |
 | 2026-09-07 | `safe_decimal` ganhou `padrao=None` para campo obrigatório | Ler "não entendi o que ele contou" como "ele contou zero" inventaria uma diferença de caixa do tamanho do turno |
 | 2026-09-07 | Travas por teste em vez de convenção (overrides e conversão monetária) | ✅ As duas pagaram na primeira execução: acharam 2 overrides e 1 conversão que a varredura manual perdeu |
+| 2026-09-07 | A fila guarda o **documento montado**, não o id da comanda | Reimprimir tem que sair igual ao que teria saído na hora; e fechamento de caixa e teste de impressora não têm de onde ser remontados |
+| 2026-09-07 | O cupom guardado tem **commit próprio** | Dos cinco caminhos de impressão só um commitava. O registro de que algo não saiu no papel não pode depender de qual botão foi apertado |
+| 2026-09-07 | Painel da fila na tela de Impressoras (fora do roteiro) | Sem onde reimprimir, o aviso "o cupom ficou salvo na fila" seria promessa vazia |
+| 2026-09-07 | Trava de reentrância na espera da UI | ✅ Medido: evento postado por código atravessa o `ExcludeUserInputEvents`. Sem a trava, a pilha de esperas aninhadas cresceria sem fim |

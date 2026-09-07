@@ -9,6 +9,7 @@ from gestor_comercial.repository.caixa_repository import CaixaRepository
 from gestor_comercial.repository.categoria_repository import CategoriaRepository
 from gestor_comercial.repository.combo_item_repository import ComboItemRepository
 from gestor_comercial.repository.comanda_repository import ComandaRepository
+from gestor_comercial.repository.fila_impressao_repository import FilaImpressaoRepository
 from gestor_comercial.repository.funcionario_repository import FuncionarioRepository
 from gestor_comercial.repository.impressora_repository import ImpressoraRepository
 from gestor_comercial.repository.item_comanda_repository import ItemComandaRepository
@@ -51,6 +52,7 @@ class UnitOfWork:
         self.movimentos = MovimentoCaixaRepository(self.session)
         self.quitacoes = QuitacaoConsumoRepository(self.session)
         self.impressoras = ImpressoraRepository(self.session)
+        self.fila_impressao = FilaImpressaoRepository(self.session)
         self.loja_config = LojaConfigRepository(self.session)
 
     def commit(self) -> None:

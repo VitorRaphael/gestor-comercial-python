@@ -100,6 +100,7 @@ def main() -> int:
     from gestor_comercial.services.impressao_service import ImpressaoService
     from gestor_comercial.services.pagamento_service import PagamentoService
     from gestor_comercial.ui.main_window import MainWindow
+    from gestor_comercial.ui.widgets.aviso_impressao import aguardar_repintando
 
     # Um único UnitOfWork por processo (ver docstring de UnitOfWork): app
     # desktop de usuário único, sem servidor, então a Session dele serve de
@@ -127,7 +128,14 @@ def main() -> int:
             )
             # Sem `abrir_driver` explícito: em produção vale o driver ESC/POS de
             # verdade. Quem troca isso por um driver falso é a suíte de testes.
-            impressao_service = ImpressaoService(uow, auth_service)
+            #
+            # `aguardar` é o que faz a impressão não congelar a tela (Fase 3 de
+            # `Mitigação de Falhas.md`): a conversa com o cabo roda numa thread e
+            # esta espera mantém a janela repintando, sem aceitar clique novo. O
+            # service não importa Qt — a escolha é injetada aqui.
+            impressao_service = ImpressaoService(
+                uow, auth_service, aguardar=aguardar_repintando
+            )
 
             janela = MainWindow(
                 auth_service,

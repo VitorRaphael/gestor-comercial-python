@@ -29,15 +29,18 @@ dinheiro se estiverem erradas:
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
+from gestor_comercial.core.resilience import logger_do_app
 from gestor_comercial.domain.caixa import Caixa
 from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.enums import FormaPagamento, StatusCaixa
+from gestor_comercial.domain.fila_impressao import ItemFilaImpressao
 from gestor_comercial.domain.impressora import Impressora
 from gestor_comercial.domain.item_comanda import ItemComanda
 from gestor_comercial.hardware.impressora_escpos import (
@@ -45,6 +48,9 @@ from gestor_comercial.hardware.impressora_escpos import (
     Documento,
     DriverImpressora,
     ErroDeImpressao,
+    ParametrosImpressora,
+    documento_de_json,
+    documento_para_json,
 )
 from gestor_comercial.hardware.impressora_escpos import abrir_driver as abrir_driver_escpos
 from gestor_comercial.repository.unit_of_work import UnitOfWork
@@ -70,6 +76,21 @@ AbridorDeDriver = Callable[..., AbstractContextManager[DriverImpressora]]
 # Nome do grupo cujos itens não têm para onde ir. Aparece na tela do operador
 # junto com o motivo, para ele saber qual categoria configurar.
 GRUPO_SEM_IMPRESSORA = "SEM IMPRESSORA DEFINIDA"
+
+# Teto de espera da thread de impressão, com folga sobre os 3 s do driver.
+# A folga é proposital: no caso normal quem responde primeiro é a mensagem
+# específica do `hardware/` ("sem papel", "cabo solto"), que diz ao operador o
+# que fazer. Este teto é o último recurso, para o driver que não devolve nunca.
+TEMPO_MAXIMO_DE_IMPRESSAO = 6.0
+
+# Como a thread de impressão é esperada. Recebe a thread e o teto em segundos.
+EsperaDeThread = Callable[[threading.Thread, float], None]
+
+
+def _aguardar_simples(thread: threading.Thread, teto_s: float) -> None:
+    """Espera bloqueante — o padrão para a suíte e para uso sem interface."""
+    thread.join(teto_s)
+
 
 # Rótulos escritos por extenso e acentuados: o cupom é lido pelo cliente, não
 # pelo programador. Um `.value.capitalize()` daria "Consumo_interno".
@@ -119,9 +140,16 @@ class ImpressaoService:
         uow: UnitOfWork,
         auth: AuthService,
         abrir_driver: AbridorDeDriver = abrir_driver_escpos,
+        aguardar: EsperaDeThread = _aguardar_simples,
     ) -> None:
         self.uow = uow
         self.auth = auth
+        # `aguardar` é como a thread de impressão é esperada (Fase 3). O padrão
+        # é `join()` puro, que serve para a suíte e para qualquer uso sem Qt; a
+        # UI injeta uma espera que mantém a tela repintando, para o operador
+        # nunca ver a janela branca de "Não Está Respondendo". A escolha mora
+        # aqui, e não dentro do service, porque `services/` não importa Qt.
+        self._aguardar = aguardar
         # `abrir_driver` injetável é a costura de teste: a suíte passa um driver
         # falso e exercita todo o roteamento sem impressora, sem escpos e sem
         # arquivo em disco.
@@ -195,7 +223,7 @@ class ImpressaoService:
             return self._sem_impressora_padrao("o recibo do cliente", len(itens))
 
         documento = self._documento_recibo(comanda, itens, padrao, datetime.now())
-        return self._enviar(padrao, documento, len(itens))
+        return self._enviar(padrao, documento, len(itens), "Recibo do cliente")
 
     # ------------------------------------------------------------------
     # Pré-conta (fechamento para conferência)
@@ -219,7 +247,7 @@ class ImpressaoService:
             return self._sem_impressora_padrao("a pré-conta", len(itens))
 
         documento = self._documento_pre_conta(comanda, itens, padrao, datetime.now())
-        return self._enviar(padrao, documento, len(itens))
+        return self._enviar(padrao, documento, len(itens), "Pré-conta")
 
     # ------------------------------------------------------------------
     # Fechamento de caixa
@@ -243,7 +271,7 @@ class ImpressaoService:
         documento = self._documento_fechamento(
             caixa, resumo, resumo_vendas, resumo_cancelamentos, padrao, datetime.now()
         )
-        return self._enviar(padrao, documento, 0)
+        return self._enviar(padrao, documento, 0, "Fechamento de caixa")
 
     # ------------------------------------------------------------------
     # Teste de impressora
@@ -259,7 +287,7 @@ class ImpressaoService:
         # Impressora desativada não é barrada aqui de propósito: o teste existe
         # justamente para o gerente conferir o cabo antes de reativá-la.
         documento = self._documento_teste(impressora, datetime.now())
-        return self._enviar(impressora, documento, 0)
+        return self._enviar(impressora, documento, 0, "Teste de impressora")
 
     # ------------------------------------------------------------------
     # Roteamento (porte de RoteamentoImpressaoService.rotear)
@@ -293,7 +321,14 @@ class ImpressaoService:
                 continue
 
             documento = self._documento_producao(comanda, grupo, agora, segunda_via)
-            resultados.append(self._enviar(grupo.impressora, documento, len(grupo.itens)))
+            resultados.append(
+                self._enviar(
+                    grupo.impressora,
+                    documento,
+                    len(grupo.itens),
+                    f"Comanda {self._destino_da_comanda(comanda)}",
+                )
+            )
 
         return resultados
 
@@ -362,32 +397,163 @@ class ImpressaoService:
     # ------------------------------------------------------------------
 
     def _enviar(
-        self, impressora: Impressora, documento: Documento, quantidade_itens: int
+        self,
+        impressora: Impressora,
+        documento: Documento,
+        quantidade_itens: int,
+        descricao: str = "Cupom",
     ) -> ResultadoImpressao:
-        """Abre o driver, imprime e transforma qualquer falha em resultado.
+        """Manda o cupom pro papel e transforma qualquer falha em resultado.
 
-        O timeout curto (3 s) é o default de `abrir_driver`: a impressão roda na
-        thread da UI, então nada aqui pode ficar pendurado esperando um IP que
-        não responde. Chamar com um único argumento também é o que permite ao
-        teste injetar um driver falso de assinatura simples.
+        Fronteira única com o hardware, e por isso o lugar certo para as duas
+        garantias da Fase 3: **a UI não congela** e **o cupom não se perde**.
+
+        A conversa com o periférico roda numa thread (`_falar_com_o_periferico`),
+        e o que falhou é guardado em `fila_impressao_pendente` para o operador
+        reimprimir depois. Nada disso muda o contrato de quem chama: continua
+        devolvendo um `ResultadoImpressao` síncrono, e continua sem levantar.
+        """
+        erro = self._falar_com_o_periferico(impressora, documento)
+        if erro is None:
+            return ResultadoImpressao(impressora.nome, quantidade_itens, True)
+
+        # O cupom não sai no papel, mas não some: fica na fila. É a metade que
+        # faltava do RNF de §2 — antes disto, recuperar o pedido dependia de o
+        # operador achar a comanda e clicar "2ª via" à mão, no meio do pico.
+        self._guardar_na_fila(impressora, documento, descricao, erro)
+        return ResultadoImpressao(impressora.nome, quantidade_itens, False, erro)
+
+    def _falar_com_o_periferico(
+        self, impressora: Impressora, documento: Documento
+    ) -> str | None:
+        """Abre o driver e imprime **fora da thread da UI**. Devolve o erro, ou `None`.
+
+        Aqui mora a resolução do conflito registrado em `Mitigação de Falhas.md`
+        §1.4. A Fase 4 da remasterização proibiu, por escrito, mandar a impressão
+        para outra thread: o app inteiro vive sobre um único `UnitOfWork`, e
+        `Session` não é thread-safe — trocaríamos 3 segundos de tela congelada
+        por corrupção silenciosa do banco do food truck. A proibição continua
+        valendo na íntegra.
+
+        O que atravessa para a thread não é a impressão inteira: é só a metade
+        que fala com o cabo. Montar o documento (que lê comanda, itens, produtos)
+        já aconteceu, na thread da UI. O que vai daqui para lá são duas coisas
+        imutáveis e sem vínculo nenhum com o SQLAlchemy: o `ParametrosImpressora`
+        (retrato dos dados de conexão, tirado na linha abaixo) e o `Documento`,
+        que é `list[BlocoTexto]` — `frozen=True`, só str e bool.
+
+        **Nenhuma `Session` cruza fronteira de thread.** Quem espera é o
+        chamador, via `self._aguardar`: a suíte e qualquer uso sem Qt usam o
+        `join()` simples; a UI injeta uma espera que mantém a tela repintando
+        (ver `ui/widgets/aviso_impressao.py`).
+        """
+        parametros = ParametrosImpressora.de(impressora)
+        nome = impressora.nome
+        recado: list[str | None] = [None]
+
+        def trabalho() -> None:
+            try:
+                with self._abrir_driver(parametros) as driver:
+                    driver.imprimir(documento)
+            except ErroDeImpressao as erro:
+                recado[0] = str(erro)
+            except Exception as erro:  # noqa: BLE001 - último cinto de segurança do RNF
+                # `hardware/` promete só levantar ErroDeImpressao, mas se um dia
+                # escapar outra coisa dali a venda não pode cair junto. Mensagem
+                # diferente de propósito: "erro inesperado" é o sinal de que a
+                # falha é nossa, não do cabo da impressora.
+                recado[0] = f"Erro inesperado ao imprimir em '{nome}': {erro}"
+
+        # `daemon=True`: se o driver travar apesar de todos os timeouts da camada
+        # `hardware/`, o processo ainda tem que conseguir fechar quando o dono do
+        # food truck clicar no X. Uma thread pendurada não pode segurar o PDV.
+        thread = threading.Thread(target=trabalho, name="impressao", daemon=True)
+        thread.start()
+        self._aguardar(thread, TEMPO_MAXIMO_DE_IMPRESSAO)
+
+        if thread.is_alive():
+            # Folga proposital sobre os 3 s do driver: assim, no caso normal, quem
+            # responde é a mensagem específica do `hardware/` ("sem papel", "cabo
+            # solto"), que diz ao operador o que fazer. Esta aqui é o último
+            # recurso, para o driver que não devolve nunca.
+            return (
+                f"A impressora '{nome}' não respondeu em "
+                f"{TEMPO_MAXIMO_DE_IMPRESSAO:.0f} segundos. Verifique se ela está "
+                "ligada e conectada; o cupom ficou salvo na fila."
+            )
+        return recado[0]
+
+    def _guardar_na_fila(
+        self, impressora: Impressora, documento: Documento, descricao: str, erro: str
+    ) -> None:
+        """Salva o cupom que não saiu, para a 2ª via não depender de memória humana.
+
+        **Nunca levanta.** Falhar ao guardar o cupom não pode virar o segundo
+        problema em cima do primeiro: a venda já está commitada e o cliente já
+        foi embora. No pior caso o operador perde a fila, que é onde ele já
+        estava antes desta fase existir.
         """
         try:
-            with self._abrir_driver(impressora) as driver:
-                driver.imprimir(documento)
-        except ErroDeImpressao as erro:
-            return ResultadoImpressao(impressora.nome, quantidade_itens, False, str(erro))
-        except Exception as erro:  # noqa: BLE001 - último cinto de segurança do RNF
-            # `hardware/` promete só levantar ErroDeImpressao, mas se um dia
-            # escapar outra coisa dali a venda não pode cair junto. Mensagem
-            # diferente de propósito: "erro inesperado" é o sinal de que a falha
-            # é nossa, não do cabo da impressora.
-            return ResultadoImpressao(
-                impressora.nome,
-                quantidade_itens,
-                False,
-                f"Erro inesperado ao imprimir em '{impressora.nome}': {erro}",
+            self.uow.fila_impressao.salvar(
+                ItemFilaImpressao(
+                    impressora_id=impressora.id,
+                    documento=documento_para_json(documento),
+                    descricao=descricao[:120],
+                    ultimo_erro=erro[:400],
+                )
             )
-        return ResultadoImpressao(impressora.nome, quantidade_itens, True)
+            self.uow.fila_impressao.podar_excedente()
+            # `commit` aqui, e não no fim da operação: dos cinco caminhos de
+            # impressão só `imprimir_comanda` commita, e o cupom guardado não
+            # pode depender de qual botão o operador apertou. É o registro de
+            # que algo não saiu no papel — ele tem que sobreviver inclusive a um
+            # rollback da operação que o gerou.
+            self.uow.commit()
+        except Exception:  # noqa: BLE001
+            logger_do_app().exception("Não foi possível guardar o cupom na fila")
+
+    # ------------------------------------------------------------------
+    # Fila de contingência (Fase 3)
+    # ------------------------------------------------------------------
+
+    def listar_fila(self) -> list[ItemFilaImpressao]:
+        """Os cupons que não saíram, do mais antigo para o mais novo."""
+        return self.uow.fila_impressao.listar_pendentes()
+
+    def reimprimir_da_fila(self, item_id: int) -> ResultadoImpressao:
+        """Tenta de novo um cupom guardado. Só sai da fila se sair no papel.
+
+        O item **não** é removido antes da tentativa: se a impressora continuar
+        muda, o cupom tem que continuar lá. O que sobe é `tentativas`, para a
+        tela poder mostrar quantas vezes já se tentou.
+        """
+        item = self.uow.fila_impressao.buscar_por_id(item_id)
+        if item is None:
+            raise RecursoNaoEncontradoError(f"Cupom {item_id} não está mais na fila.")
+
+        impressora = self.uow.impressoras.buscar_por_id(item.impressora_id)
+        if impressora is None:
+            raise RecursoNaoEncontradoError(
+                "A impressora deste cupom não existe mais no cadastro. "
+                "Cadastre-a de novo, ou descarte o cupom."
+            )
+
+        documento = documento_de_json(item.documento)
+        erro = self._falar_com_o_periferico(impressora, documento)
+        if erro is not None:
+            item.tentativas += 1
+            item.ultimo_erro = erro[:400]
+            self.uow.fila_impressao.salvar(item)
+            return ResultadoImpressao(impressora.nome, 0, False, erro)
+
+        self.uow.fila_impressao.remover(item)
+        return ResultadoImpressao(impressora.nome, 0, True)
+
+    def descartar_da_fila(self, item_id: int) -> None:
+        """Joga fora um cupom que não interessa mais (o cliente já foi, o dia virou)."""
+        item = self.uow.fila_impressao.buscar_por_id(item_id)
+        if item is not None:
+            self.uow.fila_impressao.remover(item)
 
     # ------------------------------------------------------------------
     # Montagem dos documentos

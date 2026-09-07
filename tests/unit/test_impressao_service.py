@@ -432,7 +432,13 @@ def test_impressao_que_falha_inteira_ainda_assim_confirma_o_pedido(
     resultados = impressao.imprimir_comanda(comanda.id)
 
     assert resultados[0].sucesso is False
-    assert commits == [1]
+    # Dois commits desde a Fase 3, e o segundo é novo de propósito: o primeiro
+    # guarda o cupom na fila de contingência, o segundo confirma o pedido. São
+    # fatos independentes — o cupom que não saiu tem que sobreviver mesmo que a
+    # operação que o gerou seja desfeita depois. A garantia original continua
+    # valendo: é UM commit do pedido, e não um por grupo de impressão (o teste
+    # acima, com impressão bem-sucedida, tranca o caso sem fila).
+    assert len(commits) == 2
     assert item.impresso_em is not None
 
 

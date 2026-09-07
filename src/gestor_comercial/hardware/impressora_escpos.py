@@ -19,6 +19,7 @@ nada.
 from __future__ import annotations
 
 import contextlib
+import json
 import textwrap
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -61,6 +62,105 @@ class BlocoTexto:
 
 
 Documento = list[BlocoTexto]
+
+
+def documento_para_json(documento: Documento) -> str:
+    """Serializa o documento para guardar na fila de contingência (Fase 3).
+
+    JSON e não pickle: o arquivo do banco vai para pendrive e precisa ser
+    legível e inofensivo — pickle executaria código na volta. As chaves são os
+    nomes dos campos de `BlocoTexto`, então um cupom guardado hoje continua
+    legível depois de o resto do sistema mudar.
+    """
+    return json.dumps(
+        [
+            {
+                "texto": bloco.texto,
+                "negrito": bloco.negrito,
+                "centralizado": bloco.centralizado,
+                "dobro": bloco.dobro,
+            }
+            for bloco in documento
+        ],
+        ensure_ascii=False,
+    )
+
+
+def documento_de_json(bruto: str) -> Documento:
+    """A volta de `documento_para_json`. Documento ilegível vira lista vazia.
+
+    Não levanta de propósito: um registro corrompido na fila não pode impedir os
+    outros cupons de saírem, e muito menos derrubar a tela que lista a fila.
+    Campo faltando cai no default do `BlocoTexto`.
+    """
+    try:
+        crus = json.loads(bruto)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(crus, list):
+        return []
+    blocos: Documento = []
+    for cru in crus:
+        if not isinstance(cru, dict):
+            continue
+        blocos.append(
+            BlocoTexto(
+                texto=str(cru.get("texto", "")),
+                negrito=bool(cru.get("negrito", False)),
+                centralizado=bool(cru.get("centralizado", False)),
+                dobro=bool(cru.get("dobro", False)),
+            )
+        )
+    return blocos
+
+
+@dataclass(frozen=True)
+class ParametrosImpressora:
+    """Retrato dos dados de conexão de uma impressora, sem vínculo com o banco.
+
+    Existe para a impressão poder sair da thread da UI (Fase 3 de `Mitigação de
+    Falhas.md`). O objeto `Impressora` do `domain/` é uma entidade do
+    SQLAlchemy: ler um atributo dele em outra thread mexe na `Session`, que não
+    é thread-safe — exatamente a corrupção silenciosa que a decisão da Fase 4 da
+    remasterização queria evitar.
+
+    Este retrato é tirado **na thread da UI**, é imutável e só tem str/int/None.
+    É ele que atravessa para a thread de trabalho.
+
+    Nada precisou mudar em `abrir_driver` para aceitá-lo: esta camada sempre leu
+    a impressora por `getattr`, e a docstring do módulo já dizia que isso
+    "permite testar com um objeto qualquer que tenha os campos certos". O
+    desacoplamento estava pronto antes de existir motivo para usá-lo.
+    """
+
+    nome: str
+    tipo_conexao: str
+    colunas: int
+    vendor_id: str | None = None
+    product_id: str | None = None
+    porta_serial: str | None = None
+    baudrate: int | None = None
+    host: str | None = None
+    porta_rede: int | None = None
+    nome_fila: str | None = None
+    caminho_arquivo: str | None = None
+
+    @classmethod
+    def de(cls, impressora: "Impressora") -> "ParametrosImpressora":
+        bruto = getattr(impressora, "tipo_conexao", None)
+        return cls(
+            nome=_nome_da(impressora),
+            tipo_conexao=str(getattr(bruto, "value", bruto) or ""),
+            colunas=_colunas_de(impressora),
+            vendor_id=getattr(impressora, "vendor_id", None),
+            product_id=getattr(impressora, "product_id", None),
+            porta_serial=getattr(impressora, "porta_serial", None),
+            baudrate=getattr(impressora, "baudrate", None),
+            host=getattr(impressora, "host", None),
+            porta_rede=getattr(impressora, "porta_rede", None),
+            nome_fila=getattr(impressora, "nome_fila", None),
+            caminho_arquivo=getattr(impressora, "caminho_arquivo", None),
+        )
 
 
 class ErroDeImpressao(Exception):

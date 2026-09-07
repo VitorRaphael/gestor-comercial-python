@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -81,6 +82,10 @@ _GLIFOS_CONEXAO = {
     TipoConexaoImpressora.WINDOWS: "🖥",
     TipoConexaoImpressora.ARQUIVO: "📄",
 }
+
+# Teto da lista de cupons pendentes: ~5 linhas. Passando disso ela rola, para
+# uma fila grande não empurrar a tabela de impressoras para fora da tela.
+_ALTURA_MAXIMA_FILA = 150
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
@@ -202,7 +207,10 @@ class ImpressorasView(QWidget):
         layout_acoes.addWidget(self._botao_excluir)
 
         layout_painel.addWidget(barra_acoes)
-        coluna.addWidget(painel)
+        # `stretch=1` só na tabela: sem isto o espaço que sobra na coluna é
+        # dividido com o painel da fila, que fica com um vão vazio enorme entre
+        # a lista e os botões. A tabela é quem deve crescer.
+        coluna.addWidget(painel, stretch=1)
 
         self._label_ajuda = QLabel(
             "A impressora padrão recebe o recibo do cliente, o fechamento de caixa e "
@@ -213,9 +221,66 @@ class ImpressorasView(QWidget):
         self._label_ajuda.setWordWrap(True)
         coluna.addWidget(self._label_ajuda)
 
+        coluna.addWidget(self._montar_painel_fila())
+
         envelope = QWidget()
         envelope.setLayout(coluna)
         return envelope
+
+    def _montar_painel_fila(self) -> QWidget:
+        """Os cupons que não saíram no papel, e o que fazer com eles (Fase 3).
+
+        Sem esta lista a fila de contingência seria promessa vazia: o aviso âmbar
+        diz "o cupom ficou salvo na fila para reimpressão", e o operador precisa
+        de um lugar onde de fato reimprimir. Fica na tela de Impressoras porque é
+        onde ele já vai quando a impressora dá problema.
+
+        O painel some inteiro quando a fila está vazia — que é o dia normal. Uma
+        seção permanente vazia só ensinaria o operador a ignorar aquela área da
+        tela, e é justamente ali que a informação urgente aparece.
+        """
+        self._painel_fila = QFrame()
+        self._painel_fila.setObjectName("impressorasPainel")
+        layout = QVBoxLayout(self._painel_fila)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(8)
+
+        eyebrow = QLabel("CUPONS QUE NÃO SAÍRAM")
+        eyebrow.setObjectName("impressorasSelecaoLabel")
+        layout.addWidget(eyebrow)
+
+        ajuda = QLabel(
+            "Ficaram guardados quando a impressora não respondeu. Resolva o "
+            "papel ou o cabo e clique em Reimprimir."
+        )
+        ajuda.setProperty("variante", "fraco")
+        ajuda.setWordWrap(True)
+        layout.addWidget(ajuda)
+
+        self._lista_fila = QListWidget()
+        self._lista_fila.setFrameShape(QFrame.Shape.NoFrame)
+        self._lista_fila.setStyleSheet("background: transparent;")
+        self._lista_fila.setMaximumHeight(_ALTURA_MAXIMA_FILA)
+        self._painel_fila.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+        )
+        layout.addWidget(self._lista_fila)
+
+        acoes = QHBoxLayout()
+        acoes.addStretch()
+
+        self._botao_reimprimir = QPushButton("Reimprimir")
+        self._botao_reimprimir.setProperty("variante", "pilula-ciano")
+        self._botao_reimprimir.clicked.connect(self._reimprimir_da_fila)
+        acoes.addWidget(self._botao_reimprimir)
+
+        self._botao_descartar = QPushButton("Descartar")
+        self._botao_descartar.setProperty("variante", "perigo")
+        self._botao_descartar.clicked.connect(self._descartar_da_fila)
+        acoes.addWidget(self._botao_descartar)
+
+        layout.addLayout(acoes)
+        return self._painel_fila
 
     def _montar_painel_categorias(self) -> QWidget:
         painel = QFrame()
@@ -270,6 +335,9 @@ class ImpressorasView(QWidget):
         for linha, impressora in enumerate(self._impressoras):
             self._preencher_linha(linha, impressora)
         self._ao_selecionar_linha()
+        # Depois de `self._impressoras`: a lista da fila mostra o NOME da
+        # impressora de destino, e o mapa de nomes sai daí.
+        self._atualizar_fila()
 
     def _ao_selecionar_linha(self) -> None:
         self._atualizar_indicadores_linha()
@@ -511,6 +579,67 @@ class ImpressorasView(QWidget):
             self._mostrar_erro(str(erro))
             return
         self._aviso.mostrar_um(resultado, contexto="Teste")
+
+    # ------------------------------------------------------------------
+    # Fila de contingência (Fase 3 de `Mitigação de Falhas.md`)
+    # ------------------------------------------------------------------
+
+    def _atualizar_fila(self) -> None:
+        pendentes = self._impressao.listar_fila()
+        # Painel escondido no dia normal: seção permanentemente vazia ensina o
+        # operador a ignorar aquela área da tela, e é ali que aparece o urgente.
+        self._painel_fila.setVisible(bool(pendentes))
+        self._lista_fila.clear()
+        por_id = {impressora.id: impressora.nome for impressora in self._impressoras}
+        for item in pendentes:
+            destino = por_id.get(item.impressora_id, "impressora removida")
+            rotulo = f"{item.criado_em:%H:%M} · {item.descricao} → {destino}"
+            if item.tentativas > 1:
+                rotulo += f" ({item.tentativas} tentativas)"
+            linha = QListWidgetItem(rotulo)
+            linha.setData(Qt.ItemDataRole.UserRole, item.id)
+            self._lista_fila.addItem(linha)
+
+        # A lista tem a altura do que ela mostra, até o teto. Sem isto ela ocupa
+        # sempre o máximo e sobra um vão entre o último cupom e os botões — numa
+        # tela de 768px, espaço vazio é espaço tirado da tabela de impressoras.
+        if pendentes:
+            altura_linha = self._lista_fila.sizeHintForRow(0)
+            self._lista_fila.setFixedHeight(
+                min(_ALTURA_MAXIMA_FILA, altura_linha * len(pendentes) + 8)
+            )
+
+    def _item_da_fila_selecionado(self) -> int | None:
+        linha = self._lista_fila.currentItem()
+        return None if linha is None else linha.data(Qt.ItemDataRole.UserRole)
+
+    def _reimprimir_da_fila(self) -> None:
+        item_id = self._item_da_fila_selecionado()
+        if item_id is None:
+            self._mostrar_erro("Escolha na lista qual cupom reimprimir.")
+            return
+
+        self._mostrar_erro("")
+        try:
+            resultado = executar_impressao(lambda: self._impressao.reimprimir_da_fila(item_id))
+        except _ERROS_SERVICE as erro:
+            # A impressora do cupom sumiu do cadastro entre a listagem e o
+            # clique. Cabo solto e papel acabado voltam em `resultado`.
+            self._mostrar_erro(str(erro))
+            self._atualizar_fila()
+            return
+        self._aviso.mostrar_um(resultado, contexto="Reimpressão")
+        self._atualizar_fila()
+
+    def _descartar_da_fila(self) -> None:
+        item_id = self._item_da_fila_selecionado()
+        if item_id is None:
+            self._mostrar_erro("Escolha na lista qual cupom descartar.")
+            return
+
+        self._mostrar_erro("")
+        self._impressao.descartar_da_fila(item_id)
+        self._atualizar_fila()
 
     def _mostrar_erro(self, mensagem: str) -> None:
         self._label_erro.setText(mensagem)
