@@ -43,15 +43,25 @@ class TipoMovimento(enum.Enum):
 
 
 class CargoFuncionario(enum.Enum):
-    """Opções fixas do dropdown "Cargo" em Funcionários (§3.13). Guardado
+    """Opções fixas do seletor "Cargo" em Funcionários (§3.13). Guardado
     como texto (`Funcionario.cargo` é `String`, não `Enum` de banco) para não
-    exigir migração de dado histórico — validado aqui, na camada de serviço."""
+    exigir migração de dado histórico — validado em `FuncionarioService`.
+
+    A ORDEM aqui é a ordem em que os cards aparecem na grade do modal de
+    cadastro (`ui/widgets/funcionario_dialog.py`), e o texto é o que vai para o
+    banco. Renomear um valor é mudança de dado, não de rótulo: quem já estava
+    gravado com o texto antigo precisa de migração junto — foi o caso de
+    `ATENDENTE` ("Atendente"), que virou `ENTREGADOR` ("Entregador") em
+    2026-09-08 a pedido do Vitor, com a migração `a7f3c2e5d918` reescrevendo as
+    linhas existentes. "Atendente" não descrevia função nenhuma do food truck:
+    todo mundo atende. Quem leva o pedido do delivery, sim.
+    """
 
     GERENTE = "Gerente"
     CAIXA = "Caixa"
     GARCOM = "Garçom"
     COZINHA = "Cozinha"
-    ATENDENTE = "Atendente"
+    ENTREGADOR = "Entregador"
 
 
 class TipoConexaoImpressora(enum.Enum):

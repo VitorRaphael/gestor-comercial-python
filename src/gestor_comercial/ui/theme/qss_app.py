@@ -310,17 +310,36 @@ def construir_qss_app(t: dict[str, str]) -> str:
       letter-spacing: 1px;
       background: transparent;
     }}
-    QFrame[variante="mesa"][ocupada="true"] QLabel#mesaCartaoTag {{ color: {t['mesa_ocupada_borda']}; }}
+    QFrame[variante="mesa"][ocupada="true"] QLabel#mesaCartaoTag {{ color: {t['mesa_ocupada_tag']}; }}
     QFrame[variante="mesa"][fechando="true"] QLabel#mesaCartaoTag {{ color: {t['mesa_fechando_borda']}; }}
     QLabel#mesaCartaoValor {{ color: {t['texto']}; font-size: 13px; font-weight: 800; background: transparent; }}
     QLabel#mesaCartaoNome {{ color: {t['texto_fraco']}; font-size: 11px; background: transparent; }}
-    /* Ciano, não roxo/vermelho: "ocupada" é estado normal (mesa em
-       atendimento), não um alerta — vermelho fica reservado pra ações
-       destrutivas (perigo). */
+    /* Vermelho Ferrari (2026-09-08), no lugar do ciano. O ciano dizia
+       "estado normal, nada a ver aqui" — e mesa ocupada é justamente onde
+       está o dinheiro em aberto do salão, o que o operador precisa achar de
+       relance numa grade de oito colunas. Vermelho de PERIGO continua sendo
+       outro token (`perigo`), e continua só em ação destrutiva: o que estes
+       cards usam é a família `mesa_ocupada_*`, que existe só para eles. */
     QFrame[variante="mesa"][ocupada="true"] {{
       background: {t['mesa_ocupada_bg']};
       border: 1px solid {t['mesa_ocupada_borda']};
       border-top: 3px solid {t['mesa_ocupada_borda']};
+    }}
+    /* O `:hover` genérico lá em cima repinta o card com `superficie_2`, que
+       era invisível enquanto ocupada TINHA essa cor de fundo. Com o corpo
+       tingido de vermelho ele passaria a apagar o tingimento quando o mouse
+       passa por cima — e a mesa cheia piscaria cinza. Esta regra devolve o
+       vermelho no hover, e a ordem em que ela aparece é o que a faz vencer. */
+    QFrame[variante="mesa"][ocupada="true"]:hover {{
+      background: {t['mesa_ocupada_bg']};
+    }}
+    /* O número da mesa e o valor em aberto são o conteúdo do card ocupado, e
+       `texto` não sabe que o fundo mudou: no tema claro ele é quase preto
+       sobre o pastel avermelhado. Daí o `mesa_ocupada_texto`, que a paleta já
+       trazia desde o redesign "Vívido" e que só agora ficou necessário. */
+    QFrame[variante="mesa"][ocupada="true"] QLabel#mesaCartaoNumero,
+    QFrame[variante="mesa"][ocupada="true"] QLabel#mesaCartaoValor {{
+      color: {t['mesa_ocupada_texto']};
     }}
     /* "Fechando" = comanda em conferência (pré-conta emitida) numa mesa
        ocupada -- sobrepõe a cor de "ocupada" acima. */
@@ -676,7 +695,10 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
     QLabel[variante="badgeMovimento"][tipo="reforco"] {{ color: {t['sucesso']}; border-color: {t['sucesso']}; }}
     QLabel[variante="badgeMovimento"][tipo="sangria"] {{ color: {t['perigo_hover']}; border-color: {t['perigo_hover']}; }}
-    QLabel[variante="badgeMovimento"][tipo="despesa"] {{ color: {t['mesa_ocupada_borda']}; border-color: {t['mesa_ocupada_borda']}; }}
+    /* `ciano_metrica`, e não `mesa_ocupada_borda`: despesa de caixa não tem
+       relação nenhuma com mesa ocupada — o que este seletor queria era a cor,
+       e o empréstimo só apareceu quando a mesa ocupada virou vermelha. */
+    QLabel[variante="badgeMovimento"][tipo="despesa"] {{ color: {t['ciano_metrica']}; border-color: {t['ciano_metrica']}; }}
 
     QFrame#caixaMiniCard {{
       background: {t['mesa_bg']};
@@ -799,7 +821,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
        verdade, entao ela nao pode herdar o `QDialog {{ background }}` acima. */
 
     QDialog#pinPadDialog {{ background: transparent; }}
-    QWidget#pinPadBackdrop {{ background: transparent; }}
+    QWidget#modalBackdrop {{ background: transparent; }}
     QWidget#pinPadCadeado {{ background: transparent; }}
 
     QFrame#pinPadCard {{
@@ -809,8 +831,8 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
 
     QFrame#pinPadIcone {{
-      background: {t['pin_icone_bg']};
-      border: 1px solid {t['pin_icone_borda']};
+      background: {t['badge_icone_bg']};
+      border: 1px solid {t['badge_icone_borda']};
       border-radius: 12px;
     }}
 
@@ -842,15 +864,15 @@ def construir_qss_app(t: dict[str, str]) -> str:
          zera a largura util e o Qt descarta o glifo -- o botao saia como um
          circulo vazio. Vale para toda tecla de tamanho fixo daqui. */
       padding: 0;
-      background: {t['pin_fechar_bg']};
-      border: 1px solid {t['pin_fechar_borda']};
+      background: {t['botao_circular_bg']};
+      border: 1px solid {t['botao_circular_borda']};
       border-radius: 16px;
-      color: {t['pin_fechar_texto']};
+      color: {t['botao_circular_texto']};
       font-size: 13px;
       font-weight: 700;
     }}
     QPushButton#pinPadFechar:hover {{
-      background: {t['pin_fechar_hover']};
+      background: {t['botao_circular_hover']};
       color: {t['texto']};
     }}
 
@@ -895,6 +917,353 @@ def construir_qss_app(t: dict[str, str]) -> str:
       padding: 10px;
     }}
     QPushButton#pinPadCancelar:hover {{ color: {t['texto']}; }}
+
+    /* ---------- Modal "Adicionar item" (`widgets/adicionar_item_dialog.py`) ----
+       Mesmo arranjo do modal de PIN: o cartao e um QFrame DENTRO do dialogo,
+       porque a janela e frameless e translucida (cantos de 16px redondos de
+       verdade) e por isso nao pode herdar o `QDialog {{ background }}`. */
+
+    QDialog#addItemDialog {{ background: transparent; }}
+    QWidget#addItemLupa {{ background: transparent; }}
+
+    QFrame#addItemCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+
+    QLabel#addItemContexto {{
+      color: {t['texto_fraco']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      background: transparent;
+    }}
+    QLabel#addItemTitulo {{
+      color: {t['texto']};
+      font-size: 18px;
+      font-weight: 800;
+      background: transparent;
+    }}
+
+    /* `padding: 0` NAO e decoracao: a regra generica de QPushButton pede 16px
+       de padding lateral, e num botao de lado fixo isso zera a largura util e
+       o Qt descarta o glifo -- o botao sai como um circulo vazio. Vale para o
+       fechar e para os dois passos de quantidade. */
+    QPushButton#addItemFechar, QPushButton#addItemPasso, QPushButton#funcDialogFechar {{
+      padding: 0;
+      background: {t['botao_circular_bg']};
+      border: 1px solid {t['botao_circular_borda']};
+      color: {t['botao_circular_texto']};
+      font-weight: 700;
+    }}
+    QPushButton#addItemFechar, QPushButton#funcDialogFechar {{ border-radius: 16px; font-size: 13px; }}
+    QPushButton#addItemPasso {{ border-radius: 17px; font-size: 18px; }}
+    QPushButton#addItemFechar:hover, QPushButton#addItemPasso:hover, QPushButton#funcDialogFechar:hover {{
+      background: {t['botao_circular_hover']};
+      color: {t['texto']};
+    }}
+    QPushButton#addItemPasso:disabled {{
+      color: {t['pilula_disabled_texto']};
+      background: {t['botao_circular_bg']};
+    }}
+
+    QFrame#addItemBuscaCaixa {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+    }}
+    QFrame#addItemBuscaCaixa[foco="true"] {{ border: 1px solid {t['acento']}; }}
+    QLineEdit#addItemBusca {{
+      background: transparent;
+      border: none;
+      padding: 0;
+      color: {t['texto']};
+      font-size: 13px;
+    }}
+    QLabel#addItemDicaEnter {{
+      color: {t['texto_fraquissimo']};
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+
+    QScrollArea#addItemFaixa {{ background: transparent; border: none; }}
+    QScrollArea#addItemFaixa > QWidget > QWidget {{ background: transparent; }}
+    QScrollArea#addItemFaixa QScrollBar:vertical {{
+      background: transparent;
+      width: 5px;
+      margin: 0;
+    }}
+    QScrollArea#addItemFaixa QScrollBar::handle:vertical {{
+      background: {t['botao_circular_hover']};
+      border-radius: 2px;
+      min-height: 16px;
+    }}
+    QScrollArea#addItemFaixa QScrollBar::add-line:vertical,
+    QScrollArea#addItemFaixa QScrollBar::sub-line:vertical {{ height: 0; }}
+    QScrollArea#addItemFaixa QScrollBar::add-page:vertical,
+    QScrollArea#addItemFaixa QScrollBar::sub-page:vertical {{ background: transparent; }}
+
+    QPushButton#addItemCategoria {{
+      padding: 5px 12px;
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+      color: {t['texto_fraco']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }}
+    QPushButton#addItemCategoria:hover {{ color: {t['texto']}; }}
+    QPushButton#addItemCategoria[ativa="true"] {{
+      background: {t['acento']};
+      border-color: {t['acento']};
+      color: {t['acento_texto']};
+    }}
+
+    /* O contêiner usa a MESMA superfície do cartão de propósito: só a borda
+       o delimita, e o degrau para `superficie_2` fica reservado para a linha
+       destacada (pintada pelo delegado). Com os dois na mesma cor, o único
+       sinal de qual linha o Enter vai lançar seria a barra âmbar. */
+    QListWidget#addItemLista {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+      padding: 4px;
+      outline: none;
+    }}
+    /* A barra padrao do sistema e larga, cinza e desenha setas nas pontas --
+       peso visual que o cartao nao comporta. Aqui ela vira um trilho de 6px
+       sem botao, que so aparece quando a lista passa da altura do cartao. */
+    QListWidget#addItemLista QScrollBar:vertical {{
+      background: transparent;
+      width: 6px;
+      margin: 4px 2px 4px 0;
+    }}
+    QListWidget#addItemLista QScrollBar::handle:vertical {{
+      background: {t['botao_circular_hover']};
+      border-radius: 3px;
+      min-height: 24px;
+    }}
+    QListWidget#addItemLista QScrollBar::add-line:vertical,
+    QListWidget#addItemLista QScrollBar::sub-line:vertical {{ height: 0; }}
+    QListWidget#addItemLista QScrollBar::add-page:vertical,
+    QListWidget#addItemLista QScrollBar::sub-page:vertical {{ background: transparent; }}
+
+    QFrame#addItemRodape {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+    }}
+    QLabel#addItemRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+    QLabel#addItemQuantidade {{
+      color: {t['texto']};
+      font-size: 18px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLineEdit#addItemObservacao {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 10px;
+      padding: 9px 12px;
+      color: {t['texto']};
+      font-size: 12px;
+    }}
+    QLineEdit#addItemObservacao:focus {{ border: 1px solid {t['acento']}; }}
+    QLabel#addItemTotal {{
+      color: {t['acento']};
+      font-size: 20px;
+      font-weight: 800;
+      background: transparent;
+    }}
+
+    /* Uma linha so no rodape, que troca de texto e de cor entre a dica de uso,
+       o erro do service e o aviso de item lancado. Tres linhas empilhadas
+       mudariam a altura do cartao no meio do lancamento, e cartao que pula de
+       tamanho e o que faz o dedo errar o botao. */
+    QLabel#addItemAviso {{
+      color: {t['texto_fraquissimo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    QLabel#addItemAviso[estado="erro"] {{ color: {t['perigo']}; }}
+    QLabel#addItemAviso[estado="sucesso"] {{ color: {t['sucesso']}; }}
+
+    QPushButton#addItemCancelar, QPushButton#funcDialogCancelar {{
+      padding: 9px 20px;
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 18px;
+      color: {t['texto']};
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    QPushButton#addItemCancelar:hover, QPushButton#funcDialogCancelar:hover {{ background: {t['botao_circular_hover']}; }}
+
+    QPushButton#addItemConfirmar, QPushButton#funcDialogConfirmar {{
+      padding: 9px 22px;
+      background: {t['acento']};
+      border: 1px solid {t['acento']};
+      border-radius: 18px;
+      color: {t['acento_texto']};
+      font-size: 12px;
+      font-weight: 800;
+    }}
+    QPushButton#addItemConfirmar:hover, QPushButton#funcDialogConfirmar:hover {{
+      background: {t['acento_hover']};
+      border-color: {t['acento_hover']};
+    }}
+    QPushButton#addItemConfirmar:disabled, QPushButton#funcDialogConfirmar:disabled {{
+      background: {t['pilula_disabled_bg']};
+      border-color: {t['pilula_disabled_bg']};
+      color: {t['pilula_disabled_texto']};
+    }}
+
+    /* ---------- Modal "Novo funcionario" (`widgets/funcionario_dialog.py`) ----
+       Terceiro modal em cartao do app, e por isso o terceiro a NAO poder
+       herdar o `QDialog {{ background }}` la de cima: a janela e frameless e
+       translucida para os cantos de 16px saírem redondos de verdade. O ✕, o
+       Cancelar e o Cadastrar nao aparecem aqui porque ja estao declarados nas
+       familias compartilhadas com o modal "Adicionar item". */
+
+    QDialog#funcDialog {{ background: transparent; }}
+    QWidget#funcDialogGlifo {{ background: transparent; }}
+
+    QFrame#funcDialogCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+
+    QFrame#funcDialogIcone {{
+      background: {t['badge_icone_bg']};
+      border: 1px solid {t['badge_icone_borda']};
+      border-radius: 21px;
+    }}
+
+    QLabel#funcDialogTitulo {{
+      color: {t['texto']};
+      font-size: 18px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#funcDialogSubtitulo {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+
+    /* Os rotulos de campo e o resumo de acesso do rodape sao o mesmo tipo de
+       texto -- caixa alta atenuada, o "carimbo" que o app usa para dizer o que
+       vem a seguir. Uma declaracao so para os dois: duas poderiam divergir. */
+    QLabel#funcDialogRotulo, QLabel#funcDialogResumo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+
+    QFrame#funcDialogIdentidade {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+    }}
+    /* Circulo de 48px: o raio e metade do lado, senao o Qt desenha um quadrado
+       de cantos arredondados. As iniciais usam o ciano de identidade -- o mesmo
+       do badge do cabecalho, porque as duas coisas dizem "e esta pessoa". */
+    QLabel#funcDialogAvatar {{
+      background: {t['botao_circular_bg']};
+      border: 1px solid {t['botao_circular_borda']};
+      border-radius: 24px;
+      color: {t['badge_icone_glifo']};
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 1px;
+    }}
+
+    /* Campo dentro de painel: o inverso da superficie do painel, como o campo
+       de observacao do modal "Adicionar item" faz dentro do rodape dele. */
+    QLineEdit#funcDialogCampo {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 10px;
+      padding: 9px 12px;
+      color: {t['texto']};
+      font-size: 13px;
+    }}
+    QLineEdit#funcDialogCampo:focus {{ border: 1px solid {t['acento']}; }}
+
+    QFrame#funcDialogCargo {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 10px;
+    }}
+    QFrame#funcDialogCargo:hover {{ border: 1px solid {t['texto_fraquissimo']}; }}
+    QFrame#funcDialogCargo[selecionado="true"] {{
+      background: {t['badge_icone_bg']};
+      border: 1px solid {t['badge_icone_glifo']};
+    }}
+    QLabel#funcDialogCargoNome {{
+      color: {t['texto']};
+      font-size: 12px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QFrame#funcDialogCargo[selecionado="true"] QLabel#funcDialogCargoNome {{
+      color: {t['badge_icone_glifo']};
+    }}
+    QLabel#funcDialogCargoDescricao {{
+      color: {t['texto_fraco']};
+      font-size: 11px;
+      background: transparent;
+    }}
+    /* O ✓ esta SEMPRE no layout e so troca de cor: escondê-lo mudaria a
+       largura da linha do titulo a cada clique -- ver `_CartaoCargo`. */
+    QLabel#funcDialogCargoMarca {{
+      color: transparent;
+      font-size: 12px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QFrame#funcDialogCargo[selecionado="true"] QLabel#funcDialogCargoMarca {{
+      color: {t['badge_icone_glifo']};
+    }}
+
+    QPushButton#funcDialogSituacao {{
+      padding: 8px 18px;
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+      color: {t['texto_fraquissimo']};
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    QPushButton#funcDialogSituacao[papel="ativo"][marcada="true"] {{
+      background: {t['pilula_ativo_bg']};
+      border: 1px solid {t['pilula_ativo_texto']};
+      color: {t['pilula_ativo_texto']};
+    }}
+    /* Inativo marcado nao ganha cor de alerta: desativar alguem e operacao
+       normal de fim de contrato, nao erro. O que ele ganha e o contorno e o
+       texto plenos, para a escolha nao ficar invisivel. */
+    QPushButton#funcDialogSituacao[papel="inativo"][marcada="true"] {{
+      border: 1px solid {t['texto_fraco']};
+      color: {t['texto']};
+    }}
+
+    QFrame#funcDialogDivisor {{ background: {t['borda']}; border: none; }}
 
     /* ---------- Tela de Impressoras ---------- */
 
@@ -980,7 +1349,8 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
     QLabel#categoriaNomeLabel {{ color: {t['texto']}; font-size: 12px; font-weight: 600; background: transparent; }}
 
-    QLabel#impressorasPendentesLink {{ color: {t['mesa_ocupada_borda']}; font-size: 11px; font-weight: 700; background: transparent; }}
+    /* Mesmo empréstimo do badge de despesa: o link de pendências queria ciano. */
+    QLabel#impressorasPendentesLink {{ color: {t['ciano_metrica']}; font-size: 11px; font-weight: 700; background: transparent; }}
 
     /* ---------- Relatórios: Histórico Diário + Dashboard Mensal ---------- */
 

@@ -71,13 +71,27 @@ class _CartaoMesa(QFrame):
 
     clicado = Signal()
 
+    LARGURA_MINIMA_PX = 96
+    # A altura é a do card MAIS CHEIO — mesa ocupada mostra quatro linhas
+    # (número, tag, valor e atendente) contra as duas da mesa livre. Enquanto o
+    # piso era 96px o card ocupado media 110 de `sizeHint` e era desenhado com
+    # 96: a política `Fixed` faz o cartão valer o piso, e as duas últimas
+    # linhas eram cortadas ao meio pela borda. Ou seja, justamente na mesa que
+    # tem dinheiro em aberto, **o valor em aberto não aparecia inteiro** — o
+    # mesmo tipo de defeito do §9.1, e igualmente anterior à cor nova.
+    #
+    # O número é medido, não chutado, e `test_mesas_ocupadas_em_vermelho.py`
+    # cobra o invariável (nenhum card menor que o próprio `sizeHint`): se uma
+    # fonte ou um tamanho do QSS mudar, quem avisa é a suíte, e não o balcão.
+    ALTURA_PX = 112
+
     def __init__(self, resumo: _ResumoMesa, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setProperty("variante", "mesa")
         self.setProperty("ocupada", "true" if resumo.status != "livre" else "false")
         self.setProperty("fechando", "true" if resumo.status == "fechando" else "false")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumSize(96, 96)
+        self.setMinimumSize(self.LARGURA_MINIMA_PX, self.ALTURA_PX)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         layout = QVBoxLayout(self)

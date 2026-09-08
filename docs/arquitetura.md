@@ -83,7 +83,7 @@ Portado integralmente do Gestor Comercial, **exceto** os itens cortados abaixo (
 
 ### 3.11 Funcionários
 - `Funcionario` é o colaborador de atendimento (garçom, cozinha, ...) — **não loga** (login é `Usuario`, §3.1). Serve só para vincular quem atendeu a comanda (`Comanda.atendente_id`, opcional) e para consumo interno (§3.8).
-- Cadastro (nome, cargo livre, telefone opcional), edição, listagem de ativos/todos.
+- Cadastro (nome, cargo, telefone opcional, situação), edição, listagem de ativos/todos. O cargo **não é texto livre** desde o §3.13: é uma das cinco opções fixas de `CargoFuncionario` — Gerente, Caixa, Garçom, Cozinha, Entregador —, validadas em `FuncionarioService`. Quem escolhe é a grade de cards de `ui/widgets/funcionario_dialog.py` (§9.5), e é lá que mora também o que cada cargo libera no PDV (`CARGOS`), derivado do cargo e não gravado no banco.
 - Desativação soft: some da busca de atendimento, mas histórico (comandas atendidas, consumo, quitações) é preservado.
 - Exclusão física, bloqueada se houver histórico vinculado (sugere desativar em vez de excluir).
 - Tela de mesas/comanda mostra um seletor de busca rápida só com `Funcionario` ativos, para setar/trocar `Comanda.atendente_id` a qualquer momento (`ComandaService.definir_atendente`).

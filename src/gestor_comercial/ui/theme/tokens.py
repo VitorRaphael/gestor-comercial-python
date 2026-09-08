@@ -107,14 +107,26 @@ TEMA_ESCURO: dict[str, str] = {
     # de vendas) — deliberadamente diferente do ciano de "ação neutra"
     # (#0891b2) usado em botões, pra não confundir dado com controle.
     "ciano_metrica": "#22D3EE",
-    # Cards de mesa (livre/ocupada/fechando): mesma superfície elevada pras
-    # três, só a barra/borda superior muda de cor por status — não é mais
-    # fundo tingido por estado (era roxo pra ocupada antes do redesign
-    # "Dark Industrial").
+    # Cards de mesa (livre/ocupada/fechando). LIVRE e FECHANDO continuam na
+    # superfície elevada com a barra superior mudando de cor; OCUPADA voltou a
+    # ser fundo tingido — Vermelho Ferrari (Rosso Corsa), decisão do Vitor em
+    # 2026-09-08. O ciano de antes tratava a mesa cheia como estado neutro, e
+    # no balcão ela é a informação que o operador precisa achar de longe: é
+    # onde tem dinheiro em aberto. O par é o da spec: corpo `#2D1214`
+    # (vermelho quase preto, que não brilha num turno inteiro de tela ligada)
+    # com contorno `#DC2626`.
     "mesa_bg": "#161615",
-    "mesa_ocupada_bg": "#1C1C1A",
-    "mesa_ocupada_borda": "#22D3EE",
+    "mesa_ocupada_bg": "#2D1214",
+    "mesa_ocupada_borda": "#DC2626",
+    # Número e valor do card ocupado. Existia desde o redesign "Vívido" e nunca
+    # tinha sido ligado ao QSS — com o fundo tingido ele passou a ser
+    # necessário, porque `texto` sozinho não sabe que o fundo mudou.
     "mesa_ocupada_texto": "#FFFFFF",
+    # A palavra OCUPADA e nada mais. Separada da borda de propósito: `#DC2626`
+    # em 10px com 1px de espaçamento sobre `#2D1214` fica escuro demais para
+    # ler de pé; `#EF4444` é o mesmo vermelho um degrau acima, que a spec chama
+    # de "glow".
+    "mesa_ocupada_tag": "#EF4444",
     # "Fechando" = comanda em conferência (pré-conta emitida, itens travados)
     # numa mesa ocupada — estado intermediário entre ocupada e livre de novo.
     "mesa_fechando_bg": "#1C1C1A",
@@ -186,20 +198,35 @@ TEMA_ESCURO: dict[str, str] = {
     "badge_combo_texto": "#1c1917",
     "campo_erro_texto": "#f43f5e",
     "campo_erro_bg": "#fdecea",
-    # ---- Modal de PIN com numpad (`ui/widgets/pin_pad_dialog.py`) ------
+    # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`) ----
     # Ciano proprio, nomeado pelo papel, em vez de reaproveitar
     # `ciano_metrica` (dado) ou `ciano_acao` (botao): o marcador de digito
     # e o ENTRAR do teclado sao FEEDBACK de autenticacao, e o dia em que a
     # paleta de metricas mudar nao pode arrastar junto a tela que tranca o
     # Caixa. As teclas tem fundo/borda proprios porque ficam DENTRO do
     # cartao (`superficie`) e precisam de um degrau de contraste a mais.
-    "pin_icone_bg": "#132E35",
-    "pin_icone_borda": "rgba(34, 211, 238, 0.22)",
-    "pin_icone_glifo": "#22D3EE",
-    "pin_fechar_bg": "#1F1F1D",
-    "pin_fechar_borda": "rgba(255, 255, 255, 0.06)",
-    "pin_fechar_hover": "#2A2A27",
-    "pin_fechar_texto": "#A1A1AA",
+    #
+    # `badge_icone_*` chamava-se `pin_icone_*` enquanto so o cadeado do PIN o
+    # usava. Hoje veste tambem o badge do modal de funcionario, as iniciais do
+    # avatar e o card de cargo escolhido -- o nome passou a ser o papel, e nao
+    # a tela, pelo mesmo criterio que renomeou `pin_fechar_*` no §9.4.
+    # Pilula "Ativo" marcada, no modal de funcionario: verde do tema sobre um
+    # fundo tingido proprio. `sucesso` sozinho, chapado, viraria um botao verde
+    # do tamanho de "Cadastrar" ao lado dele -- o que se quer aqui e um estado
+    # marcado, nao uma segunda acao primaria.
+    "pilula_ativo_bg": "#14291E",
+    "pilula_ativo_texto": "#4ADE80",
+    "badge_icone_bg": "#132E35",
+    "badge_icone_borda": "rgba(34, 211, 238, 0.22)",
+    "badge_icone_glifo": "#22D3EE",
+    # `botao_circular_*` nomeia o PAPEL, não a tela: o mesmo par bg/borda veste
+    # o ✕ do modal de PIN, o ✕ do modal "Adicionar item" e os passos −/+ da
+    # quantidade. Chamava-se `pin_fechar_*` enquanto só o PIN o usava; renomear
+    # foi mais barato que duplicar a família com os mesmos quatro hex.
+    "botao_circular_bg": "#1F1F1D",
+    "botao_circular_borda": "rgba(255, 255, 255, 0.06)",
+    "botao_circular_hover": "#2A2A27",
+    "botao_circular_texto": "#A1A1AA",
     "pin_tecla_bg": "#1E1E1C",
     "pin_tecla_borda": "rgba(255, 255, 255, 0.06)",
     "pin_tecla_hover": "#2A2A27",
@@ -233,12 +260,19 @@ TEMA_CLARO: dict[str, str] = {
     "aviso": "#b45309",
     "ciano_metrica": "#0e7490",
     # Cards de mesa: LIVRE em branco puro (mesma leitura do dashboard),
-    # OCUPADA em âmbar pastel e FECHANDO em azul pastel -- ver spec do
-    # redesign "Vívido" (2026-09-05).
+    # OCUPADA em vermelho pastel e FECHANDO em azul pastel -- ver spec do
+    # redesign "Vívido" (2026-09-05) e a troca do âmbar pelo Vermelho Ferrari
+    # (2026-09-08). A borda é o MESMO `#DC2626` do tema escuro: o vermelho de
+    # mesa ocupada é o único token de status que não muda entre os dois temas,
+    # porque é ele que o operador procura de longe.
     "mesa_bg": "#FFFFFF",
-    "mesa_ocupada_bg": "#FEF3C7",
-    "mesa_ocupada_borda": "#F59E0B",
-    "mesa_ocupada_texto": "#78350F",
+    "mesa_ocupada_bg": "#FEE2E2",
+    "mesa_ocupada_borda": "#DC2626",
+    "mesa_ocupada_texto": "#991B1B",
+    # No claro a palavra OCUPADA e o número do card usam o mesmo carmim: sobre
+    # `#FEE2E2` o `#991B1B` já tem contraste de sobra, e o degrau que o tema
+    # escuro precisa aqui só serviria para clarear texto sobre fundo claro.
+    "mesa_ocupada_tag": "#991B1B",
     "mesa_fechando_bg": "#DBEAFE",
     "mesa_fechando_borda": "#3B82F6",
     "mesa_fechando_texto": "#1E40AF",
@@ -307,20 +341,31 @@ TEMA_CLARO: dict[str, str] = {
     "badge_combo_texto": "#FFFFFF",
     "campo_erro_texto": "#DC2626",
     "campo_erro_bg": "#FEE2E2",
-    # ---- Modal de PIN com numpad (`ui/widgets/pin_pad_dialog.py`) ------
+    # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`) ----
     # Ciano proprio, nomeado pelo papel, em vez de reaproveitar
     # `ciano_metrica` (dado) ou `ciano_acao` (botao): o marcador de digito
     # e o ENTRAR do teclado sao FEEDBACK de autenticacao, e o dia em que a
     # paleta de metricas mudar nao pode arrastar junto a tela que tranca o
     # Caixa. As teclas tem fundo/borda proprios porque ficam DENTRO do
     # cartao (`superficie`) e precisam de um degrau de contraste a mais.
-    "pin_icone_bg": "#CFFAFE",
-    "pin_icone_borda": "#A5F3FC",
-    "pin_icone_glifo": "#0E7490",
-    "pin_fechar_bg": "#F0EFE9",
-    "pin_fechar_borda": "#E2E1D9",
-    "pin_fechar_hover": "#E2E1D9",
-    "pin_fechar_texto": "#64748B",
+    #
+    # `badge_icone_*` chamava-se `pin_icone_*` enquanto so o cadeado do PIN o
+    # usava. Hoje veste tambem o badge do modal de funcionario, as iniciais do
+    # avatar e o card de cargo escolhido -- o nome passou a ser o papel, e nao
+    # a tela, pelo mesmo criterio que renomeou `pin_fechar_*` no §9.4.
+    # Ver o comentario gemeo em TEMA_ESCURO. No claro o verde do token
+    # `sucesso` (#22C55E) sobre o pastel nao tem contraste de texto, entao a
+    # pilula marcada usa o verde escuro.
+    "pilula_ativo_bg": "#DCFCE7",
+    "pilula_ativo_texto": "#15803D",
+    "badge_icone_bg": "#CFFAFE",
+    "badge_icone_borda": "#A5F3FC",
+    "badge_icone_glifo": "#0E7490",
+    # Ver o comentário gêmeo em TEMA_ESCURO: o nome é o papel, não a tela.
+    "botao_circular_bg": "#F0EFE9",
+    "botao_circular_borda": "#E2E1D9",
+    "botao_circular_hover": "#E2E1D9",
+    "botao_circular_texto": "#64748B",
     "pin_tecla_bg": "#FFFFFF",
     "pin_tecla_borda": "#E2E1D9",
     "pin_tecla_hover": "#F0EFE9",

@@ -338,7 +338,7 @@ def test_o_escurecedor_aparece_ao_abrir_e_some_ao_fechar(qapp, assentar):
     """O escurecedor é filho da JANELA, não do diálogo: se ele não for solto no
     `done()`, cada ida à Central de Loja deixa um véu invisível pendurado no
     `MainWindow`, que vive o processo inteiro."""
-    from gestor_comercial.ui.widgets.pin_pad_dialog import _Backdrop
+    from gestor_comercial.ui.widgets.cartao_modal import Backdrop
 
     janela = QWidget()
     janela.resize(800, 600)
@@ -350,12 +350,12 @@ def test_o_escurecedor_aparece_ao_abrir_e_some_ao_fechar(qapp, assentar):
         modal = PinPadDialog("Caixa", "PIN", validador, janela)
         modal.show()
         qapp.processEvents()
-        assert len(janela.findChildren(_Backdrop)) == 1
+        assert len(janela.findChildren(Backdrop)) == 1
         modal.reject()
         modal.deleteLater()
     assentar()
 
-    assert janela.findChildren(_Backdrop) == [], (
+    assert janela.findChildren(Backdrop) == [], (
         "escurecedor(es) continuam pendurados na janela depois de 10 aberturas"
     )
 

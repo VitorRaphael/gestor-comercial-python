@@ -8,8 +8,13 @@ def test_criar_sem_cargo_continua_permitido(funcionarios, gerente):
     assert funcionario.cargo is None
 
 
-def test_criar_aceita_uma_das_opcoes_fixas_do_dropdown(funcionarios, gerente):
-    for cargo in ("Gerente", "Caixa", "Garçom", "Cozinha", "Atendente"):
+def test_criar_aceita_uma_das_opcoes_fixas_do_seletor(funcionarios, gerente):
+    """Os cinco textos estão escritos à mão de propósito: é o CONTRATO com o
+    banco, não uma cópia do enum. Iterar `CargoFuncionario` aqui faria o teste
+    aceitar qualquer renomeação em silêncio — e renomear um valor é mudança de
+    dado gravado, que precisa de migração junto (foi o caso de "Atendente" →
+    "Entregador", em `a7f3c2e5d918`)."""
+    for cargo in ("Gerente", "Caixa", "Garçom", "Cozinha", "Entregador"):
         funcionario = funcionarios.criar(f"Pessoa {cargo}", cargo)
         assert funcionario.cargo == cargo
 

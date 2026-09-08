@@ -62,6 +62,8 @@ from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.exceptions import AcessoNegadoError, NaoAutorizadoError
 from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.widgets import cartao_modal
+from gestor_comercial.ui.widgets.cartao_modal import Backdrop
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 
 # Um validador recebe o PIN digitado e levanta `NaoAutorizadoError` /
@@ -69,28 +71,6 @@ from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 # autoriza) não interessa a este diálogo: quem precisa dele para auditoria
 # chama o service direto.
 Validador = Callable[[str], object]
-
-
-class _Backdrop(QWidget):
-    """Escurecedor da janela de trás, para o olho ir ao cartão.
-
-    É filho da janela principal, não uma janela própria: um `QWidget` comum
-    dentro do backing store do Qt já compõe por cima dos irmãos, e isso custa
-    uma pintura chapada — bem menos que abrir uma segunda janela translúcida do
-    tamanho da tela numa máquina sem GPU para gastar.
-    """
-
-    OPACIDADE = 150  # 0-255 (~59%)
-
-    def __init__(self, parent: QWidget) -> None:
-        super().__init__(parent)
-        self.setObjectName("pinPadBackdrop")
-
-    @nao_deixa_escapar()
-    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
-        pintor = QPainter(self)
-        pintor.fillRect(self.rect(), QColor(0, 0, 0, self.OPACIDADE))
-        pintor.end()
 
 
 class _IconeCadeado(QWidget):
@@ -116,7 +96,7 @@ class _IconeCadeado(QWidget):
     @nao_deixa_escapar()
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
         paleta = ThemeController.instancia().tokens_atuais
-        cor = QColor(paleta["pin_icone_glifo"])
+        cor = QColor(paleta["badge_icone_glifo"])
 
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -134,7 +114,7 @@ class _IconeCadeado(QWidget):
         pintor.drawRoundedRect(QRectF(4.0, 9.0, 14.0, 10.0), 2.5, 2.5)
 
         # Furo da fechadura, vazado na cor da caixa que envolve o ícone.
-        pintor.setBrush(QColor(paleta["pin_icone_bg"]))
+        pintor.setBrush(QColor(paleta["badge_icone_bg"]))
         pintor.drawEllipse(QRectF(9.4, 12.4, 3.2, 3.2))
         pintor.end()
 
@@ -168,7 +148,7 @@ class PinPadDialog(QDialog):
         super().__init__(parent)
         self._validar = validador
         self._pin = ""
-        self._backdrop: _Backdrop | None = None
+        self._backdrop: Backdrop | None = None
         self._dots: list[QFrame] = []
 
         self.setObjectName("pinPadDialog")
@@ -220,19 +200,6 @@ class PinPadDialog(QDialog):
     # Montagem
     # ------------------------------------------------------------------
 
-    def _preparar_botao(self, botao: QPushButton) -> None:
-        """Tira o botão da roda de foco e do papel de "botão padrão".
-
-        As duas coisas pela mesma razão: quem lê o teclado é o diálogo, em
-        `keyPressEvent`. Com foco num botão, o Enter dispararia aquele botão em
-        vez de confirmar, e o Espaço "clicaria" a última tecla usada — bug
-        clássico de numpad em Qt.
-        """
-        botao.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        botao.setAutoDefault(False)
-        botao.setDefault(False)
-        botao.setCursor(Qt.CursorShape.PointingHandCursor)
-
     def _montar_cabecalho(self, titulo: str, subtitulo: str) -> QHBoxLayout:
         linha = QHBoxLayout()
         linha.setSpacing(12)
@@ -262,7 +229,7 @@ class PinPadDialog(QDialog):
         self._botao_fechar.setObjectName("pinPadFechar")
         self._botao_fechar.setFixedSize(32, 32)
         self._botao_fechar.setToolTip("Fechar")
-        self._preparar_botao(self._botao_fechar)
+        cartao_modal.preparar_botao(self._botao_fechar)
         self._botao_fechar.clicked.connect(self.reject)
         linha.addWidget(self._botao_fechar, 0, Qt.AlignmentFlag.AlignTop)
         return linha
@@ -300,7 +267,7 @@ class PinPadDialog(QDialog):
         botao = QPushButton(rotulo)
         botao.setObjectName("pinPadTecla")
         botao.setMinimumHeight(self.ALTURA_TECLA_PX)
-        self._preparar_botao(botao)
+        cartao_modal.preparar_botao(botao)
         return botao
 
     def _montar_teclado(self) -> QGridLayout:
@@ -324,7 +291,7 @@ class PinPadDialog(QDialog):
         self._botao_confirmar = QPushButton("ENTRAR")
         self._botao_confirmar.setObjectName("pinPadConfirmar")
         self._botao_confirmar.setMinimumHeight(self.ALTURA_TECLA_PX)
-        self._preparar_botao(self._botao_confirmar)
+        cartao_modal.preparar_botao(self._botao_confirmar)
         self._botao_confirmar.clicked.connect(self._confirmar)
         grade.addWidget(self._botao_confirmar, 3, 2)
         return grade
@@ -332,7 +299,7 @@ class PinPadDialog(QDialog):
     def _montar_rodape(self) -> QPushButton:
         self._botao_cancelar = QPushButton("Cancelar")
         self._botao_cancelar.setObjectName("pinPadCancelar")
-        self._preparar_botao(self._botao_cancelar)
+        cartao_modal.preparar_botao(self._botao_cancelar)
         self._botao_cancelar.clicked.connect(self.reject)
         return self._botao_cancelar
 
@@ -439,30 +406,12 @@ class PinPadDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _montar_backdrop(self) -> None:
-        pai = self.parentWidget()
-        if pai is None or self._backdrop is not None:
-            return
-        janela = pai.window()
-        self._backdrop = _Backdrop(janela)
-        self._backdrop.setGeometry(janela.rect())
-        self._backdrop.raise_()
-        self._backdrop.show()
+        if self._backdrop is None:
+            self._backdrop = cartao_modal.montar(self)
 
     def _descartar_backdrop(self) -> None:
-        """Solta o escurecedor do parent AGORA, não quando o Qt passar recolhendo.
-
-        `deleteLater()` sozinho só marca; até o laço de eventos girar, o widget
-        continua filho da janela principal — e a janela principal vive o
-        processo inteiro. O `setParent(None)` é o que garante que uma tarde de
-        idas e voltas à Central de Loja não deixe uma pilha de escurecedores
-        invisíveis pendurada no `MainWindow`.
-        """
-        if self._backdrop is None:
-            return
         backdrop, self._backdrop = self._backdrop, None
-        backdrop.hide()
-        backdrop.setParent(None)
-        backdrop.deleteLater()
+        cartao_modal.descartar(backdrop)
 
     # ------------------------------------------------------------------
     # Overrides do Qt
@@ -473,19 +422,10 @@ class PinPadDialog(QDialog):
         super().showEvent(event)
         self._montar_backdrop()
         self.adjustSize()
-        self._centralizar_no_pai()
-        # O diálogo, e não um botão, é quem lê o teclado (ver `_preparar_botao`).
+        cartao_modal.centralizar_no_pai(self)
+        # O diálogo, e não um botão, é quem lê o teclado
+        # (ver `cartao_modal.preparar_botao`).
         self.setFocus(Qt.FocusReason.OtherFocusReason)
-
-    def _centralizar_no_pai(self) -> None:
-        pai = self.parentWidget()
-        if pai is None:
-            return
-        janela = pai.window()
-        if not janela.isVisible():
-            return
-        centro = janela.frameGeometry().center()
-        self.move(centro.x() - self.width() // 2, centro.y() - self.height() // 2)
 
     @nao_deixa_escapar()
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 (override Qt)

@@ -11,6 +11,10 @@
 > Status geral e escopo do produto continuam em [`TODO.md`](TODO.md) e
 > [`docs/arquitetura.md`](docs/arquitetura.md).
 >
+> **Para leitura não técnica:** o **§10** conta esta mesma remasterização em
+> português de balcão — o que o programa ganhou, sem jargão. É por onde começar
+> se a pergunta é "o que melhorou?" em vez de "como foi feito?".
+>
 > **Legenda de confiança dos achados:**
 > ✅ **provado** — reproduzido nesta máquina, com saída de execução colada aqui.
 > 🔍 **verificado** — código aberto e conferido linha a linha.
@@ -1544,14 +1548,21 @@ por `VACUUM INTO` e checkpoint no fechamento. Ver §8.
 
 ---
 
-## 9. Depois da remasterização — 2026-09-06
+## 9. Depois da remasterização — registro contínuo
 
 > A faxina fechou com um defeito de layout **anterior** a ela documentado e de
 > pé (§8, última linha): o cartão "Recebimentos" da tela de Caixa cortava as
 > linhas ao meio num monitor de 768px. Ficou de fora de propósito — mudar uma
 > tela durante a comparação tiraria a paridade contra a qual comparar. Com o
 > documento fechado, a paridade já foi prestada, e o defeito passou a ser
-> simplesmente o próximo item. Esta seção é o que veio **depois** da fase 7.
+> simplesmente o próximo item. Esta seção é o que veio **depois** da fase 7, e
+> continua sendo o lugar de cada trabalho que entra na V1 daqui em diante — um
+> item por subseção, com data.
+>
+> | | | |
+> |---|---|---|
+> | §9.1 | 2026-09-06 | O cartão "Recebimentos" espremido |
+> | §9.4 | 2026-09-08 | O modal "Adicionar item" refeito |
 
 ### 9.1 O cartão "Recebimentos" espremido ✅ CORRIGIDO
 
@@ -1612,3 +1623,368 @@ porque agora têm dois donos: o cartão de saldo e a rolagem que o envolve.
 | 2026-09-06 | A rolagem **reserva a largura da barra** | Sem a reserva o viewport fica menor que o mínimo do cartão (326 contra 340) e a lateral direita é cortada — trocar corte de cima por corte de lado não é correção. Custa 14px de largura da tabela de movimentos, que reflui |
 | 2026-09-06 | Barra de rolagem fica com o **visual padrão do Qt** | É o mesmo da Configurações e do Histórico. Estilizá-la só aqui criaria uma terceira aparência de rolagem; estilizá-la global é mudança de tema para todas as telas, e não é o que este item pede |
 | 2026-09-06 | `--tamanho` na bancada em vez de editar `TAMANHO` | Os dois defeitos de aperto (Configurações e Caixa) só existem numa altura específica. Ou o tamanho é argumento do comando, ou a reprodução depende de alguém lembrar de editar a constante |
+
+
+### 9.4 O modal "Adicionar item" refeito ✅ CONCLUÍDO — 2026-09-08
+
+Pedido do Vitor, com dois mockups: substituir a janela legada de lançar produto
+na comanda pela interface moderna, **mantendo a miniatura do produto** ao lado
+de cada item. O modal antigo (`_AdicionarItemDialog`, 60 linhas dentro de
+`comanda_view.py`) era um `QFormLayout` com a moldura de janela do sistema, um
+`QSpinBox` de setinha e uma lista de texto corrido:
+`"Arroz — R$ 10,00 — Acompanhamentos"`. É a tela por onde entra **cada produto
+de cada comanda** — a mais usada do turno.
+
+O resultado mora em `ui/widgets/adicionar_item_dialog.py` e segue o arranjo do
+`pin_pad_dialog`: cartão sem moldura, escurecedor atrás, cabeçalho próprio
+(`MESA 3 · LANÇAMENTO RÁPIDO` / `Adicionar item` / ✕). Dentro: busca com lupa
+desenhada e anel âmbar no foco, faixa de pílulas de categoria, lista com
+miniatura circular, e um rodapé com quantidade, observação e a prévia do valor.
+
+**Nenhuma regra de negócio mudou.** O diálogo não conhece `ComandaService`:
+recebe um `lancar_item(produto_id, quantidade, observacao)` e chama. O
+`R$ 20,00` do rodapé é preço × quantidade **para o operador conferir** — não
+entra em cálculo, não é gravado, e o total da comanda continua inteiro no
+service. O fluxo rápido também é o de antes: `Enter` lança e o modal **fica
+aberto**, com os campos zerados e o foco de volta na busca.
+
+#### O que a digitação deixou de custar
+
+O modal fica aberto lançando item atrás de item, e é aí que estava o defeito.
+`lancar_item` faz commit, **e o commit expira os atributos das instâncias do
+SQLAlchemy** — então era depois de *cada item lançado* que a busca voltava a
+bater no banco a cada tecla. Medido sobre o cardápio real do food truck (113
+produtos), contando com `after_cursor_execute`:
+
+| | Antigo | Novo |
+|---|---|---|
+| Primeira tecla, lista fria | 9 consultas | — |
+| Teclas 2 a 4 | 0 consultas | **0** |
+| 3 teclas **depois de lançar um item** | **120 consultas** | **0** |
+| Abertura do modal (instantâneo, frio) | — | 128 consultas, **uma vez** |
+
+A troca é deliberada: paga-se na abertura, fora do caminho da tecla, o que
+antes se pagava de novo a cada lançamento. As 128 da abertura são o **N+1 do
+§3.6** aparecendo aqui; virariam 2 com `selectinload` no
+`produto_repository.listar_ativos_de_categoria_ativa`. Ficou **de fora de
+propósito**: é mudança num repositório que serve outras telas, e este item era
+o modal.
+
+Fora da conta de consultas, e no mesmo caminho: a lista virou uma
+`QStyledItemDelegate`, então digitar não constrói mais um `QListWidgetItem`
+**com `QIcon`** por produto filtrado, e a pintura acontece só nas ~4 linhas
+visíveis. `formatar_reais` (que passa por `Decimal.quantize`) saiu do por-tecla
+para o por-abertura junto com o resto do instantâneo.
+
+#### O defeito que só a bancada visual pegou
+
+A suíte fechou verde com os 5 produtos da fixture. A primeira renderização com
+o **cardápio real** mostrou outra coisa: com 15 categorias, o `FlowLayout` da
+faixa de filtros quebrava em 6 fileiras, o `QVBoxLayout` reservava a altura de
+**uma** (é o que `FlowLayout.sizeHint()` devolve) e as outras cinco eram
+pintadas **por cima da lista de produtos**.
+
+É o parente do §9.1 e do defeito da Configurações: layout que não corta,
+espreme — só que aqui nem espremia, transbordava. A correção é o teto de
+`FILEIRAS_DE_CATEGORIA = 2` com rolagem em volta, e a altura real fechada no
+`showEvent`, **depois** do primeiro `polish`: antes dele o `sizeHint` de uma
+pílula não conhece o `padding` que o QSS global aplica.
+
+#### O que a suíte cobrou no caminho
+
+`test_nenhuma_funcao_da_ui_repete_o_corpo_de_outra` (Fase 6) reprovou o commit:
+`_preparar_botao` e `_centralizar_no_pai` tinham sido **copiados** do
+`pin_pad_dialog`. Viraram `ui/widgets/cartao_modal.py`, que passa a ser o dono
+das peças comuns dos dois modais em cartão — o escurecedor (`montar`/
+`descartar`), o `preparar_botao` e o `centralizar_no_pai`. Foi a varredura
+funcionando exatamente como o §3 desenhou: a cópia não passou de um commit.
+
+#### Como foi conferido
+
+- **Suíte** — `946 passed` (de 918). 27 testes novos em
+  `tests/ui/test_adicionar_item_dialog.py` e 1 no inventário de
+  `test_vazamento_modais.py`.
+- **Os dois testes que importam foram conferidos desfazendo a correção**, como
+  manda o §9.2: sem `_garantir_filtro_aplicado()`, o teste do Enter apressado
+  reprova; sem `_ajustar_altura_da_faixa()`, o teto da faixa reprova.
+- **Bancada visual** — o cartão renderizado nos dois temas com o cardápio real,
+  na plataforma nativa (a `offscreen` não rasteriza texto). 500×630 num monitor
+  de 738px de altura.
+- **Ciclo de vida** — 30 aberturas com `exec()` não deixam diálogo preso à
+  view; 10 aberturas não deixam escurecedor pendurado na janela.
+
+#### Decisões
+
+| Data | Decisão | Motivo |
+|---|---|---|
+| 2026-09-08 | O segundo mockup manda no layout; o **âmbar do tema** manda na cor | O mockup trazia turquesa no botão Adicionar e no total. O acento do app é `acento` (âmbar no escuro, azul no claro) e funciona nos dois temas de graça; uma segunda cor de "ação primária" só existiria nesta tela |
+| 2026-09-08 | `QStyledItemDelegate` em vez de um widget por linha | `funcionarios_view` monta widget por linha e está certo lá — a lista muda ao clicar num filtro. Aqui ela é refiltrada a cada tecla, e widget por produto é o lag que o RNF proíbe |
+| 2026-09-08 | Instantâneo do cardápio na abertura, em vez de ler o ORM ao filtrar | Ver a tabela acima: tira o banco do caminho da tecla em qualquer estado, inclusive depois do commit de um lançamento |
+| 2026-09-08 | O teclado é lido **só** no `keyPressEvent` do diálogo | Ligar `returnPressed` dos campos **além** disso lançaria o item duas vezes com um Enter só: o `QLineEdit` ignora o Return e ele sobe para o diálogo. Por isso lista e botões ficam sem foco |
+| 2026-09-08 | Faixa de categorias com teto de 2 fileiras e rolagem | 15 categorias no cardápio real. Sem teto, o cartão sai da tela do food truck; com teto, quem passa disso rola — e a busca continua sendo o caminho rápido |
+| 2026-09-08 | `Esc` fecha o modal, em vez de limpar a busca primeiro | O briefing pede fechamento com descarte. O comportamento antigo (1º Esc limpa, 2º fecha) continua no `BuscaProdutoWidget`, que o modal de combos do Cardápio ainda usa |
+| 2026-09-08 | Tokens `pin_fechar_*` renomeados para `botao_circular_*` | Mesmos quatro hex vestem o ✕ dos dois modais e os passos −/+ da quantidade. O nome passou a ser o papel, e não a tela; duplicar a família seria pior |
+| 2026-09-08 | `selectinload` no repositório fica **fora** deste item | As 128 consultas da abertura são o §3.6, não o modal. Mexer num repositório que serve outras telas pede medição própria e paridade própria |
+| 2026-09-08 | O `BuscaProdutoWidget` antigo **continua existindo** | O modal "Adicionar componente" do Cardápio (`_ComponenteDialog`) ainda o usa, e não estava no escopo. `filtrar_produtos` é compartilhada entre os dois, com os testes dela intactos |
+
+---
+
+### 9.5 O modal "Novo funcionário" e o vermelho da mesa ocupada ✅ CONCLUÍDO — 2026-09-08
+
+Dois pedidos do Vitor no mesmo dia, com um mockup para o primeiro.
+
+#### Parte 1 — o modal de cadastro da equipe
+
+O `_FuncionarioDialog` eram 40 linhas dentro de `funcionarios_view.py`: três
+campos empilhados num `QFormLayout`, com a moldura de janela do sistema e um
+`QComboBox` de setinha para o cargo. Não é a tela mais usada do turno (essa é a
+de lançar item, §9.4), mas é a que decide **quem existe no sistema** — e
+"Cargo: [Garçom ▾]" não diz o que um garçom pode fazer no PDV.
+
+O resultado mora em `ui/widgets/funcionario_dialog.py` e é o **terceiro** modal
+em cartão do app, no mesmo arranjo do PIN e do "Adicionar item": cartão sem
+moldura, escurecedor atrás, cabeçalho próprio. Dentro: badge de identidade com
+ícone desenhado à mão, avatar que monta as iniciais enquanto se digita o nome,
+os cinco cargos como **cards com descrição** em grade de duas colunas, telefone
+com máscara, situação Ativo/Inativo em pílulas, e um rodapé que diz em voz alta
+o que o cargo marcado libera (`CAIXA · ACESSO LIBERADO`).
+
+**Nenhuma regra de negócio mudou, e nenhum método de service é novo.** O
+diálogo não conhece `FuncionarioService`: devolve um `DadosFuncionario` e a
+view chama `criar`/`editar` como antes. A situação também não virou campo: o
+funcionário continua nascendo ativo em `criar()`, e a view usa `ativar()`/
+`desativar()` — o mesmo par que o botão do painel de detalhe já usava — quando
+a escolha diverge do estado atual. O modal não abriu caminho novo para o banco;
+abriu uma segunda porta para o caminho que já existia.
+
+##### O que a tela promete e o que o sistema faz pararam de poder divergir
+
+"ACESSO" nunca foi campo do domínio (§3.14): é derivado do cargo. A derivação
+morava solta em `funcionarios_view` como um conjunto de dois nomes
+(`_CARGOS_ACESSO_TOTAL`), e o texto do rodapé do modal seria uma **segunda**
+lista dizendo a mesma coisa. Os dois passaram a ler `CARGOS`, onde cada cargo
+carrega o valor que vai para o banco, a descrição do card e o resumo de acesso.
+Enquanto fossem duas listas, "Gerente e Caixa" precisava estar certo em dois
+arquivos ao mesmo tempo.
+
+##### "Atendente" virou "Entregador" — e isso é mudança de dado
+
+O mockup pede cinco cargos, e o quinto é **Entregador**, não "Atendente".
+"Atendente" não descrevia função nenhuma do food truck (todo mundo ali atende);
+quem leva o pedido do delivery, sim. `CargoFuncionario.ATENDENTE` virou
+`ENTREGADOR`.
+
+`funcionarios.cargo` é `String`, não `Enum` de banco, então o **schema** não
+muda — mas o valor gravado, sim, e é por isso que a mudança veio com a migração
+`a7f3c2e5d918`. Sem ela, um funcionário já cadastrado como "Atendente"
+continuaria na lista, abriria o modal de edição com **nenhum** cargo marcado e
+perderia o cargo na primeira vez que alguém mexesse em qualquer outro campo —
+sem aviso. Nenhum `Funcionario` do `seed.py` usa "Atendente" (o bootstrap só
+cria Caixas), então na máquina do food truck a migração provavelmente não vai
+tocar em linha nenhuma; ela existe para o cadastro feito à mão.
+
+#### Parte 2 — Vermelho Ferrari na mesa ocupada
+
+A mesa em atendimento era ciano, e o comentário no QSS dizia por quê: "ocupada
+é estado normal, não um alerta". A leitura de balcão é a oposta — mesa ocupada
+é **onde está o dinheiro em aberto do salão**, e é o que se procura de relance
+numa grade de sessenta. Virou `#DC2626`, o mesmo nos dois temas (o único token
+de status que não muda entre Claro e Escuro), com o corpo do card tingido:
+`#2D1214` no escuro, `#FEE2E2` no claro, textos em branco e em carmim
+`#991B1B`. A borda, os dois pontinhos de legenda (`● OCUPADA` no resumo do
+salão e o da comanda no painel da direita) e a palavra OCUPADA acompanham,
+porque todos leem a mesma família de tokens.
+
+##### A cor tinha carona
+
+`mesa_ocupada_borda` não era lido só por seletor de mesa: o **badge de despesa
+do Caixa** e o **link de pendências das Impressoras** pegavam aquele ciano
+emprestado. Pintar a mesa de vermelho pintaria de vermelho a despesa do caixa
+junto, e ninguém veria até abrir aquela tela. Os dois passaram a ler
+`ciano_metrica`, que é a cor que queriam — e uma varredura no
+`test_mesas_ocupadas_em_vermelho.py` reprova quem recolar o empréstimo. Ela
+descobre quem lê um token trocando o valor dele por uma sentinela e procurando
+a sentinela no QSS montado, em vez de ler o template com expressão regular.
+
+##### O corte que o fundo tingido revelou
+
+Com o corpo do card na cor da superfície, ninguém via que o card ocupado tem
+**quatro** linhas (número, tag, valor, atendente) contra as duas da mesa livre:
+ele media 110px de conteúdo e era desenhado com 96, o piso de
+`setMinimumSize`. O valor em aberto saía cortado ao meio e o nome de quem
+atende não aparecia — no card da mesa que tem dinheiro pendurado, e justo o
+dado que a cor nova existe para destacar.
+
+É o parente do §9.1 e da Configurações da Fase 7: layout que não corta,
+espreme. O piso subiu para `ALTURA_PX = 112`, medido, e o que a suíte cobra não
+é o número: é o invariável de que nenhum card seja desenhado menor que o
+próprio `sizeHint`.
+
+#### O que a suíte cobrou no caminho
+
+O teste do corte **passava verde com o defeito no lugar**, e por um motivo que
+vale registrar: a plataforma `offscreen` sobe com o banco de fontes **vazio**, e
+sem fonte o card ocupado mede 93px em vez de 110 — o aperto simplesmente não
+acontece ali. A correção foi registrar, na fixture, a fonte que o próprio app
+registra no boot (`resources/fonts/ArchivoBlack-Regular.ttf`, que vive no
+repositório) e devolvê-la ao banco no fim. Sem isso, o arquivo teria três
+testes que nenhuma regressão poderia deixar vermelhos — exatamente o que o §9.2
+manda conferir antes de fechar.
+
+#### Como foi conferido
+
+- **Suíte** — `1009 passed` (de 946). 47 testes novos em
+  `tests/ui/test_funcionario_dialog.py`, 15 em
+  `tests/ui/test_mesas_ocupadas_em_vermelho.py` e 1 no inventário de
+  `test_vazamento_modais.py`.
+- **Os testes que importam foram conferidos desfazendo a correção**, como manda
+  o §9.2: com `ALTURA_PX = 96` os dois testes de corte reprovam (`mesa 1: 96px
+  < 110px`); devolvendo o empréstimo do ciano, a varredura da carona reprova.
+- **Bancada visual** — `tools/comparar_telas.py --tamanho 1366x738` nos dois
+  temas: das 24 renderizações, 22 **idênticas byte a byte** e só as duas de
+  Mesas diferindo. O cartão do modal foi renderizado na plataforma nativa
+  (520×536 num monitor de 738px de altura), em branco, preenchido e em edição,
+  nos dois temas.
+- **Migração** — aplicada do zero num banco temporário até a `head`, com um
+  `Funcionario` gravado como "Atendente": `upgrade` reescreve para "Entregador",
+  `downgrade` devolve, `upgrade` reescreve de novo.
+- **Ciclo de vida** — 30 aberturas com `exec()` não deixam diálogo preso à view;
+  10 aberturas não deixam escurecedor pendurado na janela.
+
+#### Decisões
+
+| Data | Decisão | Motivo |
+|---|---|---|
+| 2026-09-08 | O mockup manda no layout; o **acento do tema** manda no botão Cadastrar | Mesma decisão do §9.4, e pelo mesmo motivo: o mockup traz turquesa na ação primária, mas o app já tem uma (`acento` — âmbar no escuro, azul no claro) e ela funciona nos dois temas de graça. Uma segunda cor de "ação primária" existiria só nesta tela. O ciano do mockup **ficou** onde ele é identidade e não ação: o badge do cabeçalho, as iniciais do avatar e o card de cargo escolhido |
+| 2026-09-08 | As iniciais continuam sendo **primeira + última** palavra | O mockup mostra "AB" para "Ana Beatriz Souza" (duas primeiras); o app usa o monograma de sempre, nome + sobrenome, e "AS" é o que a linha da lista já mostrava. Trocar mudaria o avatar de toda a tela de Funcionários, e o exemplo escrito no briefing ("Ana Beatriz" → "AB") vale nos dois critérios. É uma linha em `iniciais()` se o Vitor preferir o do mockup |
+| 2026-09-08 | `ATENDENTE` → `ENTREGADOR` com **migração de dado** junto | O valor do enum é o que está gravado na coluna. Renomear sem migrar faz o cadastro antigo perder o cargo na primeira edição, calado |
+| 2026-09-08 | Situação Ativo/Inativo pelos métodos que já existiam | `criar()` não recebe situação e nunca recebeu. Mudar a assinatura do service por causa de uma pílula seria a UI mandando na camada de dados; `ativar()`/`desativar()` já fazem exatamente isso |
+| 2026-09-08 | A máscara de telefone **não mexe** no que não parece telefone | `telefone` é texto livre e sempre foi. Abrir o modal para trocar o cargo de alguém não pode remontar um recado gravado ali como se fosse número — seria o dado reescrito por um caminho que ninguém pediu |
+| 2026-09-08 | O ✓ do card de cargo está sempre no layout e só troca de cor | Mostrar e esconder mudaria a largura da linha do título a cada clique, e card que muda de tamanho ao ser escolhido é o que faz o dedo errar o próximo |
+| 2026-09-08 | Tokens `pin_icone_*` renomeados para `badge_icone_*` | Terceira vez que o mesmo trio bg/borda/glifo veste uma tela que não é a do PIN. Mesmo critério do `botao_circular_*` no §9.4: o nome é o papel, não a tela |
+| 2026-09-08 | "Fechando" **não** entrou na mudança de cor | Continua âmbar. Se os dois estados ficarem vermelhos, param de se distinguir na grade — que é o que a cor existe para fazer |
+| 2026-09-08 | O `_QuitarConsumoDialog` continua com a moldura do sistema | Não estava no pedido, e é o modal que pede a Senha Operacional: mexer nele sem paridade própria é mexer num caminho de autorização |
+
+##### Ficou de fora, e por quê
+
+- **As 8 colunas fixas da grade de mesas** (`_COLUNAS_GRADE = 8`) não cabem na
+  largura útil do monitor de 1366px: a última coluna fica atrás da barra de
+  rolagem horizontal. É anterior a este item e independente da cor — mas
+  aparece nas renderizações acima, e por isso fica registrado aqui.
+- **O `BuscaProdutoWidget`** e o modal "Adicionar componente" do Cardápio
+  continuam como estavam (§9.4).
+
+---
+
+## 10. As melhores mudanças que o programa teve — em português de balcão
+
+> **Por que esta seção existe.** Todo o resto do documento é escrito para quem
+> vai mexer no código. Esta é a mesma remasterização contada para quem vai
+> **usar** o programa: o que mudou no balcão, sem jargão. Nenhum número aqui é
+> novo — todos vêm do §7 e das fases. É o resumo para mostrar ao pai do Vitor,
+> e para o próprio Vitor lembrar, daqui a seis meses, o que estas 8 fases
+> compraram.
+
+### 1. O dinheiro parou de ter duas versões
+
+A conta de "como escrever um valor em reais" existia **10 vezes copiada** — e
+uma delas era diferente das outras: a tela de Mesas escrevia de um jeito e as
+outras nove, de outro. Hoje existe **uma regra só**, `R$ 1.234,50`, em todas as
+telas.
+
+Mais sério que a aparência: a tela e o cupom impresso **arredondavam para lados
+diferentes**. Dava para a tela mostrar `R$ 0,00` e o papel na mão do cliente
+mostrar `0,01`. Hoje os dois passam pela mesma regra, e um teste reprova se
+alguém separar de novo. (§3.8, Fase 3)
+
+### 2. O sistema parou de poder gravar dado pela metade
+
+Antes, quando uma operação falhava no meio, o que ela já tinha mexido ficava
+pendurado — e a **próxima** operação gravava aquela sujeira junto com o dado
+dela. Era o único achado da auditoria capaz de corromper dado de verdade. Hoje
+toda operação desfaz o que fez quando falha.
+
+Junto, o banco passou a **recusar ligação impossível** (um pagamento apontando
+para uma comanda que não existe). Ligar isso revelou um defeito que dormia
+desde uma migração antiga, invisível para os testes, que quebraria em produção.
+(§3.1 e §3.5, Fase 1 e 2)
+
+### 3. As telas pesadas ficaram rápidas — na máquina fraca
+
+Medido num banco com **3 meses de operação real**:
+
+| Tela | Antes | Depois |
+|---|---|---|
+| Dashboard Mensal | 2.502 consultas, 960 ms | **217 consultas, 108 ms** |
+| Histórico do mês | 183 consultas, 127 ms | **79, 28 ms** |
+| Grade de Mesas | 26 consultas, 22 ms | **16, 4 ms** |
+
+O pior de todos buscava a comanda de **cada pagamento**, uma por uma: 1.326
+consultas para montar um mês. Virou 6.
+
+E gravar não ficou mais caro por causa disso: os índices triplicaram o custo de
+escrita, o WAL devolveu tudo, e o resultado final **grava mais rápido que o
+ponto de partida** (1,11 ms contra 1,17 ms por item lançado). (§7.1, Fase 2)
+
+### 4. Perder o dia de vendas ficou muito mais difícil
+
+- Backup automático **a cada fechamento de caixa**, guardando os 60 mais
+  recentes — e um botão para gerar uma cópia na hora, antes de mexer no
+  cardápio ou para levar num pendrive.
+- O arquivo do banco fica **sempre completo no disco** com o programa fechado.
+- A proteção contra **queda de energia no meio da gravação** foi mantida de
+  propósito, contra a recomendação padrão que se lê por aí — porque o cenário
+  do food truck é exatamente esse. Existe um teste que **mata o processo de
+  verdade** no meio da escrita para provar. (§8, Fase 2)
+
+### 5. Defeitos que o pai do Vitor veria, e que morreram
+
+Nenhum destes é sutileza de código — todos aparecem na tela:
+
+- **Cartão fantasma** sobrando na grade de Mesas e no rodapé do Caixa: um
+  pedaço de tela que continuava pintado depois de deixar de existir.
+- **Texto empilhado por cima de texto**: "CoCozinha", "SIM SIMONLI" — a célula
+  nova desenhada em cima da antiga, no Cardápio e nas Impressoras. E um botão
+  "2ª via" sobrevivendo numa tabela já esvaziada.
+- **No tema Claro**, o título "Mesa 3" sumia no branco e o avatar mostrava a
+  letra errada.
+- **Configurações espremida**: os botões de senha viravam pílulas de 14px, sem
+  rótulo nenhum, num monitor de 768px.
+- **Recebimentos cortado ao meio** na tela de Caixa, na mesma altura de tela
+  (§9).
+- Uma **tela inteira invisível** (Estoque), montada toda vez que o programa
+  abria e sem nenhum caminho até ela: peso morto no boot e no `.exe`.
+
+### 6. A rede de segurança que não existia
+
+Metade do código do sistema — as telas, ~8.000 linhas — **não tinha um único
+teste**. Hoje tem 18 arquivos de teste, e a suíte foi de **621 testes com 1
+falha para 800 verdes** (801 com o item do §9).
+
+Isso não melhora nada hoje. Melhora tudo daqui para frente: é a diferença entre
+mexer no sistema e descobrir o estrago no balcão, ou descobrir em 26 segundos
+na máquina do Vitor.
+
+E a prova final: as **11 telas em 24 estados** foram fotografadas e comparadas
+pixel a pixel com o código de antes da faxina, e os **6 cupons** conferidos
+linha a linha. Os cupons saem idênticos; das telas, as únicas diferenças são os
+defeitos consertados. Mudou o que devia mudar, e **nada mais**. (Fase 7)
+
+### 7. O achado mais importante foi um erro nosso
+
+A auditoria dizia que o app vazava **40 MB de memória** e deixava 300 janelas
+vivas. Acreditar nisso teria custado semanas caçando um fantasma. A medição
+refeita provou que os três achados de memória **não existiam** — eram artefato
+de medir sem o laço de eventos do Qt. O consumo real de 300 aberturas é **0,5
+MB, com zero janelas vivas**.
+
+O ganho é ter parado de perseguir o problema errado. E a bancada de medição
+ficou versionada no projeto, com uma opção que reproduz a medição errada ao
+lado da certa, para ninguém repetir. (§2.3, §3.2, §3.3 e §7.2)
+
+---
+
+**Em uma frase:** o sistema ficou mais rápido onde travava, parou de poder
+gravar dado quebrado, ganhou backup automático, perdeu uma dúzia de defeitos
+visíveis — e, o mais valioso, ganhou uma rede de testes que torna seguro
+continuar mexendo nele.

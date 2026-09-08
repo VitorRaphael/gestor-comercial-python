@@ -40,6 +40,8 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QDialog, QWidget
 
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
+from gestor_comercial.ui.widgets.adicionar_item_dialog import AdicionarItemDialog
+from gestor_comercial.ui.widgets.funcionario_dialog import FuncionarioDialog
 from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
 
 ABERTURAS = 30
@@ -100,6 +102,23 @@ def test_pin_da_loja_nao_acumula(qapp, assentar, auth):
     assert pai.findChildren(PinPadDialog) == []
 
 
+def test_adicionar_item_nao_acumula(qapp, assentar):
+    """Um diálogo por clique em "+ Item" — e numa mesa de oito pessoas o
+    operador entra e sai dele o dia inteiro. O comportamento completo do modal
+    está em `test_adicionar_item_dialog.py`; aqui ele entra no inventário de
+    modais do app, que é o que esta varredura mantém.
+
+    Cardápio vazio de propósito: o que se mede é o ciclo de vida do diálogo, e
+    ele não muda com o número de produtos.
+    """
+    pai = QWidget()
+
+    _abrir_e_fechar(lambda p: AdicionarItemDialog([], "Mesa 1", lambda *_: None, p), pai)
+    assentar()
+
+    assert pai.findChildren(AdicionarItemDialog) == []
+
+
 def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, assentar, auth):
     """Rede larga: qualquer `QDialog` pendurado na view, de qualquer tipo.
 
@@ -112,10 +131,11 @@ def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, assentar, auth):
     _abrir_e_fechar(lambda p: CancelamentoDialog("Cancelar comanda", p), pai, vezes=10)
     _abrir_e_fechar(lambda p: PinPadDialog.para_caixa(auth, p), pai, vezes=10)
     _abrir_e_fechar(lambda p: PinPadDialog.para_loja(auth, p), pai, vezes=10)
+    _abrir_e_fechar(lambda p: AdicionarItemDialog([], "Mesa 1", lambda *_: None, p), pai, vezes=10)
     assentar()
 
     vivos = pai.findChildren(QDialog)
-    assert vivos == [], f"{len(vivos)} diálogos de 30 aberturas continuam na memória"
+    assert vivos == [], f"{len(vivos)} diálogos de 40 aberturas continuam na memória"
 
 
 def test_construir_sem_abrir_deixa_o_dialogo_preso_a_view(qapp, assentar):
@@ -183,3 +203,20 @@ def test_fechar_pelo_ok_ou_pelo_cancelar_libera_igual(qapp, assentar, codigo):
     assentar()
 
     assert pai.findChildren(CancelamentoDialog) == []
+
+
+def test_novo_funcionario_nao_acumula(qapp, assentar):
+    """Aberto a cada cadastro e a cada edição de funcionário. É o modal menos
+    frequente dos quatro — e entra nesta varredura exatamente por isso: o
+    inventário só serve enquanto for completo. O comportamento dele está em
+    `test_funcionario_dialog.py`.
+
+    Sem funcionário de propósito: o que se mede é o ciclo de vida, e ele é o
+    mesmo abrindo em branco ou para editar.
+    """
+    pai = QWidget()
+
+    _abrir_e_fechar(lambda p: FuncionarioDialog(parent=p), pai)
+    assentar()
+
+    assert pai.findChildren(FuncionarioDialog) == []

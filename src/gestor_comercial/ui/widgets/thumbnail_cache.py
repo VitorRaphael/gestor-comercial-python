@@ -19,21 +19,34 @@ from __future__ import annotations
 from collections import OrderedDict
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 
 from gestor_comercial.services.imagem_service import resolver_caminho_thumbnail
 from gestor_comercial.ui.theme.controller import ThemeController
 
 LIMITE_ENTRADAS = 200
 
-# Chave = (imagem_path ou None, tamanho, inicial) -> QPixmap já escalado.
+# Os dois recortes que o app pede hoje. `CARTAO` é o retângulo arredondado que
+# o Cardápio e a tabela da comanda sempre usaram; `CIRCULO` entrou com o modal
+# "Adicionar item", cujo mockup pede avatar redondo com DUAS letras (o cartão
+# desenha uma). A diferença mora aqui, e não no chamador, para continuar
+# valendo o que o §3.10 estabeleceu: quem desenha a miniatura de produto é este
+# módulo, e o desenho e a chave do cache saem do mesmo lugar.
+FORMATO_CARTAO = "cartao"
+FORMATO_CIRCULO = "circulo"
+
+_LETRAS_POR_FORMATO = {FORMATO_CARTAO: 1, FORMATO_CIRCULO: 2}
+
+# Chave = (imagem_path ou None, tamanho, sigla, formato) -> QPixmap já escalado.
 #
-# A inicial entra na chave por causa do §3.10: o placeholder é DESENHADO com a
-# primeira letra do produto, mas a chave só tinha caminho e tamanho — e o
+# A sigla entra na chave por causa do §3.10: o placeholder é DESENHADO com as
+# primeiras letras do produto, mas a chave só tinha caminho e tamanho — e o
 # caminho de todo produto sem foto é o mesmo `None`. Resultado: o primeiro
 # produto sem foto a ser desenhado emprestava a inicial dele para todos os
-# outros, e a Coca-Cola aparecia com um "X" no cardápio.
-_cache: "OrderedDict[tuple[str | None, int, str], QPixmap]" = OrderedDict()
+# outros, e a Coca-Cola aparecia com um "X" no cardápio. O formato entra pela
+# mesma razão: o mesmo produto, no mesmo tamanho, sai redondo num lugar e
+# quadrado no outro — são dois desenhos, e portanto duas entradas.
+_cache: "OrderedDict[tuple[str | None, int, str, str], QPixmap]" = OrderedDict()
 
 # Paleta com que os placeholders do cache foram pintados. O `ThemeController`
 # devolve sempre o mesmo dicionário de módulo por tema (`TEMA_CLARO`/
@@ -43,14 +56,26 @@ _cache: "OrderedDict[tuple[str | None, int, str], QPixmap]" = OrderedDict()
 _tema_do_cache: dict[str, str] | None = None
 
 
-def obter_pixmap(imagem_path: str | None, tamanho: int, nome_produto: str = "") -> QPixmap:
+def obter_pixmap(
+    imagem_path: str | None,
+    tamanho: int,
+    nome_produto: str = "",
+    formato: str = FORMATO_CARTAO,
+) -> QPixmap:
     """`QPixmap` quadrado de `tamanho`x`tamanho` para uma foto de produto.
 
     Sem `imagem_path` (ou arquivo ausente em disco), devolve um placeholder
     vetorial leve gerado sob demanda — não bate no disco nem lança exceção.
+
+    `formato` escolhe o recorte: `FORMATO_CARTAO` (padrão, retângulo
+    arredondado) ou `FORMATO_CIRCULO` (avatar redondo do modal de lançamento).
+    O recorte é feito UMA vez, na hora de entrar no cache — quem pinta a linha
+    da lista recebe o pixmap pronto e não gasta `QPainterPath` por repaint, que
+    é o que o Celeron do food truck não tem para dar.
     """
     _descartar_se_o_tema_virou()
-    chave = (imagem_path, tamanho, _inicial(nome_produto))
+    sigla = _sigla(nome_produto, formato)
+    chave = (imagem_path, tamanho, sigla, formato)
     pixmap_cacheado = _cache.get(chave)
     if pixmap_cacheado is not None:
         _cache.move_to_end(chave)
@@ -58,11 +83,11 @@ def obter_pixmap(imagem_path: str | None, tamanho: int, nome_produto: str = "") 
 
     caminho = resolver_caminho_thumbnail(imagem_path)
     if caminho is None:
-        pixmap = _gerar_placeholder(tamanho, nome_produto)
+        pixmap = _gerar_placeholder(tamanho, sigla, formato)
     else:
         pixmap_disco = QPixmap(str(caminho))
         if pixmap_disco.isNull():
-            pixmap = _gerar_placeholder(tamanho, nome_produto)
+            pixmap = _gerar_placeholder(tamanho, sigla, formato)
         else:
             pixmap = pixmap_disco.scaled(
                 tamanho,
@@ -70,6 +95,8 @@ def obter_pixmap(imagem_path: str | None, tamanho: int, nome_produto: str = "") 
                 Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                 Qt.TransformationMode.SmoothTransformation,
             )
+            if formato == FORMATO_CIRCULO:
+                pixmap = _recortar_em_circulo(pixmap, tamanho)
 
     _cache[chave] = pixmap
     _cache.move_to_end(chave)
@@ -104,17 +131,45 @@ def _descartar_se_o_tema_virou() -> None:
     _tema_do_cache = tokens_atuais
 
 
-def _inicial(nome_produto: str) -> str:
-    """A letra que o placeholder desenha — e que por isso precisa entrar na chave."""
-    return (nome_produto or "?").strip()[:1].upper() or "?"
+def _sigla(nome_produto: str, formato: str = FORMATO_CARTAO) -> str:
+    """As letras que o placeholder desenha — e que por isso entram na chave.
+
+    Uma para o cartão, duas para o círculo. São os primeiros caracteres do
+    nome, não as iniciais das palavras: "Anel de Cebola" vira "AN", e não "AC",
+    porque no modal a sigla serve para o olho voltar ao lugar certo da lista
+    ordenada alfabeticamente — e a lista é ordenada pelo nome inteiro.
+    """
+    letras = _LETRAS_POR_FORMATO.get(formato, 1)
+    return (nome_produto or "?").strip()[:letras].upper() or "?"
 
 
-def _gerar_placeholder(tamanho: int, nome_produto: str) -> QPixmap:
-    """Placeholder: fundo `superficie_2`, borda `borda_card`, 1ª letra do produto.
+def _recortar_em_circulo(pixmap: QPixmap, tamanho: int) -> QPixmap:
+    """Devolve a foto recortada num círculo, com o resto transparente."""
+    recortado = QPixmap(tamanho, tamanho)
+    recortado.fill(Qt.GlobalColor.transparent)
 
-    Letra inicial em vez de ícone de prato/garfo desenhado à mão: menos código
-    de vetor pra manter e já ajuda a diferenciar produtos na lista mesmo sem
-    foto (ex.: "X" de X-Burger, "C" de Coca-Cola).
+    painter = QPainter(recortado)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    caminho = QPainterPath()
+    caminho.addEllipse(QRectF(0, 0, tamanho, tamanho))
+    painter.setClipPath(caminho)
+    # `KeepAspectRatioByExpanding` pode devolver um lado maior que `tamanho`;
+    # centralizar evita que o recorte pegue só o canto esquerdo da foto.
+    painter.drawPixmap(
+        (tamanho - pixmap.width()) // 2,
+        (tamanho - pixmap.height()) // 2,
+        pixmap,
+    )
+    painter.end()
+    return recortado
+
+
+def _gerar_placeholder(tamanho: int, sigla: str, formato: str = FORMATO_CARTAO) -> QPixmap:
+    """Placeholder: fundo `superficie_2`, borda `borda_card`, sigla do produto.
+
+    Letras iniciais em vez de ícone de prato/garfo desenhado à mão: menos
+    código de vetor pra manter e já ajuda a diferenciar produtos na lista mesmo
+    sem foto (ex.: "X" de X-Burger, "CO" de Coca-Cola).
     """
     tokens = ThemeController.instancia().tokens_atuais
     pixmap = QPixmap(tamanho, tamanho)
@@ -123,21 +178,26 @@ def _gerar_placeholder(tamanho: int, nome_produto: str) -> QPixmap:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-    raio = max(4, tamanho // 8)
     margem = 1.0
     retangulo = QRectF(margem, margem, tamanho - 2 * margem, tamanho - 2 * margem)
 
     painter.setBrush(QColor(tokens.get("superficie_2", "#1C1C1A")))
     painter.setPen(QPen(QColor(tokens.get("borda_card", "#242220")), 1))
-    painter.drawRoundedRect(retangulo, raio, raio)
+    if formato == FORMATO_CIRCULO:
+        painter.drawEllipse(retangulo)
+    else:
+        raio = max(4, tamanho // 8)
+        painter.drawRoundedRect(retangulo, raio, raio)
 
-    letra = _inicial(nome_produto)
     fonte = QFont()
-    fonte.setPixelSize(max(10, int(tamanho * 0.45)))
+    # Duas letras num círculo do mesmo lado precisam de corpo menor que uma
+    # letra sozinha, senão a sigla encosta na borda.
+    proporcao = 0.34 if formato == FORMATO_CIRCULO else 0.45
+    fonte.setPixelSize(max(9, int(tamanho * proporcao)))
     fonte.setBold(True)
     painter.setFont(fonte)
     painter.setPen(QColor(tokens.get("texto_fraquissimo", "#71717A")))
-    painter.drawText(retangulo, Qt.AlignmentFlag.AlignCenter, letra)
+    painter.drawText(retangulo, Qt.AlignmentFlag.AlignCenter, sigla)
 
     painter.end()
     return pixmap

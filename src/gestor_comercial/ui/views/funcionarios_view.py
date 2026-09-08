@@ -22,7 +22,6 @@ from decimal import Decimal
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -60,8 +59,11 @@ from gestor_comercial.ui.rotulo_identidade import rotulo_identidade
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.modais import executar_modal
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
-
-_CARGOS_SUGERIDOS = [cargo.value for cargo in CargoFuncionario]
+from gestor_comercial.ui.widgets.funcionario_dialog import (
+    CARGOS_COM_ACESSO_TOTAL,
+    FuncionarioDialog,
+    iniciais,
+)
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
@@ -72,7 +74,10 @@ _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoE
 # demais só atendem. Se um dia isso precisar ser um campo de verdade
 # (editável, independente do cargo), é uma migração nova — documentado aqui
 # para não passar como se fosse um dado gravado.
-_CARGOS_ACESSO_TOTAL = {CargoFuncionario.GERENTE.value, CargoFuncionario.CAIXA.value}
+#
+# A lista mora em `funcionario_dialog.CARGOS`, junto do texto que o modal
+# mostra ("ACESSO LIBERADO", "APENAS PEDIDOS"): enquanto eram duas, o rodapé
+# do cadastro e esta linha do detalhe podiam discordar sobre o mesmo cargo.
 
 _FILTRO_TODOS = "TODOS"
 _FILTRO_ATIVOS = "ATIVO"
@@ -310,17 +315,20 @@ class FuncionariosView(QWidget):
         self._preencher_lista()
 
     def _criar(self) -> None:
-        modal = _FuncionarioDialog(parent=self)
+        modal = FuncionarioDialog(parent=self)
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-        nome, cargo, telefone = modal.resultado()
+        dados = modal.resultado()
 
         self._label_erro.setText("")
         try:
-            novo = self._funcionarios_service.criar(nome, cargo, telefone)
+            novo = self._funcionarios_service.criar(dados.nome, dados.cargo, dados.telefone)
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
+        # Fora do `try`: o cadastro já está gravado, e um tropeço na situação
+        # não pode fazer a tela voltar sem mostrar quem acabou de entrar.
+        self._aplicar_situacao(novo, dados.ativo)
         self._selecionado_id = novo.id
         self.atualizar()
 
@@ -328,32 +336,50 @@ class FuncionariosView(QWidget):
         funcionario = self._funcionario_por_id(funcionario_id)
         if funcionario is None:
             return
-        modal = _FuncionarioDialog(funcionario=funcionario, parent=self)
+        modal = FuncionarioDialog(funcionario=funcionario, parent=self)
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-        nome, cargo, telefone = modal.resultado()
+        dados = modal.resultado()
 
         self._label_erro.setText("")
         try:
-            self._funcionarios_service.editar(funcionario.id, nome, cargo, telefone)
+            atualizado = self._funcionarios_service.editar(
+                funcionario.id, dados.nome, dados.cargo, dados.telefone
+            )
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
+        self._aplicar_situacao(atualizado, dados.ativo)
         self.atualizar()
+
+    def _aplicar_situacao(self, funcionario: Funcionario, ativo: bool) -> None:
+        """A situação escolhida no modal, escrita pelos métodos que já existiam.
+
+        `FuncionarioService.criar()` não recebe situação — nasce ativo, e sempre
+        nasceu. Quem liga e desliga é `ativar()`/`desativar()`, o mesmo par que
+        o botão do painel de detalhe usa: o modal não trouxe caminho novo para
+        o banco, só uma segunda porta para o caminho que já existia.
+
+        Só chama quando a escolha **diverge** do estado atual. Os dois métodos
+        levantam `RegraDeNegocioError` de propósito quando não há o que mudar
+        ("já está ativo"), e essa mensagem, aqui, seria erro sem erro nenhum.
+        """
+        if funcionario.ativo == ativo:
+            return
+        try:
+            if ativo:
+                self._funcionarios_service.ativar(funcionario.id)
+            else:
+                self._funcionarios_service.desativar(funcionario.id)
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
 
     def _alternar_status_id(self, funcionario_id: int) -> None:
         funcionario = self._funcionario_por_id(funcionario_id)
         if funcionario is None:
             return
         self._label_erro.setText("")
-        try:
-            if funcionario.ativo:
-                self._funcionarios_service.desativar(funcionario.id)
-            else:
-                self._funcionarios_service.ativar(funcionario.id)
-        except _ERROS_SERVICE as erro:
-            self._label_erro.setText(str(erro))
-            return
+        self._aplicar_situacao(funcionario, not funcionario.ativo)
         self.atualizar()
 
     def _excluir_id(self, funcionario_id: int) -> None:
@@ -451,7 +477,7 @@ class _LinhaFuncionario(QFrame):
         layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(12)
 
-        avatar = QLabel(_iniciais(funcionario.nome))
+        avatar = QLabel(iniciais(funcionario.nome))
         avatar.setObjectName("funcionariosAvatar")
         avatar.setFixedSize(38, 38)
         avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -594,14 +620,14 @@ class _PainelDetalheFuncionario(QFrame):
         self._funcionario_id = funcionario.id
         self.setEnabled(True)
 
-        self._avatar_grande.setText(_iniciais(funcionario.nome))
+        self._avatar_grande.setText(iniciais(funcionario.nome))
         self._label_nome.setText(funcionario.nome)
         self._label_cargo.setText((funcionario.cargo or "Sem cargo definido").upper())
 
         self._label_consumo_valor.setText(formatar_reais(saldo))
 
         self._label_status.setText("Ativo" if funcionario.ativo else "Inativo")
-        acesso = "Total" if (funcionario.cargo in _CARGOS_ACESSO_TOTAL) else "Restrito"
+        acesso = "Total" if (funcionario.cargo in CARGOS_COM_ACESSO_TOTAL) else "Restrito"
         self._label_acesso.setText(acesso)
         self._label_telefone.setText(funcionario.telefone or "—")
         self._label_turno.setText(funcionario.turno_horario or "—")
@@ -657,51 +683,6 @@ def _linha_meta(layout_pai: QVBoxLayout, rotulo: str) -> QLabel:
     return label_valor
 
 
-class _FuncionarioDialog(QDialog):
-    """Modal de cadastro/edição: nome, cargo e telefone."""
-
-    def __init__(self, funcionario: Funcionario | None = None, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Editar funcionário" if funcionario else "Novo funcionário")
-
-        layout = QVBoxLayout(self)
-        formulario = QFormLayout()
-
-        self._campo_nome = QLineEdit(funcionario.nome if funcionario else "")
-        formulario.addRow("Nome", self._campo_nome)
-
-        # §3.13: dropdown estrito, não mais combo editável — cargo passou a
-        # ser uma das 5 opções fixas, validadas de novo em `FuncionarioService`.
-        self._campo_cargo = QComboBox()
-        self._campo_cargo.setEditable(False)
-        self._campo_cargo.addItem("Selecione...", userData=None)
-        self._campo_cargo.addItems(_CARGOS_SUGERIDOS)
-        if funcionario and funcionario.cargo in _CARGOS_SUGERIDOS:
-            self._campo_cargo.setCurrentText(funcionario.cargo)
-        else:
-            self._campo_cargo.setCurrentIndex(0)
-        formulario.addRow("Cargo", self._campo_cargo)
-
-        self._campo_telefone = QLineEdit(funcionario.telefone if funcionario and funcionario.telefone else "")
-        self._campo_telefone.setPlaceholderText("Opcional")
-        formulario.addRow("Telefone", self._campo_telefone)
-
-        layout.addLayout(formulario)
-
-        botoes = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        botoes.accepted.connect(self.accept)
-        botoes.rejected.connect(self.reject)
-        layout.addWidget(botoes)
-
-    def resultado(self) -> tuple[str, str | None, str | None]:
-        nome = self._campo_nome.text().strip()
-        cargo = self._campo_cargo.currentText().strip() if self._campo_cargo.currentIndex() > 0 else None
-        telefone = self._campo_telefone.text().strip() or None
-        return nome, cargo, telefone
-
-
 class _QuitarConsumoDialog(QDialog):
     """Modal de baixa: valor a abater e Senha Operacional (Gerente) para autorizar.
 
@@ -742,14 +723,3 @@ class _QuitarConsumoDialog(QDialog):
         valor = safe_decimal(self._campo_valor.text(), padrao=None)
         senha_gerente = self._campo_senha_gerente.text().strip()
         return valor, senha_gerente
-
-
-def _iniciais(nome: str) -> str:
-    partes = [p for p in nome.strip().split() if p]
-    if not partes:
-        return "—"
-    if len(partes) == 1:
-        return partes[0][0].upper()
-    return (partes[0][0] + partes[-1][0]).upper()
-
-
