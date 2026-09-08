@@ -122,7 +122,7 @@ Implementado em `AuthService.validar_pin_nivel(pin, nivel_minimo)`, que testa
 do Nível 3 para baixo até `nivel_minimo` e para no primeiro que confere.
 `validar_pin_gerente` (Nível 2) e `validar_pin_dono` (Nível 3) são atalhos
 dessa função para os dois pontos de reautenticação mais comuns
-(cancelamento/estorno de comanda e Central de Loja/`LojaPinDialog`).
+(cancelamento/estorno de comanda e Central de Loja/`PinPadDialog`).
 
 **Troca de cada segredo (sempre exige o de nível acima, ou o "ou" do Nível
 1)**:
@@ -227,7 +227,7 @@ gestor-comercial-python/
 │           ├── modais.py · tabelas.py · layout_utils.py · estilo.py
 │           ├── paineis_relatorio.py · filtro_periodo_operador.py
 │           ├── kpi_card.py · busca_produto.py · thumbnail_cache.py · flow_layout.py
-│           └── gerente_pin_dialog.py · loja_pin_dialog.py · comprovante_dialog.py ...
+│           └── pin_pad_dialog.py · comprovante_dialog.py ...
 │
 ├── tests/
 │   ├── unit/ · integration/
@@ -317,3 +317,4 @@ gestor-comercial-python/
   - **Telas que rolam em vez de espremer**: `configuracoes_view.py` ganhou `QScrollArea` (Fase 7). Um `QVBoxLayout` sem rolagem, quando o conteúdo passa da altura da página, encolhe os filhos abaixo do tamanho natural — na tela de 768px da máquina do food truck os botões de Senhas e Acesso ficavam sem rótulo. Travado por `tests/ui/test_telas_cabem_na_tela.py`.
   - **Bancadas em `tools/`** (sem dependência nova, fora de `src/`, não entram no `.exe`): `medir_memoria.py`, `comparar_telas.py` (paridade visual, 11 telas × 24 estados) e `comparar_cupons.py` (paridade da impressão ESC/POS, 6 documentos). Foi a paridade visual contra o código de antes da remasterização que provou que as 13 correções de UI chegaram à tela — e que achou a única regressão da faxina.
   Suíte em **800 testes, 0 `xfail`, 100% verde**.
+- 2026-09-08 — **Modal de PIN unificado com teclado numérico (`ui/widgets/pin_pad_dialog.py`).** `GerentePinDialog` e `LojaPinDialog` eram cópia um do outro em tudo menos o título e o método de `AuthService` chamado, e pediam o segredo num `QLineEdit` solto dentro de um `QFormLayout` com moldura de janela do sistema — interação errada para quem opera de pé, com o teclado atrás do monitor. Os dois viraram um `PinPadDialog` só, parametrizado por título, subtítulo e **validador**, com os dois usos entrando por `para_caixa` (Nível 2) e `para_loja` (Nível 3): cartão de 360px sem moldura, cabeçalho com cadeado desenhado a `QPainter` (não há cadeado Unicode fora do bloco de emoji, que sairia colorido e ignoraria o tema), fileira elástica de marcadores (piso de 6, para a Master de fábrica; cresce até os 8 da Operacional), numpad 3x4 com ENTRAR em teal, rodapé Cancelar e escurecedor da janela de trás. Entrada híbrida: clique, teclado físico e numérico USB entram pelos mesmos três métodos (`_digitar`/`_apagar`/`_confirmar`); Esc continua caindo no `reject()` do `QDialog`. **A cascata do §3.13 não foi tocada** — o diálogo não sabe o que é nível, só entrega a string ao validador que recebeu, e `test_pin_dialogs.py` prova os dois lados (a Operacional abre o Caixa e NÃO abre a Central de Loja). 16 tokens `pin_*` novos nas duas paletas, todo o estilo no QSS global (§3.15). Dois defeitos achados durante o trabalho, os dois com teste: (1) `clicked.connect(lambda ...)` capturando `self` prende o diálogo à view — medido, 10 de 10 presos com lambda, 0 com método ligado; é o §3.14 aparecendo em `clicked`, e as teclas passaram a usar `sender()`; (2) a regra genérica `QPushButton {{ padding: 10px 16px }}` zera a largura útil de um botão de 32px fixos e o Qt descarta o glifo — o ✕ de fechar saía como círculo vazio. Suíte em **918 testes, 100% verde**.

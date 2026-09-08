@@ -186,6 +186,29 @@ TEMA_ESCURO: dict[str, str] = {
     "badge_combo_texto": "#1c1917",
     "campo_erro_texto": "#f43f5e",
     "campo_erro_bg": "#fdecea",
+    # ---- Modal de PIN com numpad (`ui/widgets/pin_pad_dialog.py`) ------
+    # Ciano proprio, nomeado pelo papel, em vez de reaproveitar
+    # `ciano_metrica` (dado) ou `ciano_acao` (botao): o marcador de digito
+    # e o ENTRAR do teclado sao FEEDBACK de autenticacao, e o dia em que a
+    # paleta de metricas mudar nao pode arrastar junto a tela que tranca o
+    # Caixa. As teclas tem fundo/borda proprios porque ficam DENTRO do
+    # cartao (`superficie`) e precisam de um degrau de contraste a mais.
+    "pin_icone_bg": "#132E35",
+    "pin_icone_borda": "rgba(34, 211, 238, 0.22)",
+    "pin_icone_glifo": "#22D3EE",
+    "pin_fechar_bg": "#1F1F1D",
+    "pin_fechar_borda": "rgba(255, 255, 255, 0.06)",
+    "pin_fechar_hover": "#2A2A27",
+    "pin_fechar_texto": "#A1A1AA",
+    "pin_tecla_bg": "#1E1E1C",
+    "pin_tecla_borda": "rgba(255, 255, 255, 0.06)",
+    "pin_tecla_hover": "#2A2A27",
+    "pin_tecla_pressed": "#141413",
+    "pin_confirmar_bg": "#1D5E65",
+    "pin_confirmar_hover": "#22757F",
+    "pin_confirmar_texto": "#FFFFFF",
+    "pin_dot_vazio": "rgba(255, 255, 255, 0.15)",
+    "pin_dot_cheio": "#22D3EE",
 }
 
 TEMA_CLARO: dict[str, str] = {
@@ -284,4 +307,27 @@ TEMA_CLARO: dict[str, str] = {
     "badge_combo_texto": "#FFFFFF",
     "campo_erro_texto": "#DC2626",
     "campo_erro_bg": "#FEE2E2",
+    # ---- Modal de PIN com numpad (`ui/widgets/pin_pad_dialog.py`) ------
+    # Ciano proprio, nomeado pelo papel, em vez de reaproveitar
+    # `ciano_metrica` (dado) ou `ciano_acao` (botao): o marcador de digito
+    # e o ENTRAR do teclado sao FEEDBACK de autenticacao, e o dia em que a
+    # paleta de metricas mudar nao pode arrastar junto a tela que tranca o
+    # Caixa. As teclas tem fundo/borda proprios porque ficam DENTRO do
+    # cartao (`superficie`) e precisam de um degrau de contraste a mais.
+    "pin_icone_bg": "#CFFAFE",
+    "pin_icone_borda": "#A5F3FC",
+    "pin_icone_glifo": "#0E7490",
+    "pin_fechar_bg": "#F0EFE9",
+    "pin_fechar_borda": "#E2E1D9",
+    "pin_fechar_hover": "#E2E1D9",
+    "pin_fechar_texto": "#64748B",
+    "pin_tecla_bg": "#FFFFFF",
+    "pin_tecla_borda": "#E2E1D9",
+    "pin_tecla_hover": "#F0EFE9",
+    "pin_tecla_pressed": "#E2E1D9",
+    "pin_confirmar_bg": "#0891B2",
+    "pin_confirmar_hover": "#0E7490",
+    "pin_confirmar_texto": "#FFFFFF",
+    "pin_dot_vazio": "rgba(0, 0, 0, 0.15)",
+    "pin_dot_cheio": "#0891B2",
 }

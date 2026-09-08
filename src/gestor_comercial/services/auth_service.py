@@ -239,7 +239,7 @@ class AuthService:
 
     def validar_pin_dono(self, pin: str) -> Usuario:
         """Reautenticação para a Central de Loja (Nível 3 — Master/Dono, ver
-        `LojaPinDialog`): só a Senha Master autentica, sem herdar de baixo
+        `PinPadDialog.para_loja`): só a Senha Master autentica, sem herdar de baixo
         pra cima (o inverso da cascata normal não existe)."""
         if not self.validar_pin_nivel(pin, nivel_minimo=3):
             raise NaoAutorizadoError("PIN inválido.")

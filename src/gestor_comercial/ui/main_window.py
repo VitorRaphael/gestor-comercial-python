@@ -53,8 +53,7 @@ from gestor_comercial.ui.views.mesas_view import MesasView
 from gestor_comercial.ui.views.pagamento_dialog import PagamentoDialog
 from gestor_comercial.ui.views.relatorios_view import RelatoriosView
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
-from gestor_comercial.ui.widgets.gerente_pin_dialog import GerentePinDialog
-from gestor_comercial.ui.widgets.loja_pin_dialog import LojaPinDialog
+from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
 from gestor_comercial.ui.widgets.modais import executar_modal
 from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
@@ -163,7 +162,7 @@ class MainWindow(QMainWindow):
         # Mesmo raciocínio da Loja (ver _abrir_area_loja): a tela de Caixa expõe a
         # gaveta, movimentos e histórico de fechamentos, então também fica
         # atrás de PIN — só que de um gerente de verdade, não do código de
-        # supervisor fixo da Loja (ver GerentePinDialog).
+        # supervisor fixo da Loja (ver `PinPadDialog.para_caixa`).
         self._caixa_desbloqueada = False
 
         self._paginas = QStackedWidget()
@@ -239,7 +238,7 @@ class MainWindow(QMainWindow):
         # Cardápio, Funcionários, Impressoras, Relatórios e
         # Configurações vivem só como cards dentro da Central de Loja (ver
         # `LojaHubView`) -- não duplicam entrada aqui na sidebar. Um único
-        # atalho, atrás do PIN de supervisor (ver LojaPinDialog/
+        # atalho, atrás do PIN de supervisor (ver PinPadDialog.para_loja/
         # _abrir_area_loja), no rodapé, logo acima do "Sair".
         botao_loja = QPushButton("Central de Loja")
         botao_loja.setProperty("variante", "nav")
@@ -325,7 +324,7 @@ class MainWindow(QMainWindow):
             # Reautenticação a cada acesso, não só na primeira vez: um PIN
             # digitado há uma hora não prova quem está com o mouse na mão
             # agora, e a área guarda faturamento/diferença de caixa do mês.
-            modal = LojaPinDialog(self._auth, self)
+            modal = PinPadDialog.para_loja(self._auth, self)
             if executar_modal(modal) != QDialog.DialogCode.Accepted:
                 return
             self._loja_desbloqueada = True
@@ -343,7 +342,7 @@ class MainWindow(QMainWindow):
             # _abrir_area_loja): gaveta e histórico de fechamentos são dados
             # sensíveis, e um PIN digitado há uma hora não prova quem está
             # com o mouse na mão agora.
-            modal = GerentePinDialog(self._auth, self)
+            modal = PinPadDialog.para_caixa(self._auth, self)
             if executar_modal(modal) != QDialog.DialogCode.Accepted:
                 return
             self._caixa_desbloqueada = True

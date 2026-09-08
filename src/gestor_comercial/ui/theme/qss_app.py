@@ -793,6 +793,109 @@ def construir_qss_app(t: dict[str, str]) -> str:
 
     QDialog {{ background: {t['superficie']}; }}
 
+    /* ---------- Modal de PIN com numpad (`widgets/pin_pad_dialog.py`) ----------
+       O cartao e um QFrame DENTRO do dialogo, nao o dialogo: a janela e
+       frameless e translucida para os cantos de 16px aparecerem redondos de
+       verdade, entao ela nao pode herdar o `QDialog {{ background }}` acima. */
+
+    QDialog#pinPadDialog {{ background: transparent; }}
+    QWidget#pinPadBackdrop {{ background: transparent; }}
+    QWidget#pinPadCadeado {{ background: transparent; }}
+
+    QFrame#pinPadCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+
+    QFrame#pinPadIcone {{
+      background: {t['pin_icone_bg']};
+      border: 1px solid {t['pin_icone_borda']};
+      border-radius: 12px;
+    }}
+
+    QLabel#pinPadTitulo {{
+      color: {t['texto']};
+      font-size: 16px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#pinPadSubtitulo {{
+      color: {t['texto_fraco']};
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    QLabel#pinPadInstrucao {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    QLabel#pinPadInstrucao[estado="erro"] {{ color: {t['perigo']}; }}
+
+    QPushButton#pinPadFechar {{
+      /* `padding: 0` NAO e decoracao: a regra generica de QPushButton la em
+         cima pede 16px de padding lateral, e num botao de 32px fixos isso
+         zera a largura util e o Qt descarta o glifo -- o botao saia como um
+         circulo vazio. Vale para toda tecla de tamanho fixo daqui. */
+      padding: 0;
+      background: {t['pin_fechar_bg']};
+      border: 1px solid {t['pin_fechar_borda']};
+      border-radius: 16px;
+      color: {t['pin_fechar_texto']};
+      font-size: 13px;
+      font-weight: 700;
+    }}
+    QPushButton#pinPadFechar:hover {{
+      background: {t['pin_fechar_hover']};
+      color: {t['texto']};
+    }}
+
+    QFrame#pinPadDot {{ background: {t['pin_dot_vazio']}; border-radius: 5px; }}
+    QFrame#pinPadDot[estado="cheio"] {{ background: {t['pin_dot_cheio']}; }}
+    QFrame#pinPadDot[estado="erro"] {{ background: {t['perigo']}; }}
+
+    QPushButton#pinPadTecla {{
+      padding: 0;
+      background: {t['pin_tecla_bg']};
+      border: 1px solid {t['pin_tecla_borda']};
+      border-radius: 10px;
+      color: {t['texto']};
+      font-size: 18px;
+      font-weight: 700;
+    }}
+    QPushButton#pinPadTecla:hover {{ background: {t['pin_tecla_hover']}; }}
+    QPushButton#pinPadTecla:pressed {{ background: {t['pin_tecla_pressed']}; }}
+
+    QPushButton#pinPadConfirmar {{
+      padding: 0 8px;
+      background: {t['pin_confirmar_bg']};
+      border: 1px solid {t['pin_confirmar_bg']};
+      border-radius: 10px;
+      color: {t['pin_confirmar_texto']};
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 1px;
+    }}
+    QPushButton#pinPadConfirmar:hover {{
+      background: {t['pin_confirmar_hover']};
+      border-color: {t['pin_confirmar_hover']};
+    }}
+
+    QPushButton#pinPadCancelar {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 10px;
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      font-weight: 700;
+      padding: 10px;
+    }}
+    QPushButton#pinPadCancelar:hover {{ color: {t['texto']}; }}
+
     /* ---------- Tela de Impressoras ---------- */
 
     QFrame#impressorasPainel {{

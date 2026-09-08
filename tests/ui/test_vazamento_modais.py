@@ -40,8 +40,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QDialog, QWidget
 
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
-from gestor_comercial.ui.widgets.gerente_pin_dialog import GerentePinDialog
-from gestor_comercial.ui.widgets.loja_pin_dialog import LojaPinDialog
+from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
 
 ABERTURAS = 30
 
@@ -75,26 +74,30 @@ def test_cancelamento_dialog_nao_acumula(qapp, assentar):
     )
 
 
-def test_gerente_pin_dialog_nao_acumula(qapp, assentar, auth):
-    """O modal de PIN de gerente é aberto a cada cancelamento autorizado."""
+def test_pin_do_caixa_nao_acumula(qapp, assentar, auth):
+    """O modal de PIN do Caixa é aberto a cada entrada na tela (Nível 2)."""
     pai = QWidget()
 
-    _abrir_e_fechar(lambda p: GerentePinDialog(auth, p), pai)
+    _abrir_e_fechar(lambda p: PinPadDialog.para_caixa(auth, p), pai)
     assentar()
 
-    assert pai.findChildren(GerentePinDialog) == []
+    assert pai.findChildren(PinPadDialog) == []
 
 
-def test_loja_pin_dialog_nao_acumula(qapp, assentar, auth):
-    """Este é o pior caso de frequência: `main_window.py:327-329` exige o PIN a
-    cada acesso à Central de Loja, e `_trancar_loja()` roda em toda navegação
-    para fora. Um modal por ida e volta."""
+def test_pin_da_loja_nao_acumula(qapp, assentar, auth):
+    """Este é o pior caso de frequência: `main_window._abrir_area_loja` exige o
+    PIN a cada acesso à Central de Loja, e `_trancar_loja()` roda em toda
+    navegação para fora. Um modal por ida e volta.
+
+    Os dois usos são a MESMA classe desde a unificação em `PinPadDialog`, mas
+    continuam com teste próprio: o que se mede aqui é o site de chamada, e é
+    dele que sai a frequência."""
     pai = QWidget()
 
-    _abrir_e_fechar(lambda p: LojaPinDialog(auth, p), pai)
+    _abrir_e_fechar(lambda p: PinPadDialog.para_loja(auth, p), pai)
     assentar()
 
-    assert pai.findChildren(LojaPinDialog) == []
+    assert pai.findChildren(PinPadDialog) == []
 
 
 def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, assentar, auth):
@@ -107,8 +110,8 @@ def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, assentar, auth):
     pai = QWidget()
 
     _abrir_e_fechar(lambda p: CancelamentoDialog("Cancelar comanda", p), pai, vezes=10)
-    _abrir_e_fechar(lambda p: GerentePinDialog(auth, p), pai, vezes=10)
-    _abrir_e_fechar(lambda p: LojaPinDialog(auth, p), pai, vezes=10)
+    _abrir_e_fechar(lambda p: PinPadDialog.para_caixa(auth, p), pai, vezes=10)
+    _abrir_e_fechar(lambda p: PinPadDialog.para_loja(auth, p), pai, vezes=10)
     assentar()
 
     vivos = pai.findChildren(QDialog)
