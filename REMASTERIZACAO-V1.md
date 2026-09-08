@@ -1876,6 +1876,162 @@ manda conferir antes de fechar.
 
 ---
 
+### 9.6 A movimentação manual do caixa em modal único ✅ CONCLUÍDO — 2026-09-08
+
+Pedido do Vitor com dois mockups: a mini-tela de sangria/reforço/despesa
+(`_MovimentoDialog`, 30 linhas dentro de `caixa_view.py`) virou um cartão com
+teclado numérico na própria tela. O resultado mora em
+`ui/widgets/movimentacao_caixa_dialog.py` e é o **quarto** modal em cartão do
+app, no mesmo arranjo do PIN, do "Adicionar item" e do "Novo funcionário":
+cartão sem moldura, escurecedor atrás, cabeçalho próprio.
+
+#### Uma classe, três operações — o requisito arquitetural do pedido
+
+Sangria, reforço e despesa não são três telas. São a mesma tela — valor,
+descrição, confirmar — com ícone, texto e sugestões diferentes. O que separa uma
+da outra cabe numa linha, e é essa linha que `OPERACOES` guarda:
+
+```python
+Operacao(tipo, papel, titulo, subtitulo, rotulo_confirmar,
+         placeholder, tags, glifo, token_tinta, token_glifo)
+```
+
+`papel` é a chave que o QSS lê (`[operacao="sangria"]`), e ela chega a
+**exatamente dois widgets**: o badge do cabeçalho e o botão que grava. O resto
+do cartão é idêntico nas três e é declarado uma vez só — inclusive as teclas do
+numpad, o ✕, o Cancelar e o divisor, que já eram famílias compartilhadas com os
+outros modais.
+
+`CONSUMO_FUNCIONARIO` fica de fora de propósito, e o construtor levanta
+`ValueError` se alguém tentar: `registrar_movimento` recusa esse tipo (consumo
+interno já é rastreado como pagamento da comanda, e o movimento manual
+descontaria a mesma dívida uma segunda vez). Abrir um cartão sem título e sem
+cor para terminar num erro de service seria pior que não abrir.
+
+##### O que a tela de Caixa deixou de repetir
+
+`caixa_view` tinha **três dicionários paralelos** com as mesmas três chaves: o
+rótulo do tipo (`_ROTULOS_TIPO_MOVIMENTO`), a chave de estilo do badge da tabela
+(`_TIPO_BADGE`) e a variante do botão. "Reforço" precisava estar certo nos três
+ao mesmo tempo. Os três passaram a ler `OPERACOES`, e o laço que monta os botões
+itera o próprio dicionário — movimentação manual nova entra num lugar só e ganha
+botão, modal e badge de uma vez. É o mesmo remédio que o §9.5 aplicou em
+`CARGOS`.
+
+#### O visor conta centavos, e é aí que está o ganho
+
+O modal antigo pedia o valor num `QLineEdit`: o operador digitava `"50,00"`,
+`"R$ 50"` ou `"50.00"` e `safe_decimal` lia de volta, com `padrao=None` para o
+caso de não conseguir — daí o `_ERRO_VALOR` ("Valor inválido. Informe um valor
+em reais, como 50,00.") na linha vermelha da tela.
+
+Agora o visor é um `int` de centavos que cresce pela direita, como máquina de
+cartão: `5`,`0`,`0`,`0` mostra `R$ 0,05` → `R$ 0,50` → `R$ 5,00` → `R$ 50,00`.
+Isso **apaga a classe inteira de defeito**: não existe mais "valor ilegível",
+porque nunca houve texto para ler de volta. `safe_decimal` continua existindo e
+continua certo — ele resolve o problema de *ler* o que foi digitado, e a
+abertura e o fechamento do caixa, que ainda são campos de texto, continuam
+precisando dele.
+
+O teto do visor sai de `dinheiro.LIMITE`, e não de um número escolhido na tela.
+A razão é específica: `NUMERIC(10,2)` é o teto das colunas monetárias, e um
+valor acima dele faz `registrar_movimento` levantar `ValueError` — que **não
+está em `_ERROS_SERVICE`** e subiria como estouro no balcão em vez de virar
+mensagem na tela. Amarrando os dois, o numpad não consegue montar esse valor.
+
+#### O que NÃO mudou
+
+**Nenhuma regra financeira, e nenhuma gravação nova.** O diálogo não conhece
+`CaixaService`: devolve um `DadosMovimento` (valor + descrição) e a view chama
+`registrar_movimento(tipo, valor, descricao)` — mesma assinatura, mesmo tipo,
+mesma ordem. Quem exige gerente para sangria e despesa continua sendo o service
+(§3.1), quem recusa valor menor ou igual a zero continua sendo o service, e o
+erro que ele levantar continua aparecendo na linha de erro da tela de trás. O
+`Decimal` passa por `dinheiro()` como todo dinheiro do sistema, e o texto do
+visor sai de `formatar_reais` — o mesmo `R$ 1.234,50` da tabela de movimentos e
+do relatório de fechamento impresso (§3.8).
+
+O modal não abriu caminho novo para o banco; abriu uma porta melhor para o
+caminho que já existia. Os testes provam isso com a `CaixaView` de verdade, o
+service de verdade e o banco de verdade — um dublê do diálogo provaria só que o
+teste sabe chamar o service.
+
+#### Ciclo de vida (§3.2/§3.9/§3.14, e o RNF do Celeron)
+
+O briefing pediu, no vocabulário do Tkinter, `destroy()` + `unbind()` +
+`after_cancel`. Os três equivalentes em PySide6 passam por `done()`, o único
+portão por onde saem Confirmar, Cancelar, ✕ e Esc:
+
+* **destroy** — `executar_modal()` faz o `deleteLater()` depois de ler o
+  resultado; `done()` acrescenta soltar o escurecedor, que é filho da **janela**
+  e não do diálogo;
+* **unbind** — o `eventFilter` do campo de descrição é removido explicitamente.
+  `QShortcut` não existe: o teclado é lido no `keyPressEvent` do próprio
+  diálogo, que morre com ele;
+* **after_cancel** — não há timer nenhum, e isso é decisão. O visor é
+  recalculado na tecla, não há busca a agrupar e nada é agendado.
+
+E o **oposto** da limpeza, que quase virou defeito: `done()` **não** zera o
+valor digitado. No modal de PIN zerar é obrigatório (o segredo tem que sumir da
+memória e ninguém o lê de volta); aqui `resultado()` é lido *depois* do
+`exec()`, e zerar faria toda sangria ser gravada como R$ 0,00 — sem erro, sem
+aviso, com o turno fechando errado no fim da noite. Tem teste próprio.
+
+#### Teclado
+
+`0`-`9` e o numpad USB alimentam o visor, `Backspace` apaga o último dígito,
+`Enter` confirma (só com valor maior que zero — o botão nasce desligado),
+`Esc` fecha sem gravar e `Tab` alterna entre o visor e o campo de descrição.
+
+O `Tab` precisou dos dois lados. Só existem dois destinos de foco, e um deles é
+o próprio diálogo, que tem `FocusPolicy.NoFocus` como todo modal em cartão daqui
+— a navegação natural do Qt pularia o diálogo e o `Tab` não faria nada. Então o
+`keyPressEvent` manda o foco para o campo e o `eventFilter` do campo o manda de
+volta. O anel âmbar do visor é o que diz para onde o próximo dígito vai: com o
+cursor na descrição, dígito é texto de descrição — e é assim que tem que ser.
+
+#### Como foi conferido
+
+- **Suíte 1085** (de 1025), **60 testes novos** no arquivo próprio mais um no
+  inventário de vazamento de modais. Zero falhas, zero xfail.
+- **Os testes que importam foram conferidos desfazendo a correção**, como manda
+  o §9.2. Oito mutações, oito reprovações: sem o teto, o dígito extra passa;
+  zerando o valor em `done()`, seis testes caem; sem o `removeEventFilter`, o
+  `unbind` reprova; com o botão sempre aceso, o portão de R$ 0,00 reprova; com a
+  tecla a 120px, o cartão não cabe na tela; sem a propriedade `operacao`, três
+  reprovam; com o chip emendando em vez de trocar, um; e desligando a volta do
+  `Tab`, um.
+- **Renderização nativa** (não `offscreen`) das três operações nos dois temas:
+  460×611 para sangria e reforço, 460×644 para despesa, que é a que quebra a
+  faixa de chips em duas fileiras por ter quatro sugestões.
+- **Ciclo de vida** — 30 aberturas com `exec()` a partir da `CaixaView` não
+  deixam diálogo preso; 10 aberturas não deixam escurecedor pendurado na janela.
+
+#### Decisões
+
+| Data | Decisão | Motivo |
+|---|---|---|
+| 2026-09-08 | **Uma** classe parametrizada, e não três diálogos | Requisito explícito do pedido, e o certo: o que se copiaria entre três classes não é decoração — é o acumulador de centavos e o ciclo de vida, as duas coisas que quebram em silêncio |
+| 2026-09-08 | O botão de sangria é **ciano**, não vermelho | O mockup oferecia os dois. Tirar troco para o malote é rotina de turno, não operação destrutiva: pintar de vermelho o botão que o gerente aperta cinco vezes por noite gasta o único sinal de alerta que a tela tem. O vermelho continua reservado para "Fechar caixa" e para os cancelamentos |
+| 2026-09-08 | Cada operação com **família de token própria**, mesmo coincidindo com `perigo`/`sucesso` | O coral da sangria é hoje o mesmo hex de `perigo`, e é justamente por isso que o empréstimo seria perigoso — é a armadilha que o §9.5 desarmou quando a mesa ocupada virou vermelha e arrastou junto o badge de despesa do Caixa. Sangria não é ERRO e reforço não é SUCESSO: são duas direções de dinheiro |
+| 2026-09-08 | Tokens `pin_tecla_*` renomeados para `tecla_numerica_*` | Segundo numpad do app, mesmas teclas, mesmos quatro hex. Mesmo critério do `botao_circular_*` (§9.4) e do `badge_icone_*` (§9.5): o nome é o papel, não a tela |
+| 2026-09-08 | O erro do service continua sendo mostrado **na tela de trás** | Diferente do "Adicionar item", que trata o erro dentro do modal porque fica aberto para o próximo item. Aqui é um movimento e o modal fecha; mover o tratamento para dentro seria mexer no caminho de autorização (sangria e despesa exigem gerente) sem o pedido ter pedido isso |
+| 2026-09-08 | Ícones desenhados à mão, inclusive as setas | O recibo da despesa não existe fora do bloco de emoji, e `↗`/`↙` caem no Segoe UI Emoji: saem coloridos, chapados e ignorando o tema — numa máquina limpa que pode nem ter a fonte. Mesma decisão do cadeado (§PIN), da lupa (§9.4) e do usuário (§9.5) |
+| 2026-09-08 | O cartão foi **encolhido** depois da primeira medição | 674px de altura num monitor de 768px é margem curta demais. Visor, espaçamentos e margens cederam 30px; as teclas do numpad **não**, porque alvo de dedo é o que não pode encolher num PDV |
+| 2026-09-08 | O visor NÃO é limpo no fechamento | O oposto do modal de PIN, e de propósito: `resultado()` é lido depois do `exec()`, e limpar faria toda sangria ser gravada como R$ 0,00 |
+
+##### Ficou de fora, e por quê
+
+- **A abertura e o fechamento do caixa** continuam em `_ValorDialog` e
+  `_FecharCaixaDialog`, com a moldura do sistema e campos de texto. Não estavam
+  no pedido, e o fechamento tem três campos com semântica diferente (dinheiro
+  contado, maquininha, observação) — merece o próprio mockup, não uma cópia
+  deste. São eles que ainda justificam o `_ERRO_VALOR` na view.
+- **O `_QuitarConsumoDialog`** e o modal "Adicionar componente" do Cardápio
+  continuam como estavam (§9.5, §9.4).
+
+---
+
 ## 10. As melhores mudanças que o programa teve — em português de balcão
 
 > **Por que esta seção existe.** Todo o resto do documento é escrito para quem

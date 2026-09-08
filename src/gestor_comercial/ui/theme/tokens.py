@@ -198,7 +198,8 @@ TEMA_ESCURO: dict[str, str] = {
     "badge_combo_texto": "#1c1917",
     "campo_erro_texto": "#f43f5e",
     "campo_erro_bg": "#fdecea",
-    # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`) ----
+    # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`,
+    #      `movimentacao_caixa_dialog.py`) ----
     # Ciano proprio, nomeado pelo papel, em vez de reaproveitar
     # `ciano_metrica` (dado) ou `ciano_acao` (botao): o marcador de digito
     # e o ENTRAR do teclado sao FEEDBACK de autenticacao, e o dia em que a
@@ -227,15 +228,54 @@ TEMA_ESCURO: dict[str, str] = {
     "botao_circular_borda": "rgba(255, 255, 255, 0.06)",
     "botao_circular_hover": "#2A2A27",
     "botao_circular_texto": "#A1A1AA",
-    "pin_tecla_bg": "#1E1E1C",
-    "pin_tecla_borda": "rgba(255, 255, 255, 0.06)",
-    "pin_tecla_hover": "#2A2A27",
-    "pin_tecla_pressed": "#141413",
+    # `tecla_numerica_*` chamava-se `pin_tecla_*` enquanto só o numpad do PIN
+    # existia. O modal de movimentação de caixa (§9.6) trouxe o SEGUNDO numpad
+    # do app, com as mesmas teclas de 10px de raio dentro do mesmo cartão —
+    # renomear pelo papel foi mais barato que duplicar a família com os mesmos
+    # quatro hex, pelo mesmo critério de `botao_circular_*`.
+    "tecla_numerica_bg": "#1E1E1C",
+    "tecla_numerica_borda": "rgba(255, 255, 255, 0.06)",
+    "tecla_numerica_hover": "#2A2A27",
+    "tecla_numerica_pressed": "#141413",
     "pin_confirmar_bg": "#1D5E65",
     "pin_confirmar_hover": "#22757F",
     "pin_confirmar_texto": "#FFFFFF",
     "pin_dot_vazio": "rgba(255, 255, 255, 0.15)",
     "pin_dot_cheio": "#22D3EE",
+    # ---- Movimentação manual da gaveta (`movimentacao_caixa_dialog.py`) ----
+    # Uma família por operação, e NÃO `perigo`/`sucesso`/`acento` emprestados.
+    # As cores até coincidem hoje (o coral da sangria é o mesmo hex de
+    # `perigo`), e é exatamente por isso que o empréstimo seria perigoso: é a
+    # armadilha que o §9.5 desarmou quando a mesa ocupada virou vermelha e
+    # arrastou junto o badge de despesa do Caixa, que só queria "aquele ciano
+    # ali". Sangria não é ERRO e reforço não é SUCESSO — são duas direções de
+    # dinheiro. Com nome próprio, mudar o vermelho de alerta do app não repinta
+    # a gaveta, e vice-versa.
+    #
+    # `_tinta` é o fundo do badge do cabeçalho e `_glifo` é o ícone desenhado
+    # dentro dele (`_IconeMovimento` lê estes dois nomes de `Operacao`).
+    "mov_sangria_tinta": "#2D1517",
+    "mov_sangria_glifo": "#F87171",
+    "mov_reforco_tinta": "#14291E",
+    "mov_reforco_glifo": "#4ADE80",
+    "mov_despesa_tinta": "#2B2113",
+    "mov_despesa_glifo": "#FBBF24",
+    # O botão que grava. Sangria em ciano, e não em vermelho, porque tirar
+    # troco para o malote é rotina de turno, não operação destrutiva: pintar de
+    # vermelho o botão que o gerente aperta cinco vezes por noite gasta o único
+    # sinal de alerta que a tela tem. O vermelho continua reservado para
+    # "Fechar caixa" e para os cancelamentos.
+    "mov_sangria_acao": "#22D3EE",
+    "mov_sangria_acao_texto": "#062A30",
+    "mov_reforco_acao": "#22C55E",
+    "mov_reforco_acao_texto": "#052E16",
+    "mov_despesa_acao": "#E5A93C",
+    "mov_despesa_acao_texto": "#2B1D02",
+    # O visor de valor é REBAIXADO, não elevado: `superficie_2` (#1C1C1A) é
+    # mais claro que o cartão e faria o número parecer um botão. O mockup pede
+    # o contrário — um recorte mais escuro que o cartão, como o vidro de uma
+    # maquininha.
+    "mov_visor_bg": "#111110",
 }
 
 TEMA_CLARO: dict[str, str] = {
@@ -341,7 +381,8 @@ TEMA_CLARO: dict[str, str] = {
     "badge_combo_texto": "#FFFFFF",
     "campo_erro_texto": "#DC2626",
     "campo_erro_bg": "#FEE2E2",
-    # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`) ----
+    # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`,
+    #      `movimentacao_caixa_dialog.py`) ----
     # Ciano proprio, nomeado pelo papel, em vez de reaproveitar
     # `ciano_metrica` (dado) ou `ciano_acao` (botao): o marcador de digito
     # e o ENTRAR do teclado sao FEEDBACK de autenticacao, e o dia em que a
@@ -366,13 +407,35 @@ TEMA_CLARO: dict[str, str] = {
     "botao_circular_borda": "#E2E1D9",
     "botao_circular_hover": "#E2E1D9",
     "botao_circular_texto": "#64748B",
-    "pin_tecla_bg": "#FFFFFF",
-    "pin_tecla_borda": "#E2E1D9",
-    "pin_tecla_hover": "#F0EFE9",
-    "pin_tecla_pressed": "#E2E1D9",
+    "tecla_numerica_bg": "#FFFFFF",
+    "tecla_numerica_borda": "#E2E1D9",
+    "tecla_numerica_hover": "#F0EFE9",
+    "tecla_numerica_pressed": "#E2E1D9",
     "pin_confirmar_bg": "#0891B2",
     "pin_confirmar_hover": "#0E7490",
     "pin_confirmar_texto": "#FFFFFF",
     "pin_dot_vazio": "rgba(0, 0, 0, 0.15)",
     "pin_dot_cheio": "#0891B2",
+    # ---- Movimentação manual da gaveta (`movimentacao_caixa_dialog.py`) ----
+    # Ver o comentário gêmeo em TEMA_ESCURO para o PORQUÊ de cada operação ter
+    # família própria em vez de pegar `perigo`/`sucesso`/`acento` emprestados.
+    # O que muda aqui é o arranjo, não o significado: no claro o badge é pastel
+    # com o ícone escuro (o inverso do escuro, que é tinta escura com ícone
+    # aceso), e o botão usa o degrau saturado da paleta clara — `#22D3EE` e
+    # `#4ADE80` sobre branco não têm contraste de texto em botão.
+    "mov_sangria_tinta": "#FEE2E2",
+    "mov_sangria_glifo": "#DC2626",
+    "mov_reforco_tinta": "#DCFCE7",
+    "mov_reforco_glifo": "#15803D",
+    "mov_despesa_tinta": "#FEF3C7",
+    "mov_despesa_glifo": "#B45309",
+    "mov_sangria_acao": "#0891B2",
+    "mov_sangria_acao_texto": "#ECFEFF",
+    "mov_reforco_acao": "#16A34A",
+    "mov_reforco_acao_texto": "#F0FDF4",
+    "mov_despesa_acao": "#B45309",
+    "mov_despesa_acao_texto": "#FFFBEB",
+    # Rebaixado em relação ao cartão, como no escuro — só que aqui o cartão é
+    # branco puro, então "mais fundo" é o bege do terminal.
+    "mov_visor_bg": "#F0EFE9",
 }

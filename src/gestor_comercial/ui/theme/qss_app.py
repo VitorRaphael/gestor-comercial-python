@@ -880,17 +880,19 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QFrame#pinPadDot[estado="cheio"] {{ background: {t['pin_dot_cheio']}; }}
     QFrame#pinPadDot[estado="erro"] {{ background: {t['perigo']}; }}
 
-    QPushButton#pinPadTecla {{
+    QPushButton#pinPadTecla, QPushButton#movCaixaTecla {{
       padding: 0;
-      background: {t['pin_tecla_bg']};
-      border: 1px solid {t['pin_tecla_borda']};
+      background: {t['tecla_numerica_bg']};
+      border: 1px solid {t['tecla_numerica_borda']};
       border-radius: 10px;
       color: {t['texto']};
       font-size: 18px;
       font-weight: 700;
     }}
-    QPushButton#pinPadTecla:hover {{ background: {t['pin_tecla_hover']}; }}
-    QPushButton#pinPadTecla:pressed {{ background: {t['pin_tecla_pressed']}; }}
+    QPushButton#pinPadTecla:hover,
+    QPushButton#movCaixaTecla:hover {{ background: {t['tecla_numerica_hover']}; }}
+    QPushButton#pinPadTecla:pressed,
+    QPushButton#movCaixaTecla:pressed {{ background: {t['tecla_numerica_pressed']}; }}
 
     QPushButton#pinPadConfirmar {{
       padding: 0 8px;
@@ -950,16 +952,19 @@ def construir_qss_app(t: dict[str, str]) -> str:
        de padding lateral, e num botao de lado fixo isso zera a largura util e
        o Qt descarta o glifo -- o botao sai como um circulo vazio. Vale para o
        fechar e para os dois passos de quantidade. */
-    QPushButton#addItemFechar, QPushButton#addItemPasso, QPushButton#funcDialogFechar {{
+    QPushButton#addItemFechar, QPushButton#addItemPasso, QPushButton#funcDialogFechar,
+    QPushButton#movCaixaFechar {{
       padding: 0;
       background: {t['botao_circular_bg']};
       border: 1px solid {t['botao_circular_borda']};
       color: {t['botao_circular_texto']};
       font-weight: 700;
     }}
-    QPushButton#addItemFechar, QPushButton#funcDialogFechar {{ border-radius: 16px; font-size: 13px; }}
+    QPushButton#addItemFechar, QPushButton#funcDialogFechar,
+    QPushButton#movCaixaFechar {{ border-radius: 16px; font-size: 13px; }}
     QPushButton#addItemPasso {{ border-radius: 17px; font-size: 18px; }}
-    QPushButton#addItemFechar:hover, QPushButton#addItemPasso:hover, QPushButton#funcDialogFechar:hover {{
+    QPushButton#addItemFechar:hover, QPushButton#addItemPasso:hover,
+    QPushButton#funcDialogFechar:hover, QPushButton#movCaixaFechar:hover {{
       background: {t['botao_circular_hover']};
       color: {t['texto']};
     }}
@@ -1100,7 +1105,8 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QLabel#addItemAviso[estado="erro"] {{ color: {t['perigo']}; }}
     QLabel#addItemAviso[estado="sucesso"] {{ color: {t['sucesso']}; }}
 
-    QPushButton#addItemCancelar, QPushButton#funcDialogCancelar {{
+    QPushButton#addItemCancelar, QPushButton#funcDialogCancelar,
+    QPushButton#movCaixaCancelar {{
       padding: 9px 20px;
       background: {t['superficie_2']};
       border: 1px solid {t['borda']};
@@ -1109,7 +1115,8 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-size: 12px;
       font-weight: 700;
     }}
-    QPushButton#addItemCancelar:hover, QPushButton#funcDialogCancelar:hover {{ background: {t['botao_circular_hover']}; }}
+    QPushButton#addItemCancelar:hover, QPushButton#funcDialogCancelar:hover,
+    QPushButton#movCaixaCancelar:hover {{ background: {t['botao_circular_hover']}; }}
 
     QPushButton#addItemConfirmar, QPushButton#funcDialogConfirmar {{
       padding: 9px 22px;
@@ -1263,7 +1270,168 @@ def construir_qss_app(t: dict[str, str]) -> str:
       color: {t['texto']};
     }}
 
-    QFrame#funcDialogDivisor {{ background: {t['borda']}; border: none; }}
+    QFrame#funcDialogDivisor, QFrame#movCaixaDivisor {{ background: {t['borda']}; border: none; }}
+
+    /* ---------- Modal de sangria/reforco/despesa (`widgets/movimentacao_caixa_dialog.py`)
+       Quarto modal em cartao do app, e por isso o quarto a NAO poder herdar o
+       `QDialog {{ background }}` la de cima: a janela e frameless e translucida
+       para os cantos de 16px sairem redondos de verdade.
+
+       Uma classe so veste as tres operacoes: o que muda entre sangria, reforco
+       e despesa entra por `[operacao="..."]` nos DOIS lugares onde a operacao
+       tem cor -- o badge do cabecalho e o botao que grava. O resto (visor,
+       teclas, chips, rodape) e identico nas tres, e por isso e declarado uma
+       vez so. O ✕, o Cancelar, as teclas do numpad e o divisor nem aparecem
+       aqui: ja estao nas familias compartilhadas com os outros modais. */
+
+    QDialog#movCaixaDialog {{ background: transparent; }}
+    QWidget#movCaixaGlifo {{ background: transparent; }}
+    /* As faixas que quebram linha (atalhos de valor e chips de descricao) sao
+       QWidget crus, e a regra generica `QWidget {{ background: bg_marca }}` la
+       do topo os pintaria de cor de fundo do app por cima do cartao. */
+    QWidget#movCaixaFaixa {{ background: transparent; }}
+
+    QFrame#movCaixaCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+
+    QFrame#movCaixaBadge {{ border-radius: 12px; border: 1px solid transparent; }}
+    QFrame#movCaixaBadge[operacao="sangria"] {{
+      background: {t['mov_sangria_tinta']};
+      border-color: {t['mov_sangria_glifo']};
+    }}
+    QFrame#movCaixaBadge[operacao="reforco"] {{
+      background: {t['mov_reforco_tinta']};
+      border-color: {t['mov_reforco_glifo']};
+    }}
+    QFrame#movCaixaBadge[operacao="despesa"] {{
+      background: {t['mov_despesa_tinta']};
+      border-color: {t['mov_despesa_glifo']};
+    }}
+
+    QLabel#movCaixaTitulo {{
+      color: {t['texto']};
+      font-size: 18px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#movCaixaSubtitulo {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QLabel#movCaixaRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+
+    /* O visor e REBAIXADO em relacao ao cartao (ver `mov_visor_bg`): o numero
+       e leitura, nao controle, e um degrau para cima o faria parecer botao. */
+    QFrame#movCaixaVisor {{
+      background: {t['mov_visor_bg']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+    }}
+    /* O anel diz PARA ONDE o dedo no teclado esta indo: aceso, o dígito vai
+       para o valor; apagado, ele esta sendo digitado na descricao. Sem esse
+       sinal, o operador so descobre a diferenca depois de ler o que saiu. */
+    QFrame#movCaixaVisor[foco="true"] {{ border: 1px solid {t['acento']}; }}
+    QLabel#movCaixaVisorRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+    QLabel#movCaixaVisorValor {{
+      color: {t['texto']};
+      font-size: 32px;
+      font-weight: 700;
+      background: transparent;
+    }}
+
+    QPushButton#movCaixaAtalho {{
+      padding: 5px 14px;
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+      color: {t['texto']};
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    QPushButton#movCaixaAtalho:hover {{ background: {t['botao_circular_hover']}; }}
+
+    QLineEdit#movCaixaDescricao {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: {t['texto']};
+      font-size: 13px;
+    }}
+    QLineEdit#movCaixaDescricao:focus {{ border: 1px solid {t['acento']}; }}
+
+    QPushButton#movCaixaChip {{
+      padding: 5px 12px;
+      background: transparent;
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+      color: {t['texto_fraco']};
+      font-size: 11px;
+    }}
+    QPushButton#movCaixaChip:hover {{
+      background: {t['superficie_2']};
+      color: {t['texto']};
+    }}
+
+    QLabel#movCaixaOperador {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+
+    QPushButton#movCaixaConfirmar {{
+      padding: 10px 20px;
+      border: 1px solid transparent;
+      border-radius: 18px;
+      font-size: 12px;
+      font-weight: 800;
+    }}
+    QPushButton#movCaixaConfirmar[operacao="sangria"] {{
+      background: {t['mov_sangria_acao']};
+      border-color: {t['mov_sangria_acao']};
+      color: {t['mov_sangria_acao_texto']};
+    }}
+    QPushButton#movCaixaConfirmar[operacao="reforco"] {{
+      background: {t['mov_reforco_acao']};
+      border-color: {t['mov_reforco_acao']};
+      color: {t['mov_reforco_acao_texto']};
+    }}
+    QPushButton#movCaixaConfirmar[operacao="despesa"] {{
+      background: {t['mov_despesa_acao']};
+      border-color: {t['mov_despesa_acao']};
+      color: {t['mov_despesa_acao_texto']};
+    }}
+    /* Desligado enquanto o visor esta em R$ 0,00 -- e ai a cor da operacao sai
+       de cena, senao um botao vivo e colorido continuaria convidando o clique
+       que o service recusaria. As tres operacoes aparecem no seletor de
+       proposito: `#id:disabled` sozinho empata em especificidade com
+       `#id[operacao="..."]`, e empate em QSS e o tipo de regra que funciona
+       ate alguem reordenar o arquivo. Com o atributo, ganha sempre. */
+    QPushButton#movCaixaConfirmar[operacao="sangria"]:disabled,
+    QPushButton#movCaixaConfirmar[operacao="reforco"]:disabled,
+    QPushButton#movCaixaConfirmar[operacao="despesa"]:disabled {{
+      background: {t['pilula_disabled_bg']};
+      border-color: {t['pilula_disabled_bg']};
+      color: {t['pilula_disabled_texto']};
+    }}
 
     /* ---------- Tela de Impressoras ---------- */
 

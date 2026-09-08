@@ -47,6 +47,12 @@ from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.layout_utils import limpar_layout
 from gestor_comercial.ui.widgets.modais import executar_modal
+from gestor_comercial.ui.widgets.movimentacao_caixa_dialog import (
+    OPERACOES,
+    MovimentacaoCaixaDialog,
+    papel_do_movimento,
+    rotulo_do_movimento,
+)
 from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
 from gestor_comercial.ui.widgets.estilo import repolir
 from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
@@ -55,19 +61,11 @@ _COLUNAS_MOVIMENTOS = ["Quando", "Tipo", "Descrição", "Valor"]
 
 _ERRO_VALOR = "Valor inválido. Informe um valor em reais, como 50,00."
 
-_ROTULOS_TIPO_MOVIMENTO = {
-    TipoMovimento.SANGRIA: "Sangria",
-    TipoMovimento.REFORCO: "Reforço",
-    TipoMovimento.DESPESA: "Despesa",
-}
-
-# Tipo do badge/variante QSS por tipo de movimento (ver qss_app.py, seletor
-# `QLabel[variante="badgeMovimento"][tipo=...]`).
-_TIPO_BADGE = {
-    TipoMovimento.SANGRIA: "sangria",
-    TipoMovimento.REFORCO: "reforco",
-    TipoMovimento.DESPESA: "despesa",
-}
+# O rótulo do tipo ("Sangria") e a chave de estilo do badge ("sangria") moram
+# em `movimentacao_caixa_dialog.OPERACOES`, junto do título, do subtítulo e das
+# sugestões de descrição do modal que grava o movimento. Eram três dicionários
+# paralelos aqui dentro, e "Reforço" precisava estar certo nos três ao mesmo
+# tempo — mesmo remédio que o §9.5 aplicou em `CARGOS`.
 
 # Largura da coluna de resumo (saldo, recebimentos e ajustes). Vive aqui porque
 # são dois donos: o cartão de saldo, que dita a largura dos três, e a rolagem
@@ -318,15 +316,14 @@ class CaixaView(QWidget):
         topo.addLayout(bloco_titulo)
         topo.addStretch()
 
+        # A ordem e o conjunto dos botões saem de `OPERACOES`, e não de uma
+        # tupla escrita aqui: movimentação manual nova entra num lugar só e
+        # ganha botão, modal e badge de uma vez.
         self._botoes_movimento_por_tipo: dict[TipoMovimento, QPushButton] = {}
-        _VARIANTE_BOTAO_MOVIMENTO = {
-            TipoMovimento.SANGRIA: "enviar-pedido",
-            TipoMovimento.REFORCO: "pilula-vazia",
-            TipoMovimento.DESPESA: "pilula-vazia",
-        }
-        for tipo in (TipoMovimento.SANGRIA, TipoMovimento.REFORCO, TipoMovimento.DESPESA):
-            botao = QPushButton(f"+ {_ROTULOS_TIPO_MOVIMENTO[tipo]}")
-            botao.setProperty("variante", _VARIANTE_BOTAO_MOVIMENTO[tipo])
+        _VARIANTE_BOTAO_MOVIMENTO = {TipoMovimento.SANGRIA: "enviar-pedido"}
+        for tipo, operacao in OPERACOES.items():
+            botao = QPushButton(f"+ {operacao.titulo}")
+            botao.setProperty("variante", _VARIANTE_BOTAO_MOVIMENTO.get(tipo, "pilula-vazia"))
             botao.clicked.connect(lambda _checked=False, t=tipo: self._abrir_modal_movimento(t))
             self._botoes_movimento_por_tipo[tipo] = botao
             topo.addWidget(botao)
@@ -524,7 +521,7 @@ class CaixaView(QWidget):
 
     def _preencher_linha(self, linha: int, movimento: MovimentoCaixa) -> None:
         quando = movimento.registrado_em.strftime("%d/%m %H:%M")
-        tipo_texto = _ROTULOS_TIPO_MOVIMENTO.get(movimento.tipo, movimento.tipo.value)
+        tipo_texto = rotulo_do_movimento(movimento.tipo)
 
         self._tabela.setItem(linha, 0, QTableWidgetItem(quando))
         definir_celula(
@@ -605,22 +602,39 @@ class CaixaView(QWidget):
         self._aviso_impressao.mostrar_um(resultado, contexto="Fechamento de caixa")
 
     def _abrir_modal_movimento(self, tipo: TipoMovimento) -> None:
-        modal = _MovimentoDialog(_ROTULOS_TIPO_MOVIMENTO[tipo], self)
+        """Abre o cartão de sangria/reforço/despesa e grava o que ele devolver.
+
+        Quem decide se PODE continua sendo o service: sangria e despesa exigem
+        gerente (§3.1) e valor zero é recusado lá. O modal só não deixa o
+        gerente chegar até aqui com R$ 0,00 — o botão nasce desligado —, e por
+        isso a checagem de "valor ilegível" que o campo de texto antigo exigia
+        não existe mais neste caminho.
+        """
+        modal = MovimentacaoCaixaDialog(tipo, self._nome_do_operador(), self)
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-        valor, descricao = modal.resultado()
-        if valor is None:
-            self._label_erro.setText(_ERRO_VALOR)
-            return
+        dados = modal.resultado()
 
         self._label_erro.setText("")
         try:
-            self._caixa_service.registrar_movimento(tipo, valor, descricao)
+            self._caixa_service.registrar_movimento(tipo, dados.valor, dados.descricao)
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
         self._atualizar_resumo()
         self._atualizar_movimentos()
+
+    def _nome_do_operador(self) -> str | None:
+        """Quem está logado, para o rodapé do modal — `None` quando ninguém está.
+
+        Lê a sessão em memória (`AuthService.usuario_logado`), e não
+        `usuario_atual()`, porque este é um rótulo de tela: sem sessão ele mostra
+        um travessão, enquanto `usuario_atual()` levantaria `NaoAutorizadoError`
+        e o modal nem abriria. Quem tem que barrar a ação sem login é o service,
+        na hora de gravar.
+        """
+        usuario = self._caixa_service.auth.usuario_logado
+        return usuario.nome if usuario is not None else None
 
 
 class _ValorDialog(QDialog):
@@ -647,38 +661,6 @@ class _ValorDialog(QDialog):
     def valor(self) -> Decimal | None:
         """`None` quando o campo não é um valor legível — ver `safe_decimal`."""
         return safe_decimal(self._campo_valor.text(), padrao=None)
-
-
-class _MovimentoDialog(QDialog):
-    """Modal de sangria/reforço/despesa: valor e descrição."""
-
-    def __init__(self, titulo: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(titulo)
-
-        layout = QVBoxLayout(self)
-        formulario = QFormLayout()
-
-        self._campo_valor = QLineEdit()
-        formulario.addRow("Valor", self._campo_valor)
-
-        self._campo_descricao = QLineEdit()
-        self._campo_descricao.setPlaceholderText("Ex.: troco para padaria")
-        formulario.addRow("Descrição", self._campo_descricao)
-
-        layout.addLayout(formulario)
-
-        botoes = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        botoes.accepted.connect(self.accept)
-        botoes.rejected.connect(self.reject)
-        layout.addWidget(botoes)
-
-    def resultado(self) -> tuple[Decimal | None, str | None]:
-        valor = safe_decimal(self._campo_valor.text(), padrao=None)
-        descricao = self._campo_descricao.text().strip() or None
-        return valor, descricao
 
 
 class _FecharCaixaDialog(QDialog):
@@ -764,7 +746,7 @@ def _criar_badge_movimento(tipo: TipoMovimento, texto: str) -> QWidget:
 
     badge = QLabel(texto.upper())
     badge.setProperty("variante", "badgeMovimento")
-    badge.setProperty("tipo", _TIPO_BADGE.get(tipo, ""))
+    badge.setProperty("tipo", papel_do_movimento(tipo))
     layout.addWidget(badge)
     layout.addStretch()
     return container

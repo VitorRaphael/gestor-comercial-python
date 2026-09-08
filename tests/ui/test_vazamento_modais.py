@@ -39,9 +39,12 @@ import pytest
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QDialog, QWidget
 
+from gestor_comercial.domain.enums import TipoMovimento
+
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 from gestor_comercial.ui.widgets.adicionar_item_dialog import AdicionarItemDialog
 from gestor_comercial.ui.widgets.funcionario_dialog import FuncionarioDialog
+from gestor_comercial.ui.widgets.movimentacao_caixa_dialog import MovimentacaoCaixaDialog
 from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
 
 ABERTURAS = 30
@@ -119,6 +122,23 @@ def test_adicionar_item_nao_acumula(qapp, assentar):
     assert pai.findChildren(AdicionarItemDialog) == []
 
 
+def test_movimentacao_de_caixa_nao_acumula(qapp, assentar):
+    """Um diálogo por sangria, reforço ou despesa — e num turno movimentado o
+    gerente entra e sai dele várias vezes por noite.
+
+    O comportamento completo está em `test_movimentacao_caixa_dialog.py`; aqui
+    ele entra no inventário de modais do app, que é o que esta varredura
+    mantém. As três operações são a MESMA classe (§9.6), então uma delas basta
+    para medir o ciclo de vida.
+    """
+    pai = QWidget()
+
+    _abrir_e_fechar(lambda p: MovimentacaoCaixaDialog(TipoMovimento.SANGRIA, "Gerente", p), pai)
+    assentar()
+
+    assert pai.findChildren(MovimentacaoCaixaDialog) == []
+
+
 def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, assentar, auth):
     """Rede larga: qualquer `QDialog` pendurado na view, de qualquer tipo.
 
@@ -132,10 +152,13 @@ def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, assentar, auth):
     _abrir_e_fechar(lambda p: PinPadDialog.para_caixa(auth, p), pai, vezes=10)
     _abrir_e_fechar(lambda p: PinPadDialog.para_loja(auth, p), pai, vezes=10)
     _abrir_e_fechar(lambda p: AdicionarItemDialog([], "Mesa 1", lambda *_: None, p), pai, vezes=10)
+    _abrir_e_fechar(
+        lambda p: MovimentacaoCaixaDialog(TipoMovimento.SANGRIA, "Gerente", p), pai, vezes=10
+    )
     assentar()
 
     vivos = pai.findChildren(QDialog)
-    assert vivos == [], f"{len(vivos)} diálogos de 40 aberturas continuam na memória"
+    assert vivos == [], f"{len(vivos)} diálogos de 50 aberturas continuam na memória"
 
 
 def test_construir_sem_abrir_deixa_o_dialogo_preso_a_view(qapp, assentar):
