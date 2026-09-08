@@ -124,11 +124,16 @@ class PinPadDialog(QDialog):
 
     LARGURA_CARTAO_PX = 360
     ALTURA_TECLA_PX = 48
-    # Piso de marcadores mostrados com o campo vazio. Seis, e não quatro, para
-    # caber a Senha Master de fábrica ("050727") sem a fileira crescer no meio
-    # da digitação; a Operacional tem oito e passa do piso, daí a fileira ser
-    # elástica em vez de fixa.
+    # Piso de marcadores quando NINGUÉM sabe o tamanho da senha — banco
+    # anterior à coluna `senha_*_tamanho` cuja senha já tinha sido trocada (ver
+    # a migração `c1d5b8e37a42`). No caminho normal quem manda é o
+    # `tamanho_esperado` que chega de fora, lido da senha cadastrada.
     DOTS_MINIMOS = 6
+    # Teto do conjunto de marcadores, que é montado uma vez e reaproveitado. A
+    # regra de senha só tem mínimo (4 caracteres), não máximo; passando daqui a
+    # fileira para de crescer e os dígitos continuam contando. Doze cabem na
+    # largura do cartão (12x10px + 11x10px de espaço = 230px em 320px úteis) —
+    # subir este número exige refazer essa conta.
     DOTS_MAXIMOS = 12
     # As senhas só têm mínimo (4 caracteres, `LojaConfigService`), não máximo.
     # O teto aqui é do widget, não da regra: evita que um dedo preso na tecla
@@ -144,9 +149,17 @@ class PinPadDialog(QDialog):
         subtitulo: str,
         validador: Validador,
         parent: QWidget | None = None,
+        tamanho_esperado: int | None = None,
     ) -> None:
         super().__init__(parent)
         self._validar = validador
+        # Quantos marcadores mostrar com o campo ainda vazio. Vem da senha
+        # cadastrada (ver `AuthService.tamanho_do_pin_nivel`), e não de uma
+        # constante, porque o dono pode trocar a senha por uma de outro
+        # tamanho na tela de Senhas e Acesso -- e a fileira tem que acompanhar.
+        # Como o diálogo é construído a cada acesso, a leitura é sempre a do
+        # valor atual, sem precisar de sinal nem de recarga.
+        self._piso_de_dots = self._piso_valido(tamanho_esperado)
         self._pin = ""
         self._backdrop: Backdrop | None = None
         self._dots: list[QFrame] = []
@@ -188,13 +201,44 @@ class PinPadDialog(QDialog):
 
     @classmethod
     def para_caixa(cls, auth: AuthService, parent: QWidget | None = None) -> "PinPadDialog":
-        """Nível 2 (§3.13): Senha Operacional ou, herdando de cima, a Master."""
-        return cls("Caixa", "PIN DE AUTORIZAÇÃO", auth.validar_pin_gerente, parent)
+        """Nível 2 (§3.13): Senha Operacional ou, herdando de cima, a Master.
+
+        A fileira é desenhada do tamanho da **Operacional**, que é a senha
+        própria do nível. Quem entra com a Master (mais curta, de fábrica)
+        termina com marcadores sobrando e confirma no ENTRAR do mesmo jeito —
+        encher a fileira nunca foi condição para confirmar, e não pode ser,
+        justamente porque duas senhas de tamanhos diferentes abrem esta tela.
+        """
+        return cls(
+            "Caixa",
+            "PIN DE AUTORIZAÇÃO",
+            auth.validar_pin_gerente,
+            parent,
+            tamanho_esperado=auth.tamanho_do_pin_nivel(2),
+        )
 
     @classmethod
     def para_loja(cls, auth: AuthService, parent: QWidget | None = None) -> "PinPadDialog":
         """Nível 3 (§3.13): só a Senha Master abre a Central de Loja."""
-        return cls("Área da Loja", "PIN DE SUPERVISOR", auth.validar_pin_dono, parent)
+        return cls(
+            "Área da Loja",
+            "PIN DE SUPERVISOR",
+            auth.validar_pin_dono,
+            parent,
+            tamanho_esperado=auth.tamanho_do_pin_nivel(3),
+        )
+
+    @classmethod
+    def _piso_valido(cls, tamanho: int | None) -> int:
+        """O tamanho vindo do banco, contido no que o cartão consegue mostrar.
+
+        Trata `None` (tamanho desconhecido) e lixo (0, negativo, tipo errado)
+        da mesma forma: cai no piso padrão. Uma fileira com zero marcador não
+        é informação, é a tela parecendo quebrada.
+        """
+        if not isinstance(tamanho, int) or isinstance(tamanho, bool) or tamanho <= 0:
+            return cls.DOTS_MINIMOS
+        return min(tamanho, cls.DOTS_MAXIMOS)
 
     # ------------------------------------------------------------------
     # Montagem
@@ -359,15 +403,16 @@ class PinPadDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _pintar_marcadores(self, erro: bool = False) -> None:
-        """Acende um marcador por dígito, com a fileira elástica entre o piso e
-        o teto — e sem repolir o que já está do jeito certo.
+        """Acende um marcador por dígito, com a fileira elástica entre o piso
+        (o tamanho da senha cadastrada) e o teto — e sem repolir o que já está
+        do jeito certo.
 
         O `unpolish`/`polish` de `aplicar_propriedade` é o que faz o QSS
         reavaliar o widget (§3.15), mas ele não é de graça: sem a comparação
         abaixo seriam doze recálculos de estilo por tecla digitada, num
         Celeron, para mudar um marcador.
         """
-        visiveis = max(self.DOTS_MINIMOS, min(len(self._pin), self.DOTS_MAXIMOS))
+        visiveis = max(self._piso_de_dots, min(len(self._pin), self.DOTS_MAXIMOS))
         for indice, dot in enumerate(self._dots):
             dot.setVisible(indice < visiveis)
             if erro:

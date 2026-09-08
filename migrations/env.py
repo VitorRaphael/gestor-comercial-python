@@ -43,7 +43,23 @@ from gestor_comercial.repository.base import Base, DB_PATH
 
 target_metadata = Base.metadata
 
-config.set_main_option("sqlalchemy.url", f"sqlite:///{DB_PATH}")
+# Placeholder que vem no `alembic.ini` gerado pelo `alembic init` — é como se
+# reconhece "ninguém escolheu banco nenhum".
+URL_NAO_ESCOLHIDA = "driver://user:pass@localhost/dbname"
+
+# Quem não escolhe banco (o `alembic upgrade` da linha de comando e o
+# `main._aplicar_migrations` do boot) vai para o banco do app, que é o caso
+# normal. Mas um chamador que JÁ definiu a URL tem que ser respeitado.
+#
+# Sem esta checagem o `set_main_option` daqui vinha por cima de tudo, e como
+# `DB_PATH` é resolvido no import de `repository/base.py` (env var lida uma vez,
+# no primeiro import), um `command.upgrade(config, ...)` dentro de um teste
+# migrava o **banco real da máquina de quem roda a suíte** — nem `monkeypatch`
+# da variável de ambiente nem `set_main_option` no teste tinham efeito. Foi
+# assim que a migração `c1d5b8e37a42` chegou sozinha ao banco de trabalho.
+_url_do_chamador = config.get_main_option("sqlalchemy.url", None)
+if not _url_do_chamador or _url_do_chamador == URL_NAO_ESCOLHIDA:
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{DB_PATH}")
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

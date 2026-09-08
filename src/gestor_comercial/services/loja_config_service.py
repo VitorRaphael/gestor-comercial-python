@@ -44,6 +44,12 @@ MASCARA = "••••••••"
 class LojaConfigService:
     """Bootstrap e regras do módulo "Senhas e Acesso"."""
 
+    _CAMPO_DE_TAMANHO_POR_NIVEL = {
+        3: "senha_master_tamanho",
+        2: "senha_operacional_tamanho",
+        1: "senha_login_tamanho",
+    }
+
     def __init__(self, uow: UnitOfWork) -> None:
         self.uow = uow
 
@@ -68,6 +74,9 @@ class LojaConfigService:
             senha_operacional_salt=salt_operacional,
             senha_login_hash=AuthService.hash_pin(SENHA_LOGIN_PADRAO, salt_login),
             senha_login_salt=salt_login,
+            senha_master_tamanho=len(SENHA_MASTER_PADRAO),
+            senha_operacional_tamanho=len(SENHA_OPERACIONAL_PADRAO),
+            senha_login_tamanho=len(SENHA_LOGIN_PADRAO),
             cpf_dono_definido=False,
         )
         self.uow.loja_config.salvar(config)
@@ -119,6 +128,25 @@ class LojaConfigService:
         except AcessoNegadoError:
             return False
 
+    def tamanho_da_senha(self, nivel: int) -> int | None:
+        """Quantos caracteres tem a senha DAQUELE nível — nunca qual é ela.
+
+        Existe para o teclado de PIN desenhar a fileira de marcadores do
+        tamanho certo antes do primeiro dígito (`PinPadDialog`). É o próprio
+        nível, sem cascata: o Nível 2 devolve o tamanho da Operacional, e não o
+        da Master que também autentica ali. Quem digita a de cima acaba com
+        marcadores sobrando, e isso é de propósito — a fileira é uma dica do
+        que se espera, não uma trava, e o ENTRAR nunca depende de ela encher.
+
+        `None` quando o banco é anterior à coluna e aquela senha já tinha sido
+        trocada (ver a migração `c1d5b8e37a42`): quem lê cai no piso padrão, e
+        o valor certo entra sozinho na próxima troca.
+        """
+        campo = self._CAMPO_DE_TAMANHO_POR_NIVEL.get(nivel)
+        if campo is None:
+            return None
+        return getattr(self.obter_ou_criar(), campo)
+
     def validar_cpf_dono(self, cpf: str) -> None:
         config = self.obter_ou_criar()
         if not config.cpf_dono_definido or config.cpf_dono_hash is None:
@@ -147,6 +175,7 @@ class LojaConfigService:
         salt = AuthService.gerar_salt()
         config.senha_login_salt = salt
         config.senha_login_hash = AuthService.hash_pin(nova_senha, salt)
+        config.senha_login_tamanho = len(nova_senha.strip())
         self.uow.loja_config.salvar(config)
         self.uow.commit()
 
@@ -157,6 +186,7 @@ class LojaConfigService:
         salt = AuthService.gerar_salt()
         config.senha_operacional_salt = salt
         config.senha_operacional_hash = AuthService.hash_pin(nova_senha, salt)
+        config.senha_operacional_tamanho = len(nova_senha.strip())
         self.uow.loja_config.salvar(config)
         self.uow.commit()
 
@@ -167,6 +197,7 @@ class LojaConfigService:
         salt = AuthService.gerar_salt()
         config.senha_master_salt = salt
         config.senha_master_hash = AuthService.hash_pin(nova_senha, salt)
+        config.senha_master_tamanho = len(nova_senha.strip())
         self.uow.loja_config.salvar(config)
         self.uow.commit()
 

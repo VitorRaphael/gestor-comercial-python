@@ -265,12 +265,13 @@ def test_os_marcadores_acendem_um_por_digito(dialogo, qapp):
     for digito in "123":
         dialogo._digitar(digito)
 
-    assert _estados(dialogo) == ["cheio"] * 3 + ["vazio"] * 3
+    assert _estados(dialogo) == ["cheio"] * 3 + ["vazio"] * (dialogo._piso_de_dots - 3)
 
 
 def test_a_fileira_cresce_para_a_senha_de_oito_digitos(dialogo, qapp):
-    """A Operacional de fábrica tem oito caracteres e a Master seis: uma fileira
-    fixa de seis não mostraria os dois últimos toques da mais longa."""
+    """Digitar mais do que o piso empurra a fileira para cima — o caso de quem
+    entra no Caixa com a Master (6) tendo o piso da Operacional (8) é o
+    contrário, e está coberto logo abaixo."""
     dialogo.show()
     qapp.processEvents()
 
@@ -303,7 +304,7 @@ def test_o_aviso_some_quando_o_operador_volta_a_digitar(dialogo, qapp):
 
     assert dialogo._label_instrucao.property("estado") == "normal"
     assert dialogo._label_instrucao.text() == dialogo.INSTRUCAO
-    assert _estados(dialogo) == ["cheio"] + ["vazio"] * 5
+    assert _estados(dialogo) == ["cheio"] + ["vazio"] * (dialogo._piso_de_dots - 1)
 
 
 def test_a_cor_do_aviso_vem_do_qss_global_e_nao_do_widget(dialogo):
@@ -451,3 +452,124 @@ def test_nenhuma_tecla_do_pinpad_perde_o_rotulo_para_o_padding(qapp, tema_aplica
     modal.deleteLater()
 
     assert not espremidos, "tecla(s) sem largura útil para o rótulo:\n  " + "\n  ".join(espremidos)
+
+
+# ---------------------------------------------------------------------------
+# A fileira de marcadores tem o tamanho da senha CADASTRADA
+# ---------------------------------------------------------------------------
+#
+# Defeito relatado pelo Vitor: o modal do Caixa mostrava seis bolinhas para uma
+# senha de oito digitos. O piso era uma constante, e nao podia ser -- o hash e
+# via de mao unica e nao devolve o comprimento do que gerou ele, entao o
+# tamanho passou a ser gravado em `loja_config` (coluna `senha_*_tamanho`,
+# migracao c1d5b8e37a42) e lido na construcao do dialogo.
+#
+# O que estes testes trancam: que a fileira nasce do tamanho certo, que ela
+# acompanha a troca de senha do dono, e que nada disso virou trava para
+# confirmar -- porque no Nivel 2 duas senhas de tamanhos diferentes autenticam.
+
+
+def _dots_visiveis(dialogo: PinPadDialog, qapp) -> int:
+    dialogo.show()
+    qapp.processEvents()
+    total = len(_estados(dialogo))
+    dialogo.reject()
+    dialogo.deleteLater()
+    return total
+
+
+def test_o_caixa_nasce_com_a_fileira_da_senha_operacional(qapp, auth):
+    """Oito de fábrica — o número que estava errado na tela."""
+    assert _dots_visiveis(PinPadDialog.para_caixa(auth), qapp) == len(PIN_OPERACIONAL) == 8
+
+
+def test_a_loja_nasce_com_a_fileira_da_senha_master(qapp, auth):
+    """Seis de fábrica. As duas telas usam o mesmo componente e mostram
+    contagens diferentes porque guardam níveis diferentes."""
+    assert _dots_visiveis(PinPadDialog.para_loja(auth), qapp) == len(PIN_MASTER) == 6
+
+
+def test_trocar_a_senha_muda_a_fileira_do_proximo_acesso(qapp, auth, gerente):
+    """O pedido literal: "caso o cliente mude a senha, as bolinhas também devem
+    mudar". Não precisa de sinal nem de recarga — `MainWindow` constrói um
+    diálogo novo a cada acesso, e a leitura é sempre a do valor atual."""
+    antes = _dots_visiveis(PinPadDialog.para_caixa(auth), qapp)
+    assert antes == 8
+
+    auth.loja_config.alterar_senha_operacional(PIN_MASTER, "12345")
+
+    assert _dots_visiveis(PinPadDialog.para_caixa(auth), qapp) == 5, (
+        f"a fileira continuou com {antes} marcadores depois da troca de senha"
+    )
+
+
+def test_a_senha_master_confirma_com_a_fileira_do_caixa_pela_metade(qapp, auth, gerente):
+    """A armadilha de amarrar o ENTRAR ao tamanho da fileira.
+
+    O Nível 2 aceita a Operacional (8) **ou** a Master (6, cascata do §3.13).
+    Quem entra no Caixa com a Master deixa dois marcadores apagados — e tem que
+    entrar assim mesmo. Se um dia alguém "melhorar" isto com confirmação
+    automática ao encher a fileira, ou exigindo que ela encha, é aqui que
+    aparece: seria a Master deixando de abrir o Caixa.
+    """
+    modal = PinPadDialog.para_caixa(auth)
+    assert modal._piso_de_dots == 8
+
+    for digito in PIN_MASTER:
+        modal._digitar(digito)
+    assert len(modal._pin) == 6
+    assert modal.result() != QDialog.DialogCode.Accepted, "confirmou sozinho ao digitar"
+
+    modal._confirmar()
+
+    assert modal.result() == QDialog.DialogCode.Accepted
+
+
+def test_tamanho_desconhecido_cai_no_piso_padrao(qapp):
+    """Banco anterior à coluna, com a senha já trocada: o service devolve
+    `None` e a tela não pode aparecer sem marcador nenhum."""
+    modal = PinPadDialog("Caixa", "PIN", lambda _pin: None, None, tamanho_esperado=None)
+
+    assert modal._piso_de_dots == PinPadDialog.DOTS_MINIMOS
+
+
+@pytest.mark.parametrize("tamanho", [0, -3, "oito", None, True])
+def test_tamanho_invalido_nao_quebra_a_fileira(qapp, tamanho):
+    """Lixo no campo (0, negativo, tipo errado) é tratado como desconhecido —
+    fileira com zero marcador não é informação, é tela quebrada."""
+    modal = PinPadDialog("Caixa", "PIN", lambda _pin: None, None, tamanho_esperado=tamanho)
+
+    assert modal._piso_de_dots == PinPadDialog.DOTS_MINIMOS
+
+
+def test_senha_mais_longa_que_o_cartao_para_no_teto(qapp):
+    """A regra de senha só tem mínimo (4), não máximo. O conjunto de marcadores
+    é montado uma vez e tem teto — passando dele a fileira para de crescer, e
+    isso é preferível a estourar a largura do cartão."""
+    modal = PinPadDialog("Caixa", "PIN", lambda _pin: None, None, tamanho_esperado=40)
+
+    assert modal._piso_de_dots == PinPadDialog.DOTS_MAXIMOS
+
+
+def test_a_fileira_cheia_cabe_na_largura_do_cartao(qapp, tema_aplicado):
+    """O teto de marcadores é um número escrito à mão em cima de uma conta de
+    largura. Este teste é a conta, para o dia em que alguém subir o número."""
+    janela = QWidget()
+    janela.resize(1000, 700)
+    janela.show()
+    modal = PinPadDialog(
+        "Caixa", "PIN", lambda _pin: None, janela, tamanho_esperado=PinPadDialog.DOTS_MAXIMOS
+    )
+    modal.show()
+    qapp.processEvents()
+
+    dots = [d for d in modal._dots if d.isVisible()]
+    largura_da_fileira = sum(d.width() for d in dots) + 10 * (len(dots) - 1)
+    modal.reject()
+    modal.deleteLater()
+
+    assert len(dots) == PinPadDialog.DOTS_MAXIMOS
+    assert largura_da_fileira <= PinPadDialog.LARGURA_CARTAO_PX - 40, (
+        f"{PinPadDialog.DOTS_MAXIMOS} marcadores somam {largura_da_fileira}px e não cabem "
+        f"nos {PinPadDialog.LARGURA_CARTAO_PX - 40}px úteis do cartão"
+    )

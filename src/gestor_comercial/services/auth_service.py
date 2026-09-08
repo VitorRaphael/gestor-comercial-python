@@ -224,6 +224,17 @@ class AuthService:
                 return True
         return False
 
+    def tamanho_do_pin_nivel(self, nivel: int) -> int | None:
+        """Quantos caracteres tem a senha própria daquele nível.
+
+        Só o comprimento, nunca o valor — é o que o teclado de PIN
+        (`PinPadDialog`) precisa para desenhar a fileira de marcadores antes de
+        o operador digitar. Fica aqui, ao lado de `validar_pin_nivel`, porque a
+        tela já conversa com este service e não deveria precisar conhecer o
+        `LojaConfigService` por dentro para uma pergunta de uma linha.
+        """
+        return self.loja_config.tamanho_da_senha(nivel)
+
     def validar_pin_gerente(self, pin: str) -> Usuario:
         """Reautenticação para ação crítica (Nível 2 — Caixa/Autorizações):
         confere o PIN contra a cascata (Operacional ou Master, §3.13) e

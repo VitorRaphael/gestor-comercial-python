@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, String
+from sqlalchemy import Boolean, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gestor_comercial.repository.base import Base
@@ -37,6 +37,29 @@ class LojaConfig(Base):
     # "Senha de Login" e com o padrão de nomes já usado pelas outras duas.
     senha_login_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     senha_login_salt: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    # Quantos caracteres tem cada senha — NÃO a senha, só o comprimento.
+    #
+    # Existe para o teclado de PIN (`ui/widgets/pin_pad_dialog.py`) desenhar a
+    # fileira de marcadores do tamanho certo ANTES de o operador digitar: um
+    # hash é via de mão única e não devolve o comprimento do que gerou ele, e
+    # sem este campo a tela mostrava seis bolinhas para a Senha Operacional de
+    # oito dígitos.
+    #
+    # `NULL` significa "não sabemos": banco anterior a esta coluna cuja senha
+    # daquele nível já tinha sido trocada (a migração só preencheu os níveis
+    # que ainda estavam na senha de fábrica, que ela consegue conferir contra o
+    # hash). Quem lê trata `NULL` como "use o piso padrão", e o valor certo
+    # entra sozinho na próxima troca de senha.
+    #
+    # O que isto entrega a quem tiver o arquivo do banco na mão: saber que a
+    # senha tem N dígitos. Irrelevante na prática — são 4 a 8 dígitos
+    # numéricos, que um ataque offline percorre inteiro em segundos com ou sem
+    # esta coluna, e a própria tela do PIN mostra a contagem a quem estiver de
+    # pé na frente do monitor.
+    senha_master_tamanho: Mapped[int | None] = mapped_column(Integer)
+    senha_operacional_tamanho: Mapped[int | None] = mapped_column(Integer)
+    senha_login_tamanho: Mapped[int | None] = mapped_column(Integer)
 
     # CPF do dono é opcional até o primeiro cadastro (§ bootstrap) — sem
     # senha master ainda definida por ele mesmo, não há como exigir "CPF
