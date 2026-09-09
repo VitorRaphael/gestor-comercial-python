@@ -2405,6 +2405,198 @@ mesas, 15 categorias, 113 produtos, 4 combos, WAL ligado.
 
 ---
 
+### 9.9 A subcategoria vira o nível que contém os itens ✅ CONCLUÍDO — 2026-09-09
+
+Pedido do Vitor, com mockup, no mesmo dia do §9.8 e corrigindo-o:
+
+> "a subcategoria não deve ser dentro de um item e sim o inverso, os itens devem
+> ser dentro de tal subcategoria, assim ao abrir uma categoria vemos suas
+> subdivisões" — e, logo depois: "temos que ter a tela com o design bonito para
+> criar as subclasses".
+
+O §9.8 tratou a subcategoria como uma **etiqueta pendurada no produto**: um selo
+ao lado do nome, na linha do item. Estava de cabeça para baixo. A subcategoria
+**contém** produtos, e é isso que a tela precisava dizer.
+
+#### O que a segunda frase mudou no modelo, e por quê
+
+"Tela para criar as subcategorias" não é um detalhe de UI: é uma mudança de
+modelo. Com a coluna de texto do §9.8, uma subcategoria **só existia enquanto
+algum produto carregasse a string** — não havia como criar uma vazia esperando
+os itens, que é justamente como alguém organiza um cardápio (primeiro os
+grupos, depois a classificação). E renomear "Podrão" exigiria varrer e
+reescrever todo produto que a carregasse; uma reescrita em massa que falha no
+meio deixa metade do cardápio num grupo e metade no outro.
+
+Então ela virou entidade: tabela `subcategorias` (id, nome, categoria_id) e
+`produtos.subcategoria_id` no lugar do texto. Migração `f8d1a6c40b27`, que
+**converte o dado que existir** antes de derrubar a coluna antiga.
+
+| | §9.8 (texto) | §9.9 (entidade) |
+|---|---|---|
+| Criar vazia | impossível | é o caso normal |
+| Renomear | reescrever N produtos | um `UPDATE` numa linha |
+| Excluir | apagar a string de N produtos | `SET NULL`, produtos intactos |
+| "Podrão" em duas categorias | duas strings iguais, indistinguíveis | duas linhas, cada uma com a sua categoria |
+| Nome quase-igual | canonizado na gravação (calado) | recusado com mensagem |
+
+A canonização do §8 (gravar "Podrão" quando alguém digita "podrao") deixou de
+existir e virou **recusa**: com uma tela de cadastro, criar às escondidas uma
+coisa com nome diferente do que foi digitado é pior que dizer "já existe". A
+comparação continua ignorando acento, caixa e espaço repetido — é a mesma
+`chave_de_agrupamento` de `services/texto.py`, agora usada para barrar em vez de
+para reescrever.
+
+**Sem `ativo`**, ao contrário de `Categoria`, e de propósito: categoria
+desativada some do balcão junto com os produtos dela (é regra de venda);
+subcategoria é só organização, e desativar não significaria nada que excluir já
+não signifique — e excluir é seguro, porque os produtos voltam a ficar sem
+subcategoria (`ondelete="SET NULL"`) sem perder venda nem histórico.
+
+#### A regra de ouro segue trancada
+
+> **O roteamento de impressão continua 100% amarrado à CATEGORIA.**
+
+Nada aqui a afrouxou, e as três provas do §9.8 continuam de pé (com a
+`subcategoria_id` no lugar do texto):
+
+| Onde | O que prova |
+|---|---|
+| `test_a_subcategoria_nao_muda_a_impressora_de_destino` | 3 lanches da mesma categoria, em subcategorias diferentes, saem **num cupom só** |
+| `test_o_roteamento_nao_le_a_subcategoria_em_lugar_nenhum` | Varredura: a palavra não pode aparecer no `impressao_service` |
+| `test_o_vinculo_de_impressao_nao_e_tocado` (migração) | Depois do upgrade, `categorias.impressora_id` está onde estava |
+
+E a bancada: `tools/comparar_cupons.py` deu os dois cupons **idênticos linha a
+linha** contra o commit anterior. O modal de cadastro ainda **diz** a regra em
+voz alta — o cartão de contexto mostra `LANCHES · COZINHA`, porque "isso muda
+onde meu pedido sai?" é a pergunta que uma tela de subdivisão levanta.
+
+#### A tela
+
+**A árvore** (esquerda) expande a categoria e mostra `Todas`, cada subdivisão e
+— quando há item solto — `Sem subcategoria`, com a contagem de cada uma. Uma
+categoria aberta por vez: com quinze categorias, deixar todas expandidas
+transforma a coluna num rolo, e o gerente organiza uma de cada vez.
+
+**A tabela** (direita) agrupa por subdivisão, com uma linha de cabeçalho por
+grupo (`GUARNIÇÕES · 3 ITENS`). Escolher uma subdivisão específica mostra só ela
+**sem** cabeçalho — haveria um só, dizendo o que o título da tela já diz.
+
+Duas colunas saíram e uma entrou:
+
+* **o selo da subcategoria na linha do produto** — ele repetia, uma vez por
+  item, o que o cabeçalho do grupo diz uma vez, e disputava largura justamente
+  com o nome. Todo o cuidado de encurtamento do §9.8 (o laço de
+  `horizontalAdvance`, o `ensurePolished`) foi embora com ele. O problema não
+  era o selo estar mal feito: era o selo não ser o lugar da informação;
+* **a coluna "Tipo"** — existia para a badge COMBO, que aparece em 4 dos 113
+  produtos do cardápio real. Ela virou um selo ao lado do nome, e os 90px
+  voltaram para a coluna "Produto";
+* **o KPI "Preço médio"** deu lugar a **"Subcategorias"**. Média de preço sobre
+  um cardápio que vai de R$ 0,50 (chiclete) a R$ 48,00 (dois espetos de picanha)
+  não decide nada; quantas subdivisões existem, sim — é o que diz se a
+  organização avançou.
+
+**O modal "Nova subcategoria"** (`widgets/subcategoria_dialog.py`) é o **sétimo
+modal em cartão** do app, e o primeiro que cadastra algo que antes não existia.
+Cartão de contexto com a categoria e a impressora, campo com anel de foco e
+contador, as subdivisões que já existem como pílulas **apagadas e não
+clicáveis** (elas informam; clicar numa delas só poderia levar a "já existe"), e
+a conferência do nome rodando na tecla — o botão desliga antes de o gerente
+salvar para receber o erro de volta.
+
+#### Nada cortado — o pedido, e o que estava por trás dele
+
+"não deixa nada ficar cortado, pela falta de espaço" era sobre a coluna de
+categorias, e o defeito era anterior à subcategoria: **`setItemWidget` numa
+`QListWidget` não dimensiona o item**. A linha de duas alturas (nome +
+subtítulo) vinha sendo desenhada dentro da altura de uma, e as duas saíam
+cortadas ao meio — em TODAS as quinze categorias, desde que a linha ganhou
+subtítulo. A árvore nova dá `sizeHint` explícito a cada item.
+
+Três outros cortes apareceram na renderização com o cardápio real, e os três
+estão trancados em teste:
+
+1. **`stretchLastSection` nasce ligado no Qt.** A coluna da contagem tomava
+   metade da largura (medido: 146 de 293px) e o nome da subcategoria era
+   cortado. Desligá-lo é o que faz o `setSectionResizeMode` valer alguma coisa;
+2. **`setFirstColumnSpanned` num item ainda solto não vale** — o span mora no
+   modelo da árvore, e um item que ainda não foi adicionado não tem modelo onde
+   gravá-lo. Chamado antes do `addTopLevelItem`, era silenciosamente ignorado;
+3. **dois botões numa linha de 300px** cortavam o próprio rótulo ("ova categ",
+   "Subcategor"). Empilhados, cabem.
+
+##### O `setStyleSheet` que descia para os filhos
+
+Os badges ATIVO/VAZIO e a barra de margem **sumiram** no meio do trabalho: viram
+texto solto, sem pílula. A causa é uma regra do Qt que vale a pena registrar:
+`setStyleSheet("background: transparent")` num widget **vale para os
+descendentes dele**, e vence o QSS global. Enquanto os badges se pintavam
+sozinhos (com o próprio `setStyleSheet`), a regra do pai perdia; assim que
+passaram a se vestir por `objectName` no QSS global, a regra do pai começou a
+ganhar. A correção foi trocar o `setStyleSheet` do embrulho por um
+`objectName` (`celulaTransparente`) e declarar a regra no QSS — onde ela para no
+seletor em vez de descer pela árvore.
+
+#### O ganho de consulta que o §9.4 tinha deixado registrado
+
+O modal "Adicionar item" monta um instantâneo do cardápio na abertura para a
+digitação não tocar o SQLAlchemy. O §9.8 mediu **128 consultas** nessa abertura
+(o N+1 do §3.6, uma por categoria de cada produto) e registrou que
+`selectinload` as levaria a 2. A subcategoria como relação teria **dobrado** a
+conta. Em vez disso, `listar_produtos_para_lancamento()` carrega as duas
+relações de uma vez:
+
+```
+§9.8   abertura do modal (113 produtos)   128 consultas
+§9.9   abertura do modal (113 produtos)     3 consultas
+```
+
+Três, e não duas, porque são duas relações: a dos produtos e uma por relação —
+independentemente do tamanho do cardápio.
+
+#### Decisões
+
+| Data | Decisão | Por quê |
+|---|---|---|
+| 2026-09-09 | Subcategoria virou **entidade**, não continuou texto | Uma tela de cadastro exige poder criar uma vazia. Texto no produto só existe enquanto algum produto o carrega |
+| 2026-09-09 | Nome quase-igual é **recusado**, não canonizado | O §9.8 gravava "Podrão" quando o gerente digitava "podrao". Com tela de cadastro, criar às escondidas uma coisa com outro nome é pior que dizer "já existe" |
+| 2026-09-09 | Sem `ativo` na subcategoria | Categoria desativada some do balcão (regra de venda); subcategoria é organização, e excluir já cobre o caso — os produtos só perdem a etiqueta |
+| 2026-09-09 | Excluir a subcategoria **não** apaga os produtos | Excluir uma etiqueta nunca pode apagar o que ela etiquetava. É a diferença para `excluir_categoria`, que é bloqueada com produto dentro |
+| 2026-09-09 | Excluir a **categoria** leva as subdivisões junto (`cascade`) | Subcategoria órfã não é alcançável por tela nenhuma: toda navegação entra pela categoria |
+| 2026-09-09 | O produto **escolhe** a subcategoria num seletor, não digita | Digitar criaria subdivisão pela porta dos fundos, sem passar pela tela que existe para isso — e é assim que nascem duas com o mesmo nome |
+| 2026-09-09 | Trocar a categoria no formulário **zera** a subcategoria escolhida | Nome e preço valem em qualquer categoria; uma subdivisão pertence a UMA. Manter a escolha ofereceria gravar um vínculo que o service recusa |
+| 2026-09-09 | O selo da subcategoria saiu da linha do produto | Ele repetia por item o que o cabeçalho do grupo diz uma vez, e disputava largura com o nome |
+| 2026-09-09 | A coluna "Tipo" saiu; COMBO virou selo ao lado do nome | Uma coluna de 90px para uma marca que aparece em 4 de 113 produtos |
+| 2026-09-09 | "Preço médio" saiu do KPI para "Subcategorias" entrar | Média sobre um cardápio de R$ 0,50 a R$ 48,00 não decide nada |
+| 2026-09-09 | Uma categoria expandida por vez | Quinze categorias abertas viram uma coluna de sessenta linhas onde rolar é o trabalho principal |
+| 2026-09-09 | `atualizar()` **preserva** a seleção da árvore | Voltar para a primeira categoria a cada item salvo seria a tela largando o trabalho. Mesmo contrato que a tabela já cumpria com `preservar_selecao=True` |
+| 2026-09-09 | Faixa de seleção da árvore **sem** cantos arredondados | A linha da subdivisão tem duas colunas, cada uma com o seu retângulo: o arredondamento produzia duas pílulas separadas por uma fresta no meio da faixa |
+| 2026-09-09 | Família de token própria (`subcategoria_*`), verde-seco | A lição do §9.5, de novo. Não é o âmbar da marca nem o ciano de dado: "isto é organização" tem cor própria |
+
+##### Ficou de fora, e por quê
+
+- **Mover uma subcategoria de categoria.** Chegou a existir no rascunho e saiu:
+  levaria os produtos junto e mudaria a impressora deles — o que é correto (a
+  categoria é o eixo), mas é uma regra que o pedido não pediu e que ninguém
+  precisou ainda.
+- **Subcategoria no cupom da cozinha** e **relatório por subcategoria**, os
+  mesmos dois do §9.8, pelos mesmos motivos.
+- **A barra lateral do mockup** (Visão Geral, Delivery, Estoque, Fechamento).
+  São telas que não existem; o pedido era sobre o Cardápio.
+- **O `seed.py` continua não classificando nada.** Ele pula produto que já
+  existe pelo nome, então classificar lá deixaria a máquina do food truck e uma
+  máquina limpa com cardápios diferentes.
+
+**Suíte: 1284 (de 1225), 59 testes novos**, conferidos com 23 mutações — as 23
+reprovam. Bancadas: **22 das 24 telas idênticas byte a byte**, diferindo só as
+duas do Cardápio (que é a tela reestruturada), e os **2 cupons idênticos linha a
+linha**. Boot de ponta a ponta em banco novo: 60 mesas, 15 categorias, 113
+produtos, 4 combos, WAL ligado, e a consulta de subdivisões saindo por
+`COVERING INDEX`.
+
+---
+
 ## 10. As melhores mudanças que o programa teve — em português de balcão
 
 > **Por que esta seção existe.** Todo o resto do documento é escrito para quem

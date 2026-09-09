@@ -116,34 +116,41 @@ def test_agrupa_por_impressora_da_categoria(uow, impressao, driver, gerente, cai
     assert "Coca-Cola" not in driver.texto_de("Cozinha")
 
 
-def test_o_submodelo_nao_muda_a_impressora_de_destino(
+def test_a_subcategoria_nao_muda_a_impressora_de_destino(
     uow, impressao, driver, gerente, caixa_aberto, mesa
 ):
-    """A REGRA DE OURO do §9.8, medida onde ela vale: no papel que sai.
+    """A REGRA DE OURO do §9.8/§9.9, medida onde ela vale: no papel que sai.
 
-    Dois lanches da MESMA categoria, com sub-modelos DIFERENTES, e um terceiro
-    sem sub-modelo nenhum. Os três têm que sair na impressora da categoria, no
-    mesmo cupom — o sub-modelo é organização de catálogo e não pode abrir uma
-    segunda fila.
+    Dois lanches da MESMA categoria, em subcategorias DIFERENTES, e um terceiro
+    sem subcategoria nenhuma. Os três têm que sair na impressora da categoria,
+    no mesmo cupom — a subcategoria é organização de catálogo e não pode abrir
+    uma segunda fila.
 
     É este teste que permite dizer ao Vitor que nenhuma impressora precisa ser
-    reconfigurada: se um dia alguém fizer `_destino_do_item` olhar para o
-    sub-modelo, três cupons saem no lugar de um e ele reprova aqui.
+    reconfigurada: se um dia alguém fizer `_destino_do_item` olhar para a
+    subcategoria, três cupons saem no lugar de um e ele reprova aqui.
     """
+    from gestor_comercial.domain.subcategoria import Subcategoria
+
     cozinha = nova_impressora(uow, "Cozinha")
     bar = nova_impressora(uow, "Bar", padrao=True)
     artesanal = nova_categoria_com_produto(uow, "Lanches", "X Artesanal", "22.00", cozinha)
-    artesanal.subcategoria = "Artesanal"
+    categoria_id = artesanal.categoria_id
+    sub_artesanal = uow.subcategorias.salvar(
+        Subcategoria(nome="Artesanal", categoria_id=categoria_id)
+    )
+    sub_podrao = uow.subcategorias.salvar(Subcategoria(nome="Podrão", categoria_id=categoria_id))
+    artesanal.subcategoria_id = sub_artesanal.id
     podrao = uow.produtos.salvar(
         Produto(
             nome="X Podrão",
             preco=dinheiro("12.00"),
-            categoria_id=artesanal.categoria_id,
-            subcategoria="Podrão",
+            categoria_id=categoria_id,
+            subcategoria_id=sub_podrao.id,
         )
     )
     sem_submodelo = uow.produtos.salvar(
-        Produto(nome="X Burger", preco=dinheiro("13.00"), categoria_id=artesanal.categoria_id)
+        Produto(nome="X Burger", preco=dinheiro("13.00"), categoria_id=categoria_id)
     )
     comanda = nova_comanda(uow, caixa_aberto, gerente, mesa)
     for produto in (artesanal, podrao, sem_submodelo):
@@ -152,7 +159,7 @@ def test_o_submodelo_nao_muda_a_impressora_de_destino(
     resultados = impressao.imprimir_comanda(comanda.id)
 
     assert [r.impressora_nome for r in resultados] == ["Cozinha"], (
-        "o sub-modelo abriu uma segunda fila de impressão"
+        "a subcategoria abriu uma segunda fila de impressão"
     )
     assert driver.cupons_de("Cozinha") == 1
     texto = driver.texto_de("Cozinha")
@@ -162,15 +169,20 @@ def test_o_submodelo_nao_muda_a_impressora_de_destino(
     assert driver.texto_de("Bar") == ""
 
 
-def test_o_submodelo_nao_aparece_no_cupom_da_cozinha(
+def test_a_subcategoria_nao_aparece_no_cupom_da_cozinha(
     uow, impressao, driver, gerente, caixa_aberto, mesa
 ):
     """A bobina de 32 colunas é para quem produz o item, não para quem organiza
     o cardápio. O cupom continua com nome, quantidade e observação — mais uma
     linha de etiqueta empurraria o pedido para fora do olhar de quem cozinha."""
+    from gestor_comercial.domain.subcategoria import Subcategoria
+
     nova_impressora(uow, "Cozinha", padrao=True)
     produto = nova_categoria_com_produto(uow, "Lanches", "X Podrão", "12.00")
-    produto.subcategoria = "Podrão do Bairro"
+    sub = uow.subcategorias.salvar(
+        Subcategoria(nome="Podrão do Bairro", categoria_id=produto.categoria_id)
+    )
+    produto.subcategoria_id = sub.id
     comanda = nova_comanda(uow, caixa_aberto, gerente, mesa)
     novo_item(uow, comanda, produto)
 
@@ -179,7 +191,7 @@ def test_o_submodelo_nao_aparece_no_cupom_da_cozinha(
     assert "Podrão do Bairro" not in driver.texto_de("Cozinha")
 
 
-def test_o_roteamento_nao_le_o_submodelo_em_lugar_nenhum():
+def test_o_roteamento_nao_le_a_subcategoria_em_lugar_nenhum():
     """Varredura de código, e não de comportamento — a outra metade da garantia.
 
     Os testes acima provam o roteamento de HOJE. Este reprova a linha que o
@@ -194,8 +206,8 @@ def test_o_roteamento_nao_le_o_submodelo_em_lugar_nenhum():
     fonte = Path(impressao_service.__file__).read_text(encoding="utf-8")
 
     assert "subcategoria" not in fonte, (
-        "o roteamento de impressão passou a enxergar o sub-modelo — a regra de "
-        "ouro do §9.8 é que quem decide a impressora é a CATEGORIA, e só"
+        "o roteamento de impressão passou a enxergar a subcategoria — a regra "
+        "de ouro do §9.8/§9.9 é que quem decide a impressora é a CATEGORIA, e só"
     )
 
 

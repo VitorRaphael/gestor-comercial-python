@@ -35,7 +35,10 @@ RAIZ_UI = Path(pacote_ui.__file__).parent
 # `modais.py` é o próprio helper: o `modal.exec()` de dentro dele é a
 # implementação, não um site de chamada.
 ARQUIVO_DO_HELPER = "modais.py"
-SITES_ESPERADOS = 31
+# 31 no diagnóstico do §3.2; +3 com a subcategoria do §9.9 (o cadastro e a
+# renomeação, que reaproveitam o modal num `while`, e a confirmação de
+# exclusão, que é um `QMessageBox` comum).
+SITES_ESPERADOS = 34
 
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
@@ -142,20 +145,25 @@ def test_nenhuma_tela_abre_modal_com_exec_cru():
 
 
 def test_o_modal_reaproveitado_no_while_e_descartado_fora_do_laco():
-    """Os dois `while modal.exec()` do cardápio são a exceção da regra — e a
-    exceção só é legítima porque a função descarta a instância ela mesma."""
+    """Os quatro `while modal.exec()` do cardápio são a exceção da regra — e a
+    exceção só é legítima porque a função descarta a instância ela mesma.
+
+    Eram dois (criar/editar produto). O §9.9 trouxe mais dois, pelo mesmo
+    motivo: o cadastro e a renomeação de subcategoria reabrem o MESMO diálogo
+    quando o service recusa o nome, para o gerente corrigir sem redigitar."""
     _, reaproveitados, _ = _varrer()
-    assert len(reaproveitados) == 2, (
-        "esperados exatamente 2 modais reaproveitados (cardapio_view.criar/editar), "
-        f"achados {len(reaproveitados)}: {reaproveitados}"
+    assert len(reaproveitados) == 4, (
+        "esperados exatamente 4 modais reaproveitados (cardapio_view: produto e "
+        f"subcategoria, criar/editar), achados {len(reaproveitados)}: {reaproveitados}"
     )
     assert all("cardapio_view.py" in site for site in reaproveitados), reaproveitados
 
 
-def test_os_trinta_e_um_sites_do_diagnostico_continuam_cobertos():
-    """§3.2 mapeou 31 pontos de abertura. Se este número cair sem uma tela
-    sumir junto, alguém trocou `executar_modal` por `.exec()` de novo; se subir,
-    há site novo — e ele precisa entrar na conta de propósito, não por acidente."""
+def test_os_sites_do_diagnostico_continuam_cobertos():
+    """§3.2 mapeou 31 pontos de abertura, e o §9.9 acrescentou 3. Se este número
+    cair sem uma tela sumir junto, alguém trocou `executar_modal` por `.exec()`
+    de novo; se subir, há site novo — e ele precisa entrar na conta de
+    propósito, não por acidente."""
     _, _, total = _varrer()
     assert total == SITES_ESPERADOS, f"{total} sites de modal, esperados {SITES_ESPERADOS}"
 

@@ -1006,213 +1006,333 @@ def test_excluir_impressora_exige_gerente(cardapio, como_atendente):
 
 
 # ----------------------------------------------------------------------
-# Sub-modelo (§9.8)
+# Subcategoria (§9.9)
 # ----------------------------------------------------------------------
 #
-# O sub-modelo é a subdivisão DENTRO da categoria — "Lanches" se subdivide em
-# "Artesanal", "Podrão", "Combos". Os testes abaixo cobrem as três coisas que
-# fariam a subdivisão não servir para nada:
+# A subcategoria é a subdivisão DENTRO da categoria — "Lanches" se subdivide em
+# "Artesanal", "Podrão", "Combos". Nasceu como coluna de texto no produto
+# (§9.8) e virou entidade quando o Vitor pediu a tela de cadastro. Os testes
+# abaixo cobrem as quatro coisas que fariam a subdivisão não servir:
 #
-# 1. **a regra de ouro** — sub-modelo não é impressão. Cadastrar ou editar um
-#    não pode encostar no vínculo de impressora que já existe (o roteamento de
-#    verdade é conferido em `test_impressao_service.py`);
-# 2. **um grupo, e não dois** — "podrao" digitado numa categoria que já tem
-#    "Podrão" tem que cair no MESMO grupo. Sem isso o cardápio ganha dois
-#    blocos com o mesmo nome e nenhuma tela consegue juntá-los de volta;
-# 3. **opcional de verdade** — em branco é NULL, e o produto continua
-#    funcionando como sempre funcionou.
+# 1. **a regra de ouro** — subcategoria não é impressão. Nada aqui pode encostar
+#    no vínculo categoria↔impressora (o roteamento de verdade é conferido em
+#    `test_impressao_service.py`);
+# 2. **pode nascer vazia** — é a razão de ela ter deixado de ser texto no
+#    produto: o gerente planeja a organização antes de classificar os itens;
+# 3. **uma por nome, dentro da categoria** — "podrao" numa categoria que já tem
+#    "Podrão" é recusado com mensagem. Entre categorias diferentes o mesmo nome
+#    é livre;
+# 4. **excluir a etiqueta não apaga o que ela etiquetava** — os produtos voltam
+#    a ficar sem subcategoria e continuam à venda.
 
 
-def test_criar_produto_sem_submodelo_fica_nulo(cardapio, categoria):
+def test_criar_subcategoria_nasce_vazia(cardapio, categoria):
+    """O caso que a coluna de texto não conseguia: um grupo sem itens ainda."""
+    sub = cardapio.criar_subcategoria(categoria.id, "  Podrão  ")
+
+    assert sub.id is not None
+    assert sub.nome == "Podrão"
+    assert sub.categoria_id == categoria.id
+    assert sub.produtos == []
+
+
+def test_criar_subcategoria_com_nome_vazio(cardapio, categoria):
+    with pytest.raises(RegraDeNegocioError, match="nome da subcategoria"):
+        cardapio.criar_subcategoria(categoria.id, "   ")
+
+
+def test_criar_subcategoria_em_categoria_inexistente(cardapio):
+    with pytest.raises(RecursoNaoEncontradoError):
+        cardapio.criar_subcategoria(9999, "Podrão")
+
+
+def test_criar_subcategoria_exige_gerente(cardapio, categoria, como_atendente):
+    with pytest.raises(AcessoNegadoError):
+        cardapio.criar_subcategoria(categoria.id, "Podrão")
+
+
+def test_nome_repetido_na_mesma_categoria_e_recusado(cardapio, categoria):
+    cardapio.criar_subcategoria(categoria.id, "Podrão")
+
+    with pytest.raises(RegraDeNegocioError, match="Já existe"):
+        cardapio.criar_subcategoria(categoria.id, "Podrão")
+
+
+def test_nome_quase_igual_tambem_e_recusado(cardapio, categoria):
+    """Acento, caixa e espaço repetido não fazem uma subcategoria nova.
+
+    "Podrão" e "podrao" lado a lado na árvore seriam dois grupos que o gerente
+    lê como um só — e ele passaria itens para um enquanto procura no outro. O
+    `UniqueConstraint` do banco pega só o par idêntico; esta checagem é a que
+    enxerga o quase-igual, e a que produz mensagem em vez de estouro.
+    """
+    cardapio.criar_subcategoria(categoria.id, "Podrão")
+
+    for quase in ("podrao", "PODRÃO", "  podrão  "):
+        with pytest.raises(RegraDeNegocioError, match="Já existe"):
+            cardapio.criar_subcategoria(categoria.id, quase)
+
+
+def test_o_mesmo_nome_em_outra_categoria_e_livre(cardapio, categoria):
+    """"Podrão" em Lanches e "Podrão" em Porções são duas subdivisões
+    independentes, cada uma com a impressora da categoria dela."""
+    porcoes = cardapio.criar_categoria("Porções")
+    cardapio.criar_subcategoria(categoria.id, "Podrão")
+
+    outra = cardapio.criar_subcategoria(porcoes.id, "Podrão")
+
+    assert outra.categoria_id == porcoes.id
+    assert [s.nome for s in cardapio.listar_subcategorias(categoria.id)] == ["Podrão"]
+    assert [s.nome for s in cardapio.listar_subcategorias(porcoes.id)] == ["Podrão"]
+
+
+def test_listar_subcategorias_vem_em_ordem_alfabetica(cardapio, categoria):
+    for nome in ("Podrão", "Artesanal", "Cachorro Quente"):
+        cardapio.criar_subcategoria(categoria.id, nome)
+
+    nomes = [s.nome for s in cardapio.listar_subcategorias(categoria.id)]
+
+    assert nomes == ["Artesanal", "Cachorro Quente", "Podrão"]
+
+
+def test_listar_subcategorias_nao_exige_gerente(cardapio, categoria, como_atendente):
+    """Leitura de catálogo, igual a `listar_produtos`: a tela do Cardápio fica
+    aberta o turno inteiro."""
+    assert cardapio.listar_subcategorias(categoria.id) == []
+
+
+def test_editar_subcategoria_renomeia_o_grupo_inteiro_de_uma_vez(cardapio, categoria):
+    """O que a coluna de texto não conseguia fazer sem reescrever cada produto.
+
+    O vínculo é por id, então renomear não toca em produto nenhum — e não existe
+    o estado "metade do cardápio num grupo, metade no outro".
+    """
+    sub = cardapio.criar_subcategoria(categoria.id, "Podrao")
+    produto = cardapio.criar_produto(
+        "X Burguer", Decimal("13.00"), categoria.id, subcategoria_id=sub.id
+    )
+
+    cardapio.editar_subcategoria(sub.id, "Podrão")
+
+    assert produto.subcategoria.nome == "Podrão"
+    assert produto.subcategoria_id == sub.id
+
+
+def test_editar_subcategoria_aceita_o_proprio_nome(cardapio, categoria):
+    sub = cardapio.criar_subcategoria(categoria.id, "Podrão")
+
+    assert cardapio.editar_subcategoria(sub.id, "Podrão").nome == "Podrão"
+
+
+def test_editar_subcategoria_com_nome_de_outra(cardapio, categoria):
+    cardapio.criar_subcategoria(categoria.id, "Artesanal")
+    sub = cardapio.criar_subcategoria(categoria.id, "Podrão")
+
+    with pytest.raises(RegraDeNegocioError, match="Já existe"):
+        cardapio.editar_subcategoria(sub.id, "artesanal")
+
+
+def test_editar_subcategoria_exige_gerente(cardapio, categoria, como_atendente):
+    with pytest.raises(AcessoNegadoError):
+        cardapio.editar_subcategoria(9999, "Podrão")
+
+
+def test_excluir_subcategoria_solta_os_produtos_em_vez_de_apaga_los(cardapio, categoria):
+    """A diferença para `excluir_categoria`, que é bloqueada com produto dentro.
+
+    Lá o produto ficaria sem impressora e sumiria do balcão; aqui ele só perde a
+    etiqueta e reaparece no grupo "Sem subcategoria". Excluir uma ETIQUETA nunca
+    pode apagar o que ela etiquetava.
+    """
+    sub = cardapio.criar_subcategoria(categoria.id, "Podrão")
+    produto = cardapio.criar_produto(
+        "X Burguer", Decimal("13.00"), categoria.id, subcategoria_id=sub.id
+    )
+
+    cardapio.excluir_subcategoria(sub.id)
+
+    assert cardapio.listar_subcategorias(categoria.id) == []
+    assert cardapio.buscar_produto(produto.id).subcategoria_id is None
+    assert produto.ativo is True
+    assert produto.categoria_id == categoria.id
+
+
+def test_excluir_subcategoria_inexistente(cardapio):
+    with pytest.raises(RecursoNaoEncontradoError):
+        cardapio.excluir_subcategoria(9999)
+
+
+def test_excluir_subcategoria_exige_gerente(cardapio, categoria, como_atendente):
+    with pytest.raises(AcessoNegadoError):
+        cardapio.excluir_subcategoria(9999)
+
+
+def test_excluir_a_categoria_leva_as_subcategorias_dela(cardapio, categoria):
+    """Subcategoria órfã não é alcançável por tela nenhuma — toda navegação
+    entra pela categoria."""
+    cardapio.criar_subcategoria(categoria.id, "Podrão")
+
+    cardapio.excluir_categoria(categoria.id)
+
+    assert cardapio.uow.subcategorias.listar_todos() == []
+
+
+def test_contagem_de_produtos_por_subcategoria(cardapio, categoria):
+    """Uma consulta para a árvore inteira — o `GROUP BY` que evita o N+1 de
+    perguntar categoria por categoria a cada refresh da tela."""
+    podrao = cardapio.criar_subcategoria(categoria.id, "Podrão")
+    vazia = cardapio.criar_subcategoria(categoria.id, "Artesanal")
+    for nome in ("X Burguer", "X Tudo"):
+        cardapio.criar_produto(nome, Decimal("13.00"), categoria.id, subcategoria_id=podrao.id)
+
+    contagem = cardapio.contagem_de_produtos_por_subcategoria()
+
+    assert contagem[podrao.id] == 2
+    # Subdivisão recém-criada não aparece no `GROUP BY`, e quem lê trata a
+    # ausência como zero — que é a contagem certa.
+    assert vazia.id not in contagem
+
+
+# ---------------------------------------------------------------------------
+# O produto apontando para a subcategoria
+# ---------------------------------------------------------------------------
+
+
+def test_criar_produto_sem_subcategoria_fica_nulo(cardapio, categoria):
     """O estado da maioria do cardápio, e o que não pode ter mudado."""
     novo = cardapio.criar_produto("Água", Decimal("5.00"), categoria.id)
 
+    assert novo.subcategoria_id is None
     assert novo.subcategoria is None
 
 
-def test_criar_produto_guarda_o_submodelo_aparado(cardapio, categoria):
-    novo = cardapio.criar_produto(
-        "X Podrão", Decimal("12.00"), categoria.id, subcategoria="  Podrão  "
-    )
-
-    assert novo.subcategoria == "Podrão"
-
-
-@pytest.mark.parametrize("digitado", ["", "   ", None])
-def test_submodelo_em_branco_vira_nulo(cardapio, categoria, digitado):
-    """Campo flexível: vazio não pode virar string vazia no banco, senão "sem
-    sub-modelo" passaria a ser um sub-modelo chamado ""."""
-    novo = cardapio.criar_produto(
-        "Água", Decimal("5.00"), categoria.id, subcategoria=digitado
-    )
-
-    assert novo.subcategoria is None
-
-
-def test_submodelo_colapsa_espaco_repetido(cardapio, categoria):
-    """"Lanche   Artesanal" e "Lanche Artesanal" são o mesmo grupo, e o que é
-    gravado é a forma limpa — senão as duas grafias virariam duas pílulas."""
-    novo = cardapio.criar_produto(
-        "X Tudo", Decimal("16.00"), categoria.id, subcategoria="Lanche   Artesanal"
-    )
-
-    assert novo.subcategoria == "Lanche Artesanal"
-
-
-def test_submodelo_adota_a_grafia_que_a_categoria_ja_usa(cardapio, categoria):
-    """O caso que existe para não haver dois grupos com o mesmo nome.
-
-    O gerente digitou "Podrão" no primeiro item e "podrao" no segundo, sem
-    clicar na pílula de sugestão. Os dois têm que cair no mesmo grupo, com a
-    grafia que já estava lá.
-    """
-    cardapio.criar_produto("X Podrão", Decimal("12.00"), categoria.id, subcategoria="Podrão")
-
-    segundo = cardapio.criar_produto(
-        "X Podrão Duplo", Decimal("16.00"), categoria.id, subcategoria="podrao"
-    )
-
-    assert segundo.subcategoria == "Podrão"
-    assert cardapio.listar_subcategorias(categoria.id) == ["Podrão"]
-
-
-def test_submodelo_novo_mantem_a_grafia_digitada(cardapio, categoria):
-    """A outra metade: sem equivalente na categoria, quem manda é a digitação."""
-    cardapio.criar_produto("X Podrão", Decimal("12.00"), categoria.id, subcategoria="Podrão")
+def test_criar_produto_dentro_de_uma_subcategoria(cardapio, categoria):
+    sub = cardapio.criar_subcategoria(categoria.id, "Podrão")
 
     novo = cardapio.criar_produto(
-        "X Artesanal", Decimal("22.00"), categoria.id, subcategoria="Artesanal"
+        "X Burguer", Decimal("13.00"), categoria.id, subcategoria_id=sub.id
     )
 
-    assert novo.subcategoria == "Artesanal"
-    assert cardapio.listar_subcategorias(categoria.id) == ["Artesanal", "Podrão"]
+    assert novo.subcategoria_id == sub.id
+    assert novo.subcategoria.nome == "Podrão"
 
 
-def test_a_grafia_de_uma_categoria_nao_vaza_para_outra(cardapio, categoria):
-    """Sub-modelo é subdivisão DE UMA categoria: o mesmo rótulo em duas
-    categorias são duas etiquetas independentes, e a de uma não reescreve a
-    outra."""
-    outra = cardapio.criar_categoria("Porções")
-    cardapio.criar_produto("X Podrão", Decimal("12.00"), categoria.id, subcategoria="Podrão")
+def test_produto_nao_pode_apontar_para_subcategoria_de_outra_categoria(cardapio, categoria):
+    """O caso que acontece de verdade: escolher a subdivisão e DEPOIS trocar a
+    categoria no mesmo formulário. Gravado, o produto ficaria num grupo que a
+    árvore de nenhuma das duas categorias desenha — invisível nas duas."""
+    porcoes = cardapio.criar_categoria("Porções")
+    sub_de_porcoes = cardapio.criar_subcategoria(porcoes.id, "Fritas")
 
-    porcao = cardapio.criar_produto("Batata", Decimal("15.00"), outra.id, subcategoria="podrao")
+    with pytest.raises(RegraDeNegocioError, match="não pertence a esta categoria"):
+        cardapio.criar_produto(
+            "X Burguer", Decimal("13.00"), categoria.id, subcategoria_id=sub_de_porcoes.id
+        )
 
-    assert porcao.subcategoria == "podrao"
+
+def test_produto_com_subcategoria_inexistente(cardapio, categoria):
+    with pytest.raises(RecursoNaoEncontradoError):
+        cardapio.criar_produto(
+            "X Burguer", Decimal("13.00"), categoria.id, subcategoria_id=9999
+        )
 
 
-def test_atualizar_produto_troca_o_submodelo(cardapio, categoria, produto):
+def test_atualizar_produto_troca_a_subcategoria(cardapio, categoria, produto):
+    sub = cardapio.criar_subcategoria(categoria.id, "Artesanal")
+
     cardapio.atualizar_produto(
         produto.id,
         produto.nome,
         produto.preco,
         produto.custo,
         categoria.id,
-        subcategoria="Artesanal",
+        subcategoria_id=sub.id,
     )
 
-    assert produto.subcategoria == "Artesanal"
+    assert produto.subcategoria_id == sub.id
 
 
-def test_atualizar_produto_sem_submodelo_limpa_o_campo(cardapio, categoria, produto):
+def test_atualizar_produto_sem_subcategoria_limpa_o_vinculo(cardapio, categoria, produto):
     """Substituição total, a mesma regra da descrição e da foto: a tela sempre
-    manda o estado atual do formulário, inclusive o campo apagado."""
+    manda o estado atual do formulário, inclusive "Sem subcategoria"."""
+    sub = cardapio.criar_subcategoria(categoria.id, "Artesanal")
     cardapio.atualizar_produto(
-        produto.id,
-        produto.nome,
-        produto.preco,
-        produto.custo,
-        categoria.id,
-        subcategoria="Artesanal",
+        produto.id, produto.nome, produto.preco, produto.custo, categoria.id,
+        subcategoria_id=sub.id,
     )
 
     cardapio.atualizar_produto(
         produto.id, produto.nome, produto.preco, produto.custo, categoria.id
     )
 
-    assert produto.subcategoria is None
+    assert produto.subcategoria_id is None
 
 
-def test_mudar_de_categoria_confere_a_grafia_no_destino(cardapio, categoria, produto):
-    """Mover "Lanches/podrao" para "Porções", onde já existe "Podrão", tem que
-    adotar a grafia de PORÇÕES — é lá que ele vai agrupar de agora em diante."""
+def test_mover_o_produto_de_categoria_com_subcategoria_da_antiga_e_recusado(
+    cardapio, categoria, produto
+):
     porcoes = cardapio.criar_categoria("Porções")
-    cardapio.criar_produto("Batata", Decimal("15.00"), porcoes.id, subcategoria="Podrão")
+    sub = cardapio.criar_subcategoria(categoria.id, "Podrão")
 
-    cardapio.atualizar_produto(
-        produto.id,
-        produto.nome,
-        produto.preco,
-        produto.custo,
-        porcoes.id,
-        subcategoria="podrao",
-    )
-
-    assert produto.categoria_id == porcoes.id
-    assert produto.subcategoria == "Podrão"
+    with pytest.raises(RegraDeNegocioError, match="não pertence a esta categoria"):
+        cardapio.atualizar_produto(
+            produto.id, produto.nome, produto.preco, produto.custo, porcoes.id,
+            subcategoria_id=sub.id,
+        )
 
 
-def test_listar_subcategorias_nao_repete_e_vem_em_ordem(cardapio, categoria):
-    for nome, submodelo in [
-        ("X Podrão", "Podrão"),
-        ("X Podrão Duplo", "Podrão"),
-        ("X Artesanal", "Artesanal"),
-    ]:
-        cardapio.criar_produto(nome, Decimal("12.00"), categoria.id, subcategoria=submodelo)
+def test_listar_produtos_para_lancamento_traz_as_relacoes_carregadas(cardapio, categoria, uow):
+    """O que mantém a digitação do modal de lançamento sem banco (§9.4).
 
-    assert cardapio.listar_subcategorias(categoria.id) == ["Artesanal", "Podrão"]
+    Sem os `selectinload`, montar o instantâneo do cardápio lia
+    `produto.categoria` e `produto.subcategoria` um a um — o N+1 que a
+    subcategoria teria DOBRADO. Aqui as instâncias são expiradas de propósito e
+    a leitura das duas relações não pode disparar consulta nenhuma.
+    """
+    from sqlalchemy import event, inspect
 
+    sub = cardapio.criar_subcategoria(categoria.id, "Podrão")
+    for nome in ("X Burguer", "X Tudo", "X Salada"):
+        cardapio.criar_produto(nome, Decimal("13.00"), categoria.id, subcategoria_id=sub.id)
+    uow.session.expire_all()
 
-def test_listar_subcategorias_ignora_produto_sem_submodelo(cardapio, categoria, produto):
-    """Produto solto não pode virar uma sugestão vazia na tela de cadastro."""
-    cardapio.criar_produto("X Podrão", Decimal("12.00"), categoria.id, subcategoria="Podrão")
+    produtos = cardapio.listar_produtos_para_lancamento()
+    assert all(
+        "categoria" not in inspect(p).unloaded and "subcategoria" not in inspect(p).unloaded
+        for p in produtos
+    ), "as relações vieram preguiçosas — o instantâneo do modal voltaria ao banco"
 
-    assert cardapio.listar_subcategorias(categoria.id) == ["Podrão"]
+    consultas = {"n": 0}
 
+    def _contar(*_args, **_kwargs) -> None:
+        consultas["n"] += 1
 
-def test_listar_subcategorias_inclui_produto_desativado(cardapio, categoria):
-    """Quem desativou o item de verão ainda organiza o cardápio por ele — a
-    sugestão sumir faria o gerente redigitar, que é a divergência de grafia que
-    a sugestão existe para evitar."""
-    fora_de_epoca = cardapio.criar_produto(
-        "X Podrão de Verão", Decimal("12.00"), categoria.id, subcategoria="Podrão"
-    )
-    cardapio.desativar_produto(fora_de_epoca.id)
+    event.listen(uow.session.bind, "before_cursor_execute", _contar)
+    try:
+        lidos = [(p.categoria.nome, p.subcategoria.nome) for p in produtos]
+    finally:
+        event.remove(uow.session.bind, "before_cursor_execute", _contar)
 
-    assert cardapio.listar_subcategorias(categoria.id) == ["Podrão"]
-
-
-def test_listar_subcategorias_so_da_categoria_pedida(cardapio, categoria):
-    outra = cardapio.criar_categoria("Bebidas")
-    cardapio.criar_produto("X Podrão", Decimal("12.00"), categoria.id, subcategoria="Podrão")
-    cardapio.criar_produto("Coca Lata", Decimal("8.00"), outra.id, subcategoria="Refrigerante")
-
-    assert cardapio.listar_subcategorias(categoria.id) == ["Podrão"]
-    assert cardapio.listar_subcategorias(outra.id) == ["Refrigerante"]
+    assert lidos == [("Lanches", "Podrão")] * 3
+    assert consultas["n"] == 0
 
 
-def test_listar_subcategorias_nao_exige_gerente(cardapio, categoria, como_atendente):
-    """Leitura de catálogo, igual a `listar_produtos`: quem lança item na
-    comanda precisa dela na tela."""
-    assert cardapio.listar_subcategorias(categoria.id) == []
-
-
-def test_o_submodelo_nao_mexe_na_categoria_nem_na_impressora(cardapio, categoria):
+def test_a_subcategoria_nao_mexe_na_categoria_nem_na_impressora(cardapio, categoria):
     """A REGRA DE OURO, no nível do cadastro.
 
     O roteamento de verdade é conferido em `test_impressao_service.py`; aqui o
-    que se prova é que cadastrar e editar sub-modelo não encosta no vínculo de
-    impressão que já existia — nenhuma impressora precisa ser reconfigurada por
-    causa desta funcionalidade.
+    que se prova é que criar, usar e apagar subdivisão não encosta no vínculo de
+    impressão — nenhuma impressora precisa ser reconfigurada por causa disto.
     """
     impressora = cardapio.criar_impressora("Cozinha")
     cardapio.associar_impressora(categoria.id, impressora.id)
 
+    sub = cardapio.criar_subcategoria(categoria.id, "Podrão")
     novo = cardapio.criar_produto(
-        "X Podrão", Decimal("12.00"), categoria.id, subcategoria="Podrão"
+        "X Podrão", Decimal("12.00"), categoria.id, subcategoria_id=sub.id
     )
-    cardapio.atualizar_produto(
-        novo.id, novo.nome, novo.preco, novo.custo, categoria.id, subcategoria="Artesanal"
-    )
+    cardapio.editar_subcategoria(sub.id, "Podrão do Bairro")
+    cardapio.excluir_subcategoria(sub.id)
 
     assert novo.categoria_id == categoria.id
     assert novo.categoria.impressora_id == impressora.id

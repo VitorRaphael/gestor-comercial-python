@@ -12,6 +12,7 @@ from gestor_comercial.domain.movimento_caixa import MovimentoCaixa
 from gestor_comercial.domain.pagamento import Pagamento
 from gestor_comercial.domain.produto import Produto
 from gestor_comercial.domain.quitacao_consumo import QuitacaoConsumo
+from gestor_comercial.domain.subcategoria import Subcategoria
 from gestor_comercial.domain.usuario import Usuario
 
 __all__ = [
@@ -29,5 +30,6 @@ __all__ = [
     "Pagamento",
     "Produto",
     "QuitacaoConsumo",
+    "Subcategoria",
     "Usuario",
 ]

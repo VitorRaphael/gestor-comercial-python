@@ -802,7 +802,10 @@ class ComandaView(QWidget):
     def _abrir_modal_adicionar_item(self) -> None:
         if self._comanda is None:
             return
-        produtos = self._cardapio_service.listar_produtos_ativos()
+        # `listar_produtos_para_lancamento` traz categoria e subcategoria já
+        # carregadas: o modal monta o instantâneo delas na abertura e depois
+        # não toca mais no SQLAlchemy (§9.4).
+        produtos = self._cardapio_service.listar_produtos_para_lancamento()
         if not produtos:
             self._label_erro.setText("Não há produtos ativos no cardápio.")
             return

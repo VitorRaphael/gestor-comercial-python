@@ -1,12 +1,12 @@
 """Modal "Adicionar item": busca do cardápio com miniatura, filtro por
 categoria, quantidade e observação — o lançamento de produto na comanda.
 
-Desde o §9.8 a linha de metadados carrega também o **sub-modelo**
-("PORÇÕES · FRITAS"), e a busca casa contra ele: digitar "artesanal" lista os
-lanches desse sub-modelo. O filtro em pílulas continua sendo **por categoria** e
-só — é o que a impressora usa, e é o eixo que o operador tem na cabeça no
-balcão; uma segunda fileira de pílulas custaria altura num cartão que já foi
-medido contra os 728px úteis de um monitor de 768px.
+A linha de metadados carrega também a **subcategoria** ("PORÇÕES · FRITAS"), e
+a busca casa contra ela: digitar "artesanal" lista os lanches dessa
+subcategoria. O filtro em pílulas continua sendo **por categoria** e só — é o
+que a impressora usa, e é o eixo que o operador tem na cabeça no balcão; uma
+segunda fileira de pílulas custaria altura num cartão que já foi medido contra
+os 728px úteis de um monitor de 768px.
 
 Substitui o `_AdicionarItemDialog` que morava dentro de `comanda_view.py`, um
 `QFormLayout` com a moldura de janela do sistema, `QSpinBox` de setinha e uma
@@ -113,7 +113,7 @@ from gestor_comercial.services.exceptions import (
 from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets import cartao_modal
-from gestor_comercial.ui.widgets.busca_produto import filtrar_produtos
+from gestor_comercial.ui.widgets.busca_produto import filtrar_produtos, nome_da_subcategoria
 from gestor_comercial.ui.widgets.cartao_modal import Backdrop
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 from gestor_comercial.ui.widgets.flow_layout import FlowLayout
@@ -139,29 +139,30 @@ class _LinhaProduto:
     """Instantâneo do que a linha da lista precisa desenhar.
 
     Existe para o `Produto` do SQLAlchemy não ser tocado durante a digitação.
-    `listar_produtos_ativos()` não traz a categoria junto (a relação é `lazy`),
-    então ler `produto.categoria.nome` dispara consulta. Isso NÃO acontecia a
-    cada tecla no modal antigo — a instância guarda a relação já carregada, e a
-    segunda tecla saía de graça. O problema era outro, e pior, porque mora
-    justamente no laço deste modal: **`lancar_item` faz commit, e o commit
-    expira os atributos das instâncias**. Ou seja, era depois de cada item
-    lançado — com o modal ainda aberto, que é o fluxo rápido — que a digitação
-    voltava a bater no banco. Medido sobre o cardápio real (113 produtos), com
-    as consultas contadas por um `after_cursor_execute`:
+    O problema que ele resolve mora justamente no laço deste modal:
+    **`lancar_item` faz commit, e o commit expira os atributos das
+    instâncias**. Ou seja, era depois de cada item lançado — com o modal ainda
+    aberto, que é o fluxo rápido — que a digitação voltava a bater no banco, uma
+    consulta por relação de cada produto. Medido sobre o cardápio real (113
+    produtos), com as consultas contadas por um `after_cursor_execute`:
 
         ANTIGO  primeira tecla, lista fria                    9 consultas
         ANTIGO  teclas 2 a 4                                  0 consultas
         ANTIGO  3 teclas DEPOIS de lançar um item           120 consultas
 
-        NOVO    abertura do modal (instantâneo, frio)       128 consultas
+        §9.8    abertura do modal (instantâneo, frio)       128 consultas
+        §9.9    abertura do modal (instantâneo, frio)         3 consultas
         NOVO    teclas 2 a 4                                  0 consultas
         NOVO    3 teclas DEPOIS de lançar um item             0 consultas
 
     A troca é deliberada: paga-se **uma vez**, na abertura, o que antes se
     pagava de novo a cada lançamento, e o caminho da tecla fica sem banco em
-    qualquer estado. As 128 da abertura são o N+1 do §3.6 aparecendo aqui e
-    poderiam virar 2 com `selectinload` no repositório — fica registrado, mas é
-    mudança no repositório, que serve outras telas, e não neste arquivo.
+    qualquer estado. As 128 da abertura eram o N+1 do §3.6 aparecendo aqui, e o
+    §9.8 as deixou registradas como resolvíveis com `selectinload` — o §9.9
+    fez: `listar_produtos_para_lancamento()` carrega categoria e subcategoria
+    junto, e a abertura passou a custar **3** consultas (a dos produtos e uma
+    por relação), independentemente do tamanho do cardápio. Sem isso a
+    subcategoria teria DOBRADO a conta em vez de zerá-la.
 
     O que a digitação também deixou de refazer, e não aparece na conta acima:
     `formatar_reais` (que passa por `Decimal.quantize`) e um `QIcon` por
@@ -173,12 +174,13 @@ class _LinhaProduto:
     preco: Decimal
     preco_texto: str
     categoria: str
-    # O sub-modelo (§9.8) entra no instantâneo por DOIS motivos, e nenhum é
-    # decoração. O primeiro é a linha de metadados aqui embaixo. O segundo é a
-    # busca: `filtrar_produtos` casa o termo contra nome **e** sub-modelo, e é
-    # daqui que ele sai — sem este campo, digitar "artesanal" leria
-    # `produto.subcategoria` do SQLAlchemy a cada tecla, que é exatamente o que
-    # o instantâneo existe para não fazer.
+    # A subcategoria (§9.8/§9.9) entra no instantâneo por DOIS motivos, e
+    # nenhum é decoração. O primeiro é a linha de metadados aqui embaixo. O
+    # segundo é a busca: `filtrar_produtos` casa o termo contra nome **e**
+    # subcategoria, e é daqui que ele sai. Guarda o NOME e não a entidade: desde
+    # o §9.9 `produto.subcategoria` é uma relação, e ler o `.nome` dela a cada
+    # tecla seria voltar a bater no banco depois de cada item lançado — que é
+    # exatamente o que o instantâneo existe para não fazer.
     subcategoria: str | None
     metadados: str
     imagem_path: str | None
@@ -196,9 +198,10 @@ def _instantaneo(produtos: list[Produto]) -> list[_LinhaProduto]:
         # FRITAS · COMBO" se lê como um caminho, do grupo maior para o menor.
         # Usar `/` para a hierarquia e `·` para a etiqueta daria duas
         # pontuações numa linha de 9px que já é a menor da tela.
+        subcategoria = nome_da_subcategoria(produto)
         partes = [categoria]
-        if produto.subcategoria:
-            partes.append(produto.subcategoria)
+        if subcategoria:
+            partes.append(subcategoria)
         if produto.is_combo:
             partes.append("COMBO")
         linhas.append(
@@ -208,7 +211,7 @@ def _instantaneo(produtos: list[Produto]) -> list[_LinhaProduto]:
                 preco=produto.preco,
                 preco_texto=formatar_reais(produto.preco),
                 categoria=categoria,
-                subcategoria=produto.subcategoria,
+                subcategoria=subcategoria or None,
                 metadados=" · ".join(partes).upper(),
                 imagem_path=produto.imagem_path,
             )

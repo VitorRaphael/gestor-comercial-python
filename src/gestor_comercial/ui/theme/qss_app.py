@@ -604,64 +604,297 @@ def construir_qss_app(t: dict[str, str]) -> str:
       margin: 0px;
     }}
 
-    /* ---------- Sub-modelo do produto (§9.8, `views/cardapio_view.py`) ----
-       Tres pecas do mesmo assunto: o SELO ao lado do nome na tabela, o CAMPO
-       do modal de cadastro e as PILULAS (sugestao no modal, filtro no painel).
+    /* ---------- Cardapio: arvore, grupos e subcategoria (§9.9) ----------
+       A tela virou a hierarquia Categoria -> Subcategoria -> Produtos, e este
+       bloco veste os tres niveis dela.
 
-       O selo e de proposito menor e mais apagado que o `badgeCombo` logo
-       acima: COMBO muda o que o item E; sub-modelo so diz onde ele fica no
-       cardapio. Se os dois tivessem o mesmo peso, a coluna "Produto" viraria
-       duas etiquetas brigando com o nome. */
+       O selo que o §9.8 punha na LINHA de cada produto saiu: ele repetia, uma
+       vez por item, o que o cabecalho de grupo agora diz uma vez -- e disputava
+       largura justamente com o nome do produto. A familia de cor dele ficou, e
+       agora veste o cabecalho de grupo e as pilulas de filtro. */
 
-    /* Este bloco e a UNICA declaracao da fonte do selo, e e de proposito:
-       `cardapio_view._criar_badge_submodelo` polia o rotulo e MEDE o texto com
-       a fonte que sai daqui, para encurta-lo antes que ele empurre o nome do
-       produto para fora da celula. Nao ha copia em Python para divergir --
-       mexer nos numeros abaixo muda a medida junto. */
-    QLabel#badgeSubmodelo {{
-      background-color: {t['submodelo_badge_bg']};
-      border: 1px solid {t['submodelo_badge_borda']};
-      color: {t['submodelo_badge_texto']};
-      font-size: 9px;
+    /* Os eyebrows do Cardapio (CATEGORIAS, o "ACOMPANHAMENTOS · COZINHA" do
+       painel da direita e a dica do rodape) sao o mesmo tipo de texto -- caixa
+       alta atenuada, o "carimbo" que diz o que vem a seguir. Uma declaracao so
+       para os tres: tres poderiam divergir. */
+    QLabel#cardapioEyebrow {{
+      color: {t['texto_fraco']};
+      font-size: 11px;
       font-weight: 700;
-      letter-spacing: 0.8px;
-      border-radius: 4px;
-      padding: 2px 7px;
-      margin: 0px;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    QLabel#cardapioTituloPainel {{
+      color: {t['texto']};
+      font-size: 16px;
+      font-weight: 700;
+      background: transparent;
     }}
 
-    /* Input arredondado sobre a superficie rebaixada, com o anel do acento no
-       foco -- o mesmo desenho da busca do modal "Adicionar item", porque e a
-       mesma interacao (texto livre com sugestao ao lado). */
-    QLineEdit#campoSubmodelo {{
+    /* ---- A arvore da esquerda ---- */
+    QTreeWidget#arvoreCardapio {{
+      background: transparent;
+      border: none;
+      outline: none;
+    }}
+    /* Sem `border-radius` de proposito: a linha da subcategoria tem DUAS
+       colunas (nome e contagem), cada uma com o seu retangulo de item, e o
+       arredondamento produzia duas pilulas separadas por uma fresta no meio da
+       faixa selecionada. Faixa continua e chapada e o que o olho le como UMA
+       linha. */
+    QTreeWidget#arvoreCardapio::item {{
+      border-radius: 0;
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      font-weight: 600;
+    }}
+    /* O item de CATEGORIA hospeda um widget proprio (nome + subtitulo +
+       badge), entao o que o estado de selecao pinta nele e so o fundo; as
+       cores do texto vem do widget. O de SUBCATEGORIA e texto puro do proprio
+       item, e por isso acende no acento quando selecionado -- e o unico sinal
+       de qual subdivisao a tabela da direita esta mostrando. */
+    QTreeWidget#arvoreCardapio::item:hover {{ background: {t['superficie_2']}; }}
+    QTreeWidget#arvoreCardapio::item:selected {{
       background: {t['superficie_2']};
-      border: 1px solid {t['borda']};
-      border-radius: 10px;
-      padding: 6px 12px;
       color: {t['texto']};
     }}
-    QLineEdit#campoSubmodelo:focus {{ border: 1px solid {t['acento']}; }}
+    QTreeWidget#arvoreCardapio::item:selected:!has-children {{
+      background: {t['acento']};
+      color: {t['acento_texto']};
+    }}
+    /* A area de `::branch` e o recuo do filho, e o Qt a pinta com o azul de
+       selecao da paleta do sistema quando a linha esta selecionada -- um
+       quadrado de outra cor colado na faixa ambar. Transparente nos dois
+       estados: o recuo fica sendo recuo, e nao um segundo destaque. */
+    QTreeWidget#arvoreCardapio::branch,
+    QTreeWidget#arvoreCardapio::branch:selected,
+    QTreeWidget#arvoreCardapio::branch:hover {{ background: transparent; }}
+    QTreeWidget#arvoreCardapio QScrollBar:vertical {{
+      background: transparent;
+      width: 6px;
+      margin: 2px 0 2px 0;
+    }}
+    QTreeWidget#arvoreCardapio QScrollBar::handle:vertical {{
+      background: {t['botao_circular_hover']};
+      border-radius: 3px;
+      min-height: 20px;
+    }}
+    QTreeWidget#arvoreCardapio QScrollBar::add-line:vertical,
+    QTreeWidget#arvoreCardapio QScrollBar::sub-line:vertical {{ height: 0; }}
+    QTreeWidget#arvoreCardapio QScrollBar::add-page:vertical,
+    QTreeWidget#arvoreCardapio QScrollBar::sub-page:vertical {{ background: transparent; }}
 
-    /* Mesma pilula nos dois papeis. No modal de cadastro ela e SUGESTAO e
-       nunca fica marcada (clicar preenche o campo); no painel de produtos ela
-       e FILTRO e a ativa acende no acento -- o mesmo par de estados das
-       pilulas de categoria do modal "Adicionar item", de onde o desenho vem. */
-    QPushButton#pillSubmodelo {{
-      padding: 4px 11px;
+    /* `celulaTransparente` veste os embrulhos de celula de tabela. Existia como
+       `setStyleSheet("background: transparent")` no proprio widget, e isso
+       DESCE PARA OS FILHOS vencendo o QSS global -- foi o que apagou o fundo
+       dos badges assim que eles passaram a se vestir por objectName. Aqui a
+       regra e do seletor, e nao do widget, entao ela para no pai. */
+    QWidget#celulaTransparente {{ background: transparent; }}
+    QLabel#margemPercentual {{
+      background: transparent;
+      font-size: 12px;
+      font-weight: 600;
+      color: {t['texto']};
+    }}
+
+    QWidget#linhaCategoria {{ background: transparent; }}
+    QLabel#categoriaSeta {{
+      color: {t['texto_fraquissimo']};
+      font-size: 13px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel#categoriaNome {{
+      color: {t['texto']};
+      font-size: 12px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel#categoriaSubtitulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      background: transparent;
+    }}
+
+    /* ---- O cabecalho de grupo, dentro da tabela ---- */
+    QWidget#grupoSubcategoria {{
+      background: {t['subcategoria_grupo_bg']};
+      border-top: 1px solid {t['subcategoria_grupo_borda']};
+      border-bottom: 1px solid {t['subcategoria_grupo_borda']};
+    }}
+    QWidget#grupoGlifo {{ background: transparent; }}
+    QLabel#grupoNome {{
+      color: {t['subcategoria_grupo_texto']};
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1.2px;
+      background: transparent;
+    }}
+    QLabel#grupoContagem {{
+      color: {t['subcategoria_grupo_contagem']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      background: transparent;
+    }}
+    QLabel#produtoNome {{ background: transparent; color: {t['texto']}; }}
+
+    /* ---- As pilulas de filtro, entre a busca e a tabela ---- */
+    QPushButton#pillSubcategoria {{
+      padding: 5px 12px;
       background: {t['superficie_2']};
       border: 1px solid {t['borda']};
-      border-radius: 11px;
+      border-radius: 12px;
       color: {t['texto_fraco']};
       font-size: 9px;
       font-weight: 700;
       letter-spacing: 1px;
     }}
-    QPushButton#pillSubmodelo:hover {{ color: {t['texto']}; }}
-    QPushButton#pillSubmodelo[ativa="true"] {{
+    QPushButton#pillSubcategoria:hover {{ color: {t['texto']}; }}
+    QPushButton#pillSubcategoria[ativa="true"] {{
       background: {t['acento']};
       border-color: {t['acento']};
       color: {t['acento_texto']};
     }}
+
+    /* ---- Os badges de status, agora por objectName ----
+       Sairam do `setStyleSheet` de `cardapio_view` para ca (§3.15): la a cor
+       era resolvida na construcao da linha, e a tabela so acompanhava o
+       alternador Claro/Escuro porque e repovoada a cada refresh. A arvore, que
+       nao e, mostraria a cor do boot para sempre. */
+    QLabel#badgeAtivo, QLabel#badgeDesativado, QLabel#badgeVazio {{
+      font-weight: 700;
+      font-size: 11px;
+      border-radius: 4px;
+      padding: 3px 10px;
+      margin: 0px;
+    }}
+    /* Dentro da arvore o mesmo selo e um degrau menor: la ele divide a coluna
+       com o nome da categoria, e nome de categoria cortado e o defeito que esta
+       tela veio consertar. Os seletores sao os TRES ids, e nao
+       `#linhaCategoria QLabel`: a regra ampla pegava tambem o nome e o
+       subtitulo da linha, e encolhia os dois para 9px. */
+    QWidget#linhaCategoria QLabel#badgeAtivo,
+    QWidget#linhaCategoria QLabel#badgeDesativado,
+    QWidget#linhaCategoria QLabel#badgeVazio {{ font-size: 9px; padding: 2px 7px; }}
+    QLabel#badgeAtivo {{
+      background-color: {t['badge_ativo_bg']};
+      color: {t['badge_ativo_texto']};
+    }}
+    QLabel#badgeDesativado {{
+      background-color: {t['badge_desativado_bg']};
+      color: {t['badge_desativado_texto']};
+    }}
+    QLabel#badgeVazio {{
+      background-color: {t['badge_vazio_bg']};
+      color: {t['badge_vazio_texto']};
+    }}
+
+    QComboBox#seletorSubcategoria {{ min-width: 180px; }}
+
+    /* ---------- Modal "Nova subcategoria" (`widgets/subcategoria_dialog.py`)
+       Setimo modal em cartao do app, e por isso o setimo a NAO poder herdar o
+       `QDialog {{ background }}` la de cima: a janela e frameless e translucida
+       para os cantos de 16px sairem redondos de verdade. O ✕, o Cancelar e o
+       Confirmar nao aparecem aqui porque ja estao declarados nas familias
+       compartilhadas com o modal "Adicionar item". */
+
+    QDialog#subDialog {{ background: transparent; }}
+    QWidget#subDialogGlifo {{ background: transparent; }}
+    QFrame#subDialogCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+    QFrame#subDialogIcone {{
+      background: {t['subcategoria_grupo_bg']};
+      border: 1px solid {t['subcategoria_grupo_borda']};
+      border-radius: 21px;
+    }}
+    QLabel#subDialogTitulo {{
+      color: {t['texto']};
+      font-size: 18px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#subDialogSubtitulo {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QLabel#subDialogRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+    QFrame#subDialogContexto {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+    }}
+    QLabel#subDialogDestino {{
+      color: {t['subcategoria_glifo']};
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    QFrame#subDialogCaixa {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+    }}
+    QFrame#subDialogCaixa[foco="true"] {{ border: 1px solid {t['acento']}; }}
+    QLineEdit#subDialogCampo {{
+      background: transparent;
+      border: none;
+      padding: 0;
+      color: {t['texto']};
+      font-size: 14px;
+    }}
+    QLabel#subDialogContador {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    /* A linha de aviso troca de papel entre dica, erro e pronto -- mesmo
+       mecanismo do rodape do modal "Adicionar item". */
+    QLabel#subDialogAviso {{
+      color: {t['texto_fraquissimo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    QLabel#subDialogAviso[estado="erro"] {{ color: {t['perigo']}; }}
+    QLabel#subDialogAviso[estado="ok"] {{ color: {t['sucesso']}; }}
+    QWidget#subDialogFaixa {{ background: transparent; }}
+    /* As pilulas do "ja existem" sao QLabel e nao QPushButton de proposito:
+       elas informam, nao acionam. Um controle cuja unica resposta possivel e
+       "ja existe" seria uma armadilha. */
+    QLabel#subDialogPill {{
+      background: {t['subcategoria_grupo_bg']};
+      border: 1px solid {t['subcategoria_grupo_borda']};
+      border-radius: 11px;
+      padding: 4px 11px;
+      color: {t['subcategoria_grupo_texto']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }}
+    QLabel#subDialogNota {{
+      color: {t['texto_fraquissimo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      background: transparent;
+    }}
+
     QLabel[variante="badge"] {{
       background: {t['sucesso']};
       color: white;
@@ -1012,7 +1245,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
        o Qt descarta o glifo -- o botao sai como um circulo vazio. Vale para o
        fechar e para os dois passos de quantidade. */
     QPushButton#addItemFechar, QPushButton#addItemPasso, QPushButton#funcDialogFechar,
-    QPushButton#movCaixaFechar, QPushButton#turnoFechar {{
+    QPushButton#movCaixaFechar, QPushButton#turnoFechar, QPushButton#subDialogFechar {{
       padding: 0;
       background: {t['botao_circular_bg']};
       border: 1px solid {t['botao_circular_borda']};
@@ -1020,11 +1253,12 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-weight: 700;
     }}
     QPushButton#addItemFechar, QPushButton#funcDialogFechar,
-    QPushButton#movCaixaFechar, QPushButton#turnoFechar {{ border-radius: 16px; font-size: 13px; }}
+    QPushButton#movCaixaFechar, QPushButton#turnoFechar,
+    QPushButton#subDialogFechar {{ border-radius: 16px; font-size: 13px; }}
     QPushButton#addItemPasso {{ border-radius: 17px; font-size: 18px; }}
     QPushButton#addItemFechar:hover, QPushButton#addItemPasso:hover,
     QPushButton#funcDialogFechar:hover, QPushButton#movCaixaFechar:hover,
-    QPushButton#turnoFechar:hover {{
+    QPushButton#turnoFechar:hover, QPushButton#subDialogFechar:hover {{
       background: {t['botao_circular_hover']};
       color: {t['texto']};
     }}
@@ -1165,6 +1399,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QLabel#addItemAviso[estado="erro"] {{ color: {t['perigo']}; }}
     QLabel#addItemAviso[estado="sucesso"] {{ color: {t['sucesso']}; }}
 
+    QPushButton#subDialogCancelar,
     QPushButton#addItemCancelar, QPushButton#funcDialogCancelar,
     QPushButton#movCaixaCancelar, QPushButton#turnoCancelar {{
       padding: 9px 20px;
@@ -1175,11 +1410,13 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-size: 12px;
       font-weight: 700;
     }}
+    QPushButton#subDialogCancelar:hover,
     QPushButton#addItemCancelar:hover, QPushButton#funcDialogCancelar:hover,
     QPushButton#movCaixaCancelar:hover,
     QPushButton#turnoCancelar:hover {{ background: {t['botao_circular_hover']}; }}
 
-    QPushButton#addItemConfirmar, QPushButton#funcDialogConfirmar {{
+    QPushButton#addItemConfirmar, QPushButton#funcDialogConfirmar,
+    QPushButton#subDialogConfirmar {{
       padding: 9px 22px;
       background: {t['acento']};
       border: 1px solid {t['acento']};
@@ -1188,11 +1425,13 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-size: 12px;
       font-weight: 800;
     }}
-    QPushButton#addItemConfirmar:hover, QPushButton#funcDialogConfirmar:hover {{
+    QPushButton#addItemConfirmar:hover, QPushButton#funcDialogConfirmar:hover,
+    QPushButton#subDialogConfirmar:hover {{
       background: {t['acento_hover']};
       border-color: {t['acento_hover']};
     }}
-    QPushButton#addItemConfirmar:disabled, QPushButton#funcDialogConfirmar:disabled {{
+    QPushButton#addItemConfirmar:disabled, QPushButton#funcDialogConfirmar:disabled,
+    QPushButton#subDialogConfirmar:disabled {{
       background: {t['pilula_disabled_bg']};
       border-color: {t['pilula_disabled_bg']};
       color: {t['pilula_disabled_texto']};

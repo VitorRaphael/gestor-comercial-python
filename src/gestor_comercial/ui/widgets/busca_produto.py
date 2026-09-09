@@ -7,9 +7,9 @@ Filtra a cada tecla, ignora acento e caixa (`"agua"` acha `"Água Mineral"`) e
 destacado, `Esc` limpa a busca (ou fecha, se já estiver vazia) — o operador
 não pode depender do mouse com as mãos ocupadas no caixa.
 
-Desde o §9.8 a busca enxerga também o **sub-modelo**: digitar "artesanal" lista
-todos os lanches desse sub-modelo, mesmo que a palavra não apareça no nome de
-nenhum deles.
+A busca enxerga também a **subcategoria** (§9.8/§9.9): digitar "artesanal"
+lista todos os lanches dessa subcategoria, mesmo que a palavra não apareça no
+nome de nenhum deles.
 """
 
 from __future__ import annotations
@@ -33,31 +33,42 @@ from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
 _TAMANHO_MINIATURA = 40
 
 
-def _texto_buscavel(produto: object) -> str:
-    """Nome + sub-modelo, que é o que a digitação tem permissão de casar.
+def nome_da_subcategoria(produto: object) -> str:
+    """O nome da subcategoria do produto, ou `""` quando não há.
 
-    Recebe `object` porque a mesma função serve duas classes: o `Produto` do
-    SQLAlchemy (aqui e no "Adicionar componente" do Cardápio) e o
-    `_LinhaProduto` do modal "Adicionar item", que é um instantâneo sem banco
-    atrás. O `getattr` com padrão é o que permite isso sem as duas terem que
-    herdar de uma base comum só para a busca.
+    Recebe `object` porque atende duas formas do mesmo dado: o `Produto` do
+    SQLAlchemy, onde `subcategoria` é a **relação** e o nome mora dentro dela,
+    e o `_LinhaProduto` do modal "Adicionar item", que é um instantâneo sem
+    banco atrás e guarda o nome direto como `str`. O `getattr` com padrão cobre
+    ainda um terceiro caso — objeto sem o atributo, como as bancadas e os
+    testes de busca —, que responde vazio em vez de estourar.
+    """
+    subcategoria = getattr(produto, "subcategoria", None)
+    if subcategoria is None:
+        return ""
+    if isinstance(subcategoria, str):
+        return subcategoria
+    return getattr(subcategoria, "nome", "") or ""
+
+
+def _texto_buscavel(produto: object) -> str:
+    """Nome + subcategoria, que é o que a digitação tem permissão de casar.
 
     Categoria e preço ficam de FORA de propósito. Quem quer filtrar por
     categoria tem as pílulas ao lado da busca, e um preço no meio do texto
     buscável faria digitar "12" trazer o cardápio inteiro pelo "R$ 12,00" de
     dez itens — busca que traz tudo é busca que não serve.
     """
-    subcategoria = getattr(produto, "subcategoria", None) or ""
-    return f"{produto.nome} {subcategoria}"
+    return f"{produto.nome} {nome_da_subcategoria(produto)}"
 
 
 def filtrar_produtos(produtos: list[Produto], termo: str) -> list[Produto]:
     """Filtra por substring tolerante a acento/caixa, palavra por palavra.
 
     Cada palavra do termo digitado precisa aparecer em algum lugar do nome ou
-    do sub-modelo — por isso `"coca cola k"` restringe para `"Coca-Cola KS"`
+    da subcategoria — por isso `"coca cola k"` restringe para `"Coca-Cola KS"`
     mas já não casa mais com `"Coca-Cola Lata"`, e `"artesanal"` traz os
-    lanches desse sub-modelo mesmo sem a palavra estar no nome de nenhum.
+    lanches dessa subcategoria mesmo sem a palavra estar no nome de nenhum.
     """
     tokens = [_normalizar(t) for t in termo.split() if t]
     if not tokens:
@@ -163,12 +174,13 @@ class BuscaProdutoWidget(QWidget):
     def _filtrar(self, termo: str) -> None:
         self._lista_resultados.clear()
         for produto in filtrar_produtos(self._produtos_ativos, termo):
-            # O sub-modelo entra colado na categoria, como um caminho: quem
+            # A subcategoria entra colada na categoria, como um caminho: quem
             # busca "artesanal" e recebe três lanches precisa VER por que eles
             # vieram, senão o filtro parece ter trazido item errado.
             setor = produto.categoria.nome
-            if produto.subcategoria:
-                setor = f"{setor} · {produto.subcategoria}"
+            sub = nome_da_subcategoria(produto)
+            if sub:
+                setor = f"{setor} · {sub}"
             texto = f"{produto.nome} — {formatar_reais(produto.preco)} — {setor}"
             if produto.is_combo:
                 texto += "  [COMBO]"

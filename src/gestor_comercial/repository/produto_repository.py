@@ -1,4 +1,5 @@
 from sqlalchemy import exists, select
+from sqlalchemy.orm import selectinload
 
 from gestor_comercial.domain.categoria import Categoria
 from gestor_comercial.domain.produto import Produto
@@ -28,29 +29,36 @@ class ProdutoRepository(Repository[Produto]):
         )
         return list(self.session.scalars(stmt))
 
-    def listar_subcategorias(self, categoria_id: int) -> list[str]:
-        """Os sub-modelos já digitados nesta categoria, sem repetir, em ordem.
+    def listar_para_lancamento(self) -> list[Produto]:
+        """Como `listar_ativos_de_categoria_ativa`, mas com categoria e
+        subcategoria já carregadas.
 
-        É o que alimenta as sugestões do cadastro de produto e as pílulas de
-        filtro do Cardápio (§9.8). Um `DISTINCT` de duas colunas indexadas
-        (`idx_produtos_categoria_sub`): o SQLite responde varrendo o índice, sem
-        abrir linha de produto nenhuma — importa porque a tela de cadastro
-        refaz esta consulta a cada troca de categoria no seletor.
+        Serve o modal "Adicionar item", que monta um instantâneo de cada produto
+        (nome, preço, categoria, subcategoria) na abertura e depois não toca
+        mais no SQLAlchemy — é o que mantém a digitação sem banco (§9.4).
 
-        Produto sem sub-modelo (`NULL`, o estado da maioria do cardápio) não
-        vira uma sugestão vazia: o `is_not(None)` o deixa de fora aqui, e quem
-        precisa contá-los — a pílula "SEM SUB-MODELO" do Cardápio — descobre
-        isso da lista de produtos que já tem na mão.
+        Os dois `selectinload` são o que o §9.4 tinha deixado registrado como
+        possível e não feito: sem eles, montar o instantâneo do cardápio real
+        custava 128 consultas (uma por categoria de cada produto), e a
+        subcategoria dobraria a conta. Com eles são **3** — a dos produtos e uma
+        por relação, independentemente do tamanho do cardápio.
 
-        Inclui produto desativado de propósito: quem desativou o "X Podrão do
-        verão" ainda organiza o cardápio por "Podrão", e a sugestão sumir faria
-        o gerente redigitar o nome — que é justamente a divergência de grafia
-        que a sugestão existe para evitar.
+        É um método separado, e não o `selectinload` colado no
+        `listar_ativos_de_categoria_ativa`, porque as outras telas que chamam
+        aquele não leem as relações: pagariam o carregamento sem usar.
         """
         stmt = (
-            select(Produto.subcategoria)
-            .where(Produto.categoria_id == categoria_id, Produto.subcategoria.is_not(None))
-            .distinct()
-            .order_by(Produto.subcategoria)
+            select(Produto)
+            .join(Categoria, Produto.categoria_id == Categoria.id)
+            .where(Produto.ativo.is_(True), Categoria.ativo.is_(True))
+            .options(selectinload(Produto.categoria), selectinload(Produto.subcategoria))
+            .order_by(Produto.nome)
         )
-        return [subcategoria for subcategoria in self.session.scalars(stmt)]
+        return list(self.session.scalars(stmt))
+
+    def existe_com_subcategoria(self, subcategoria_id: int) -> bool:
+        return bool(
+            self.session.scalar(
+                select(exists().where(Produto.subcategoria_id == subcategoria_id))
+            )
+        )

@@ -14,3 +14,12 @@ class Categoria(Base):
 
     impressora: Mapped["Impressora | None"] = relationship(back_populates="categorias")
     produtos: Mapped[list["Produto"]] = relationship(back_populates="categoria")
+    # `cascade="all, delete-orphan"`: excluir a categoria leva as subdivisões
+    # dela junto — uma subcategoria órfã não tem como ser alcançada por tela
+    # nenhuma, já que toda navegação entra pela categoria. Os PRODUTOS não
+    # seguem essa regra: `excluir_categoria` recusa categoria com produto
+    # dentro (ver `CardapioService`), justamente para não arrancar item de
+    # cardápio com histórico de venda.
+    subcategorias: Mapped[list["Subcategoria"]] = relationship(
+        back_populates="categoria", cascade="all, delete-orphan"
+    )

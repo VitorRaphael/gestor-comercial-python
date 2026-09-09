@@ -28,6 +28,7 @@ from PySide6.QtWidgets import QDialog, QLabel, QWidget
 
 from gestor_comercial.domain.categoria import Categoria
 from gestor_comercial.domain.produto import Produto
+from gestor_comercial.domain.subcategoria import Subcategoria
 from gestor_comercial.services.exceptions import RegraDeNegocioError
 from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.widgets.adicionar_item_dialog import AdicionarItemDialog
@@ -388,24 +389,25 @@ def test_o_contexto_da_comanda_aparece_no_cabecalho(abrir):
 
 
 # ---------------------------------------------------------------------------
-# Sub-modelo (§9.8)
+# Subcategoria (§9.8/§9.9)
 # ---------------------------------------------------------------------------
 #
-# No balcão o sub-modelo tem UM trabalho: dizer, em um segundo, qual das
-# variações do mesmo tipo de item está destacada. Ele entra na linha de
-# metadados e na busca — e em nenhum outro lugar. Não há pílula de sub-modelo
-# aqui de propósito: o filtro em pílulas é por CATEGORIA, que é o eixo da
-# impressora, e uma segunda fileira custaria altura num cartão medido contra os
-# 728px úteis de um monitor de 768px.
+# No balcão a subcategoria tem UM trabalho: dizer, em um segundo, qual das
+# variações do mesmo tipo de item está destacada. Ela entra na linha de
+# metadados e na busca — e em nenhum outro lugar. Não há pílula de
+# subcategoria aqui de propósito: o filtro em pílulas é por CATEGORIA, que é o
+# eixo da impressora, e uma segunda fileira custaria altura num cartão medido
+# contra os 728px úteis de um monitor de 768px.
 
 
 @pytest.fixture
 def cardapio_com_submodelo(uow):
-    """Uma categoria, três porções — duas do mesmo sub-modelo e uma solta."""
+    """Uma categoria, três porções — duas na mesma subcategoria e uma solta."""
     porcoes = uow.categorias.salvar(Categoria(nome="Porções"))
+    fritas = uow.subcategorias.salvar(Subcategoria(nome="Fritas", categoria_id=porcoes.id))
     dados = [
-        ("Aipim", "20.00", "Fritas"),
-        ("Batata Frita", "18.00", "Fritas"),
+        ("Aipim", "20.00", fritas.id),
+        ("Batata Frita", "18.00", fritas.id),
         ("Anel de Cebola", "12.00", None),
     ]
     return [
@@ -414,10 +416,10 @@ def cardapio_com_submodelo(uow):
                 nome=nome,
                 preco=Decimal(preco),
                 categoria_id=porcoes.id,
-                subcategoria=submodelo,
+                subcategoria_id=subcategoria_id,
             )
         )
-        for nome, preco, submodelo in dados
+        for nome, preco, subcategoria_id in dados
     ]
 
 
@@ -439,7 +441,7 @@ def _linha(modal: AdicionarItemDialog, indice: int):
     return modal._lista.item(indice).data(Qt.ItemDataRole.UserRole)
 
 
-def test_o_submodelo_entra_nos_metadados_depois_da_categoria(abrir_com_submodelo):
+def test_a_subcategoria_entra_nos_metadados_depois_da_categoria(abrir_com_submodelo):
     """O exemplo do pedido: `Aipim — R$ 20,00 · Porções / Fritas`. Aqui o
     caminho sai com o mesmo `·` que a linha já usava — duas pontuações
     diferentes numa linha de 9px seriam ruído, não hierarquia."""
@@ -453,7 +455,7 @@ def test_o_submodelo_entra_nos_metadados_depois_da_categoria(abrir_com_submodelo
     assert linha.metadados == "PORÇÕES · FRITAS"
 
 
-def test_produto_sem_submodelo_mostra_so_a_categoria(abrir_com_submodelo):
+def test_produto_sem_subcategoria_mostra_so_a_categoria(abrir_com_submodelo):
     """A garantia do "não mudou nada": o cardápio de hoje inteiro está assim."""
     modal = abrir_com_submodelo()
     _digitar(modal, "cebola")
@@ -466,12 +468,13 @@ def test_o_combo_continua_por_ultimo_na_linha(qapp, uow):
     """Categoria, sub-modelo e COMBO na mesma linha: do grupo maior para o
     menor, com a etiqueta de venda no fim."""
     categoria = uow.categorias.salvar(Categoria(nome="Porções"))
+    fritas = uow.subcategorias.salvar(Subcategoria(nome="Fritas", categoria_id=categoria.id))
     combo = uow.produtos.salvar(
         Produto(
             nome="Combo Fritas",
             preco=Decimal("15.00"),
             categoria_id=categoria.id,
-            subcategoria="Fritas",
+            subcategoria_id=fritas.id,
             is_combo=True,
         )
     )
@@ -483,7 +486,7 @@ def test_o_combo_continua_por_ultimo_na_linha(qapp, uow):
         modal.deleteLater()
 
 
-def test_a_busca_acha_pelo_submodelo(abrir_com_submodelo):
+def test_a_busca_acha_pela_subcategoria(abrir_com_submodelo):
     """O pedido do §9.8, no caminho que o operador percorre: "fritas" traz as
     duas porções desse sub-modelo, e a palavra não está no nome do Aipim."""
     modal = abrir_com_submodelo()
@@ -494,15 +497,14 @@ def test_a_busca_acha_pelo_submodelo(abrir_com_submodelo):
     assert sorted(_nomes(modal)) == ["Aipim", "Batata Frita"]
 
 
-def test_a_busca_pelo_submodelo_nao_vai_ao_banco(abrir_com_submodelo, uow):
-    """O sub-modelo não pode ter reaberto o caminho que o §9.4 fechou.
+def test_a_busca_pela_subcategoria_nao_vai_ao_banco(abrir_com_submodelo, uow):
+    """A subcategoria não pode ter reaberto o caminho que o §9.4 fechou.
 
     O instantâneo existe para a digitação não tocar o SQLAlchemy — e o commit
-    de um lançamento expira as instâncias, então ler `produto.subcategoria` na
-    tecla voltaria a bater no banco depois de cada item lançado. Aqui as
+    de um lançamento expira as instâncias, então ler `produto.subcategoria.nome`
+    na tecla voltaria a bater no banco depois de cada item lançado. Aqui as
     instâncias são expiradas de propósito e a busca segue funcionando: se ela
-    ainda dependesse do banco, o teste passaria mesmo assim, mas a contagem
-    abaixo denunciaria.
+    ainda dependesse do banco, a contagem abaixo denunciaria.
     """
     from sqlalchemy import event
 

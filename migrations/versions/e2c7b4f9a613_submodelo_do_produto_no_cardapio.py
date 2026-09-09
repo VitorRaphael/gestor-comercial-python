@@ -85,5 +85,10 @@ def downgrade() -> None:
     # produto ("X Burguer (Podrão)") sujaria a busca e o cupom para sempre.
     op.drop_index(INDICE, table_name="produtos", if_exists=True)
     if _ja_tem_a_coluna():
-        with op.batch_alter_table("produtos", schema=None) as batch_op:
-            batch_op.drop_column(COLUNA)
+        # `ALTER TABLE ... DROP COLUMN` nativo (SQLite 3.35+, e o app embarca a
+        # 3.50) em vez de `batch_alter_table`: o batch RECRIA a tabela, e o
+        # `DROP TABLE produtos` do meio do caminho esbarra nas linhas de
+        # `combo_itens`/`itens_comanda` que apontam para ela — com o
+        # `PRAGMA foreign_keys=ON` do §3.5 ligado, a volta morria com
+        # "FOREIGN KEY constraint failed". Ver o cabeçalho da `f8d1a6c40b27`.
+        op.execute(f"ALTER TABLE produtos DROP COLUMN {COLUNA}")

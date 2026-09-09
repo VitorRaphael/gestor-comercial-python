@@ -19,6 +19,7 @@ from gestor_comercial.repository.movimento_caixa_repository import MovimentoCaix
 from gestor_comercial.repository.pagamento_repository import PagamentoRepository
 from gestor_comercial.repository.produto_repository import ProdutoRepository
 from gestor_comercial.repository.quitacao_consumo_repository import QuitacaoConsumoRepository
+from gestor_comercial.repository.subcategoria_repository import SubcategoriaRepository
 from gestor_comercial.repository.usuario_repository import UsuarioRepository
 
 
@@ -46,6 +47,7 @@ class UnitOfWork:
         self.itens = ItemComandaRepository(self.session)
         self.produtos = ProdutoRepository(self.session)
         self.categorias = CategoriaRepository(self.session)
+        self.subcategorias = SubcategoriaRepository(self.session)
         self.combo_itens = ComboItemRepository(self.session)
         self.pagamentos = PagamentoRepository(self.session)
         self.caixas = CaixaRepository(self.session)

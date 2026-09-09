@@ -6,11 +6,12 @@ ImpressoraService.java (§3.2, §3.3 e §3.12 da arquitetura). Produto tem
 `gestor_comercial.services.imagem_service`), nunca o caminho absoluto nem o
 arquivo original — a compressão acontece na UI antes de chamar este service.
 
-Produto tem também `subcategoria` opcional, o **sub-modelo** do §9.8: a
-subdivisão de catálogo dentro da categoria ("Lanches" → "Artesanal", "Podrão",
-"Combos"). É organização e nada mais — quem manda no roteamento do cupom
+`Subcategoria` é a subdivisão de catálogo DENTRO da categoria — "Lanches" →
+"Artesanal", "Podrão", "Combos" (§9.9). Ela tem CRUD próprio porque precisa
+poder nascer VAZIA, esperando os itens: o gerente planeja a organização antes
+de classificar. É organização e nada mais — quem manda no roteamento do cupom
 continua sendo a categoria, via `produto.categoria.impressora`, e este service
-não tem um único caminho em que o sub-modelo toque em impressora.
+não tem um único caminho em que a subcategoria toque em impressora.
 
 Cadastrar, editar, desativar e excluir são ações administrativas (§3.1) e
 exigem gerente. Listar e buscar não exigem: o atendente precisa do cardápio
@@ -32,6 +33,7 @@ from gestor_comercial.domain.impressora import (
     Impressora,
 )
 from gestor_comercial.domain.produto import Produto
+from gestor_comercial.domain.subcategoria import Subcategoria
 from gestor_comercial.repository.base import DB_PATH
 from gestor_comercial.repository.unit_of_work import UnitOfWork
 from gestor_comercial.services.auth_service import AuthService
@@ -165,6 +167,90 @@ class CardapioService:
         ]
 
     # ------------------------------------------------------------------
+    # Subcategorias (§9.9)
+    # ------------------------------------------------------------------
+
+    def criar_subcategoria(self, categoria_id: int, nome: str) -> Subcategoria:
+        """Cria uma subdivisão da categoria — inclusive VAZIA, sem produto ainda.
+
+        Poder nascer vazia é a razão de a subcategoria ter deixado de ser uma
+        coluna de texto no produto (§9.9): o gerente planeja a organização
+        primeiro e classifica os itens depois, e não o contrário.
+        """
+        self.auth.exigir_gerente()
+        categoria = self.buscar_categoria(categoria_id)
+        nome_limpo = self._texto_obrigatorio(nome, "Informe o nome da subcategoria.")
+        self._exigir_nome_de_subcategoria_livre(categoria.id, nome_limpo, subcategoria_id=None)
+
+        subcategoria = Subcategoria(nome=nome_limpo, categoria_id=categoria.id)
+        self.uow.subcategorias.salvar(subcategoria)
+        self.uow.commit()
+        return subcategoria
+
+    def listar_subcategorias(self, categoria_id: int) -> list[Subcategoria]:
+        """As subdivisões desta categoria, em ordem alfabética.
+
+        Não exige gerente, pelo mesmo motivo de `listar_produtos`: é leitura de
+        catálogo, e a tela do Cardápio fica aberta o turno inteiro.
+        """
+        return self.uow.subcategorias.listar_da_categoria(categoria_id)
+
+    def buscar_subcategoria(self, subcategoria_id: int) -> Subcategoria:
+        subcategoria = self.uow.subcategorias.buscar_por_id(subcategoria_id)
+        if subcategoria is None:
+            raise RecursoNaoEncontradoError(
+                f"Subcategoria não encontrada (código {subcategoria_id})."
+            )
+        return subcategoria
+
+    def editar_subcategoria(self, subcategoria_id: int, nome: str) -> Subcategoria:
+        """Renomeia a subdivisão — e, com ela, o grupo inteiro de uma vez.
+
+        É o que a coluna de texto não conseguia fazer: lá, renomear exigiria
+        reescrever a string em cada produto, e uma reescrita em massa que falha
+        no meio deixa metade do cardápio num grupo e metade no outro. Aqui o
+        nome mora num lugar só, então não existe "metade".
+        """
+        self.auth.exigir_gerente()
+        subcategoria = self.buscar_subcategoria(subcategoria_id)
+        nome_limpo = self._texto_obrigatorio(nome, "Informe o nome da subcategoria.")
+        self._exigir_nome_de_subcategoria_livre(
+            subcategoria.categoria_id, nome_limpo, subcategoria.id
+        )
+
+        subcategoria.nome = nome_limpo
+        self.uow.subcategorias.salvar(subcategoria)
+        self.uow.commit()
+        return subcategoria
+
+    def excluir_subcategoria(self, subcategoria_id: int) -> None:
+        """Apaga a subdivisão. Os produtos dela voltam a ficar sem subcategoria.
+
+        Diferente de `excluir_categoria`, que é bloqueada quando há produto
+        dentro: lá o produto ficaria órfão de impressora e sumiria do balcão;
+        aqui ele só perde a etiqueta e reaparece no grupo "Sem subcategoria",
+        que é a fila de trabalho de quem organiza. Excluir uma etiqueta nunca
+        pode apagar o que ela etiquetava.
+        """
+        self.auth.exigir_gerente()
+        subcategoria = self.buscar_subcategoria(subcategoria_id)
+
+        # Sem laço para soltar os produtos, e isso é uma constatação e não um
+        # descuido: o SQLAlchemy carrega `subcategoria.produtos` ao remover o
+        # pai e anula a FK de cada um deles, e o `ondelete="SET NULL"` do banco
+        # é o cinto para qualquer linha que não esteja na sessão. Havia um laço
+        # explícito aqui; a checagem por mutação mostrou que apagá-lo não
+        # reprovava teste nenhum — ele repetia o que a camada de baixo já fazia.
+        # Quem prova o comportamento é
+        # `test_excluir_subcategoria_solta_os_produtos_em_vez_de_apaga_los`.
+        self.uow.subcategorias.remover(subcategoria)
+        self.uow.commit()
+
+    def contagem_de_produtos_por_subcategoria(self) -> dict[int, int]:
+        """Quantos produtos em cada subdivisão — uma consulta para a árvore toda."""
+        return self.uow.subcategorias.contar_produtos()
+
+    # ------------------------------------------------------------------
     # Produtos (porte de ProdutoService.java)
     # ------------------------------------------------------------------
 
@@ -177,7 +263,7 @@ class CardapioService:
         descricao: str | None = None,
         is_combo: bool = False,
         imagem_path: str | None = None,
-        subcategoria: str | None = None,
+        subcategoria_id: int | None = None,
     ) -> Produto:
         self.auth.exigir_gerente()
         nome_limpo = self._texto_obrigatorio(nome, "Informe o nome do produto.")
@@ -194,19 +280,15 @@ class CardapioService:
             ativo=True,
             is_combo=bool(is_combo),
             imagem_path=self._imagem_path_limpo(imagem_path),
-            subcategoria=self._subcategoria_canonica(subcategoria, categoria.id),
+            subcategoria_id=self._subcategoria_da_categoria(subcategoria_id, categoria.id),
         )
         self.uow.produtos.salvar(produto)
         self.uow.commit()
         return produto
 
-    def listar_subcategorias(self, categoria_id: int) -> list[str]:
-        """Os sub-modelos já usados nesta categoria (§9.8).
-
-        Não exige gerente, pelo mesmo motivo de `listar_produtos`: é leitura de
-        catálogo, e quem lança item na comanda precisa dela na tela.
-        """
-        return self.uow.produtos.listar_subcategorias(categoria_id)
+    def listar_produtos_para_lancamento(self) -> list[Produto]:
+        """O cardápio vendável com categoria e subcategoria já carregadas (§9.4)."""
+        return self.uow.produtos.listar_para_lancamento()
 
     def listar_produtos(self) -> list[Produto]:
         return self.uow.produtos.listar_todos()
@@ -229,7 +311,7 @@ class CardapioService:
         categoria_id: int,
         descricao: str | None = None,
         imagem_path: str | None = None,
-        subcategoria: str | None = None,
+        subcategoria_id: int | None = None,
     ) -> Produto:
         self.auth.exigir_gerente()
         produto = self.buscar_produto(produto_id)
@@ -248,11 +330,12 @@ class CardapioService:
         # Substituição total, igual ao resto do formulário: a tela sempre manda
         # o estado atual da imagem (inclusive None, quando o gerente remove).
         produto.imagem_path = self._imagem_path_limpo(imagem_path)
-        # Mesma regra de substituição total, e a canonização olha para a
-        # categoria de DESTINO: mover um produto de "Lanches/Podrão" para
-        # "Porções" faz o sub-modelo ser conferido contra os de "Porções", que
-        # é onde ele vai passar a agrupar.
-        produto.subcategoria = self._subcategoria_canonica(subcategoria, categoria.id)
+        # Mesma regra de substituição total, e a conferência olha para a
+        # categoria de DESTINO: trocar a categoria de um produto sem trocar a
+        # subcategoria o deixaria apontando para uma subdivisão de outra
+        # categoria — visível em árvore nenhuma, porque a navegação entra pela
+        # categoria. Aqui isso é recusado com mensagem, não gravado calado.
+        produto.subcategoria_id = self._subcategoria_da_categoria(subcategoria_id, categoria.id)
         self.uow.produtos.salvar(produto)
         self.uow.commit()
         return produto
@@ -735,38 +818,52 @@ class CardapioService:
             return None
         return descricao.strip() or None
 
-    def _subcategoria_canonica(self, subcategoria: str | None, categoria_id: int) -> str | None:
-        """Limpa o sub-modelo e adota a grafia que a categoria já usa (§9.8).
+    def _subcategoria_da_categoria(
+        self, subcategoria_id: int | None, categoria_id: int
+    ) -> int | None:
+        """Confere que a subdivisão escolhida é DESTA categoria, ou recusa.
 
-        Campo em branco é `None`, sem impacto nenhum: produto sem sub-modelo é
-        o estado da maioria do cardápio, e a tela inteira funciona como sempre
-        funcionou.
+        `None` é o estado normal e não erro nenhum: produto sem subcategoria
+        aparece no grupo "Sem subcategoria", que é a fila de quem organiza.
 
-        A parte que importa é a segunda. O sub-modelo não é uma tabela — é
-        texto livre — e o que agrupa dois produtos é a **string ser a mesma**.
-        Sem esta função, o gerente que digita "podrao" numa categoria onde já
-        existe "Podrão" cria um segundo grupo, e o cardápio passa a ter dois
-        blocos com o mesmo nome que ninguém consegue juntar de volta pela tela.
-        As pílulas de sugestão do modal reduzem a chance disso, mas só cobrem
-        quem clica na sugestão em vez de digitar.
-
-        Então a comparação ignora acento, caixa e espaço repetido, e o valor
-        gravado é o que a categoria **já tinha**. Quem digita "podrao" onde já
-        existe "Podrão" grava "Podrão" — a etiqueta não vira uma segunda.
-
-        A grafia nova só vale quando não há equivalente na categoria: aí é um
-        sub-modelo novo mesmo, e é a digitação do gerente que manda.
+        O que não pode passar é um produto de "Lanches" apontando para uma
+        subdivisão de "Porções". Isso não é hipótese de laboratório: acontece
+        quando o gerente escolhe a subcategoria e DEPOIS troca a categoria no
+        mesmo formulário. Gravado, o produto ficaria num grupo que a árvore de
+        "Lanches" não desenha e a de "Porções" também não — invisível nas duas.
         """
-        if not isinstance(subcategoria, str):
+        if subcategoria_id is None:
             return None
-        texto = " ".join(subcategoria.split())
-        if not texto:
-            return None
-        chave = chave_de_agrupamento(texto)
-        for existente in self.uow.produtos.listar_subcategorias(categoria_id):
-            if chave_de_agrupamento(existente) == chave:
-                return existente
-        return texto
+        subcategoria = self.buscar_subcategoria(subcategoria_id)
+        if subcategoria.categoria_id != categoria_id:
+            raise RegraDeNegocioError(
+                f"A subcategoria '{subcategoria.nome}' não pertence a esta categoria. "
+                "Escolha uma subcategoria da categoria selecionada."
+            )
+        return subcategoria.id
+
+    def _exigir_nome_de_subcategoria_livre(
+        self, categoria_id: int, nome: str, subcategoria_id: int | None
+    ) -> None:
+        """Duas subdivisões da MESMA categoria não podem ter o mesmo nome.
+
+        A comparação ignora acento, caixa e espaço repetido (a mesma
+        `chave_de_agrupamento` da busca do cardápio), e não é rigor de purista:
+        "Podrão" e "podrao" lado a lado na árvore seriam dois grupos que o
+        gerente lê como um só, e ele passaria itens para um enquanto procura no
+        outro. O `UniqueConstraint` do banco pega só o par idêntico — esta
+        checagem é a que enxerga o quase-igual, e é a que produz mensagem em vez
+        de estouro de integridade na tela.
+
+        Entre CATEGORIAS o mesmo nome é livre: "Podrão" em Lanches e "Podrão" em
+        Porções são duas subdivisões independentes.
+        """
+        chave = chave_de_agrupamento(nome)
+        for existente in self.uow.subcategorias.listar_da_categoria(categoria_id):
+            if existente.id != subcategoria_id and chave_de_agrupamento(existente.nome) == chave:
+                raise RegraDeNegocioError(
+                    f"Já existe a subcategoria '{existente.nome}' nesta categoria."
+                )
 
     @staticmethod
     def _imagem_path_limpo(imagem_path: str | None) -> str | None:
