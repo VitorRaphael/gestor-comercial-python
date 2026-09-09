@@ -78,13 +78,25 @@ def _matar_processo_no_meio_da_escrita(db_path: Path, script: str) -> None:
 
 
 def _abrir_com_retentativa(db_path: Path) -> sqlite3.Connection:
-    # O SO pode levar um instante pra soltar o handle do processo morto.
+    """Reabre o banco depois da queda, esperando o SO soltar o handle do morto.
+
+    A retentativa precisa envolver uma **leitura de verdade**, e não só o
+    `connect()`: o `sqlite3.connect` é preguiçoso e não toca no arquivo, então
+    ele passa mesmo com o Windows ainda segurando o handle do processo
+    derrubado — e o erro reaparece no primeiro `execute`, como
+    `disk I/O error`, fora do laço. Com a suíte grande (e a máquina ocupada), o
+    SO demora mais para soltar e o teste piscava vermelho por causa do
+    mecanismo da retentativa, não do SQLite.
+    """
     ultimo_erro = None
     for _ in range(20):
+        conexao = sqlite3.connect(str(db_path))
         try:
-            return sqlite3.connect(str(db_path))
+            conexao.execute("SELECT 1").fetchone()
+            return conexao
         except sqlite3.OperationalError as erro:
             ultimo_erro = erro
+            conexao.close()
             time.sleep(0.1)
     raise ultimo_erro
 
