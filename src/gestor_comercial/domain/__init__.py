@@ -10,6 +10,7 @@ from gestor_comercial.domain.loja_config import LojaConfig
 from gestor_comercial.domain.mesa import Mesa
 from gestor_comercial.domain.movimento_caixa import MovimentoCaixa
 from gestor_comercial.domain.pagamento import Pagamento
+from gestor_comercial.domain.preferencia import Preferencia
 from gestor_comercial.domain.produto import Produto
 from gestor_comercial.domain.quitacao_consumo import QuitacaoConsumo
 from gestor_comercial.domain.subcategoria import Subcategoria
@@ -28,6 +29,7 @@ __all__ = [
     "Mesa",
     "MovimentoCaixa",
     "Pagamento",
+    "Preferencia",
     "Produto",
     "QuitacaoConsumo",
     "Subcategoria",

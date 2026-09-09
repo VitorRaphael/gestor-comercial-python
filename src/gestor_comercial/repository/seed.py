@@ -10,6 +10,11 @@ from gestor_comercial.domain.mesa import Mesa
 from gestor_comercial.domain.produto import Produto
 from gestor_comercial.domain.usuario import Usuario
 from gestor_comercial.repository.base import SessionLocal
+from gestor_comercial.repository.preferencia_repository import (
+    BOOTSTRAP_CONCLUIDO,
+    SIM,
+    PreferenciaRepository,
+)
 
 TOTAL_MESAS = 60
 
@@ -203,16 +208,6 @@ COMBOS = {
 }
 
 
-def gerar_salt() -> str:
-    return base64.b64encode(os.urandom(16)).decode()
-
-
-def hash_pin(pin: str, salt: str) -> str:
-    salt_bytes = base64.b64decode(salt)
-    digest = hashlib.sha256(salt_bytes + pin.encode()).digest()
-    return base64.b64encode(digest).decode()
-
-
 def seed_mesas(session: Session) -> None:
     existentes = {m.numero for m in session.query(Mesa.numero).all()}
     for numero in range(1, TOTAL_MESAS + 1):
@@ -321,13 +316,56 @@ def seed_combos(session: Session) -> None:
             )
 
 
+def bootstrap_ja_rodou(session: Session) -> bool:
+    """O banco já foi povoado alguma vez?
+
+    A marca é uma linha em `preferencias` (ver `PreferenciaRepository`), e não
+    "a tabela tem registros": contar linhas é justamente o que trouxe o defeito
+    de volta — apagar tudo faria a contagem zerar e o seed reabastecer.
+    """
+    return PreferenciaRepository(session).existe(BOOTSTRAP_CONCLUIDO)
+
+
 def run_seed() -> None:
+    """Povoa o banco recém-criado — **uma vez, e nunca mais**.
+
+    ## Por que a marca existe
+
+    Cada `seed_*` daqui é idempotente por conta própria: `seed_mesas` só
+    acrescenta a mesa que falta, `seed_cardapio` pula o produto cujo nome já
+    existe, `seed_funcionarios_turno` pula o turno já cadastrado. Idempotente,
+    porém, é o mesmo que **restaurador**: um registro que o Vitor apagou na
+    tela deixa de existir, o seed do boot seguinte não o encontra, conclui que
+    "falta" e o cria de novo.
+
+    Foi exatamente o defeito relatado — o operador de turno excluído em
+    Funcionários reaparecia no boot seguinte —, e ele não era só dos turnos: o
+    produto e a categoria excluídos no Cardápio voltavam pelo mesmo caminho, e
+    a mesa também voltaria se alguma tela apagasse mesa.
+
+    A marca troca o critério de "o que falta no banco" por "este banco já
+    nasceu": gravada no primeiro boot bem-sucedido, ela faz toda abertura
+    seguinte sair na primeira linha, sem consultar nem gravar nada. Uma
+    exclusão feita pelo usuário passa a ser definitiva, que é o que uma
+    exclusão significa.
+
+    Banco novo continua nascendo completo (60 mesas, cardápio, dois turnos):
+    quem instalou o programa hoje não perde nada. Quem já tinha banco recebe a
+    marca pela migração `a4c9f1d70b52`, sem reprocessar o seed.
+    """
     with SessionLocal() as session:
+        if bootstrap_ja_rodou(session):
+            return
         seed_mesas(session)
         seed_usuarios_turno(session)
         seed_funcionarios_turno(session)
         seed_cardapio(session)
         seed_combos(session)
+        # A marca entra no MESMO commit do que ela marca: se a energia cair no
+        # meio, ou o cardápio inteiro está gravado e marcado, ou nada está — e
+        # no segundo caso o boot seguinte refaz o povoamento do zero, que é o
+        # comportamento certo para um banco que nunca chegou a nascer.
+        PreferenciaRepository(session).definir(BOOTSTRAP_CONCLUIDO, SIM)
         session.commit()
 
 

@@ -31,7 +31,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -58,6 +57,7 @@ from gestor_comercial.ui.formatacao import (
 from gestor_comercial.ui.rotulo_identidade import rotulo_identidade
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.modais import executar_modal
+from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 from gestor_comercial.ui.widgets.funcionario_dialog import (
     CARGOS_COM_ACESSO_TOTAL,
@@ -386,14 +386,18 @@ class FuncionariosView(QWidget):
         funcionario = self._funcionario_por_id(funcionario_id)
         if funcionario is None:
             return
-        confirmacao = QMessageBox.question(
-            self,
-            "Excluir funcionário",
-            f"Excluir {funcionario.nome} definitivamente? Esta ação não pode ser desfeita.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if confirmacao != QMessageBox.StandardButton.Yes:
+        # A confirmação não é mais um "Sim/Não": é a Senha Master digitada na
+        # hora (§3.13, Nível 3). O `exigir_gerente()` do service continua
+        # valendo, mas ele é satisfeito pela SESSÃO — quem abriu o turno de
+        # manhã autoriza qualquer exclusão que alguém clicar à tarde. Um
+        # `QMessageBox` em cima disso separa a exclusão de um clique
+        # distraído por outro clique, e a linha some do banco de vez.
+        #
+        # O modal se recusa sozinho quando o PIN não bate e só devolve
+        # `Accepted` com a Senha Master certa; `executar_modal` descarta a
+        # instância depois de ler o código de saída (§3.2).
+        pin = PinPadDialog.para_exclusao(self._auth, funcionario.nome, self)
+        if executar_modal(pin) != QDialog.DialogCode.Accepted:
             return
 
         self._label_erro.setText("")

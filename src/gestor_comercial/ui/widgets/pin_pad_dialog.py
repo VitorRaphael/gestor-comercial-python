@@ -150,6 +150,7 @@ class PinPadDialog(QDialog):
         validador: Validador,
         parent: QWidget | None = None,
         tamanho_esperado: int | None = None,
+        mensagem: str | None = None,
     ) -> None:
         super().__init__(parent)
         self._validar = validador
@@ -189,6 +190,8 @@ class PinPadDialog(QDialog):
         corpo.setContentsMargins(20, 18, 20, 18)
         corpo.setSpacing(16)
         corpo.addLayout(self._montar_cabecalho(titulo, subtitulo))
+        if mensagem:
+            corpo.addWidget(self._montar_mensagem(mensagem))
         corpo.addLayout(self._montar_marcadores())
         corpo.addLayout(self._montar_teclado())
         corpo.addWidget(self._montar_rodape())
@@ -226,6 +229,33 @@ class PinPadDialog(QDialog):
             auth.validar_pin_dono,
             parent,
             tamanho_esperado=auth.tamanho_do_pin_nivel(3),
+        )
+
+    @classmethod
+    def para_exclusao(
+        cls, auth: AuthService, nome_do_registro: str, parent: QWidget | None = None
+    ) -> "PinPadDialog":
+        """Nível 3 (§3.13): só a Senha Master confirma uma exclusão.
+
+        Por que o nível mais alto, e não o do Caixa: exigir gerente logado já
+        era a regra do `FuncionarioService` (`exigir_gerente`), e ela é
+        satisfeita pela SESSÃO — quem abriu o turno de manhã e deixou o
+        programa aberto no balcão autoriza qualquer exclusão que alguém clicar
+        à tarde. O PIN aqui é reautenticação **na hora**, e como a ação é
+        física e irreversível (a linha sai do banco), ela sobe para a
+        credencial do dono, a mesma que abre a Central de Loja.
+
+        O nome do registro entra na mensagem e não no título: título é o que a
+        tela é ("Confirmar Exclusão"), a mensagem é o que ela está prestes a
+        fazer — e é a mensagem que muda a cada clique.
+        """
+        return cls(
+            "Confirmar Exclusão",
+            "SENHA MASTER (DONO)",
+            auth.validar_pin_dono,
+            parent,
+            tamanho_esperado=auth.tamanho_do_pin_nivel(3),
+            mensagem=f"Você deseja confirmar a ação de apagar {nome_do_registro}?",
         )
 
     @classmethod
@@ -277,6 +307,26 @@ class PinPadDialog(QDialog):
         self._botao_fechar.clicked.connect(self.reject)
         linha.addWidget(self._botao_fechar, 0, Qt.AlignmentFlag.AlignTop)
         return linha
+
+    def _montar_mensagem(self, mensagem: str) -> QLabel:
+        """A pergunta que este PIN está confirmando, dita por extenso.
+
+        Só existe quando quem abre o diálogo passa uma: "Caixa" e "Área da
+        Loja" são elevações de acesso e o título já diz tudo. Uma exclusão não
+        — ali o PIN é a confirmação de uma ação irreversível sobre um registro
+        com nome próprio, e o cartão precisa mostrar QUAL registro antes de o
+        dedo alcançar o teclado.
+
+        `setWordWrap` com o cartão de largura fixa: o nome do funcionário vem
+        do cadastro e não tem teto de tamanho útil aqui, então a linha quebra
+        em vez de esticar (o `QFrame` tem `setFixedWidth`, e sem quebra o texto
+        sairia cortado no meio da palavra).
+        """
+        self._label_mensagem = QLabel(mensagem)
+        self._label_mensagem.setObjectName("pinPadMensagem")
+        self._label_mensagem.setWordWrap(True)
+        self._label_mensagem.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        return self._label_mensagem
 
     def _montar_marcadores(self) -> QVBoxLayout:
         coluna = QVBoxLayout()

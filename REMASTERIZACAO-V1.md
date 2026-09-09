@@ -90,6 +90,13 @@ máquina sem fonte instalada.
   `b22da75` cortava igual. Ficou de fora da faxina porque mexer no layout
   durante a comparação tiraria a paridade contra a qual comparar; foi o
   primeiro item assim que ela fechou. Suíte: **801**.
+- ✅ **Sete modais em cartão** (§9.4 a §9.7, §9.9) e a **subcategoria como
+  entidade** (§9.8/§9.9), entre 2026-09-08 e 2026-09-09.
+- ✅ **O turno-fantasma, a barreira de exclusão e o olho das senhas — 2026-09-09**
+  (§9.10). O defeito de persistência que o Vitor relatou tinha duas causas, e
+  **nenhuma delas na exclusão**: o `run_seed()` repovoando a cada boot e o
+  `Usuario` de login que nunca era excluído junto do `Funcionario`. Suíte:
+  **1418**.
 
 ---
 
@@ -111,6 +118,14 @@ projeto**. Registrado para não guiar decisão errada mais na frente:
 como: **nenhuma dependência nova entra** nesta remasterização. O SQLAlchemy
 fica. As regras de higiene continuam valendo, traduzidas para Qt e para o ORM —
 e o vazamento que o briefing suspeitava **existe mesmo**, só que noutro lugar.
+
+> **A tabela acima vale para todo pedido que vier depois.** O §9.10 chegou
+> pedindo de novo `destroy()`, `unbind()` e `after_cancel()`: continua sendo a
+> API do Tk, e continua traduzida do mesmo jeito — `executar_modal()` + o
+> `done()` do diálogo (descarte), método ligado em vez de `lambda` no `connect`
+> (§3.14, que é o "unbind" que importa aqui) e `QTimer.stop()` no `done()`/
+> `hideEvent` (o "after_cancel"). O que o pedido quer dizer é ciclo de vida
+> limpo; o que muda é só o nome das funções.
 
 ---
 
@@ -2594,6 +2609,225 @@ duas do Cardápio (que é a tela reestruturada), e os **2 cupons idênticos linh
 linha**. Boot de ponta a ponta em banco novo: 60 mesas, 15 categorias, 113
 produtos, 4 combos, WAL ligado, e a consulta de subdivisões saindo por
 `COVERING INDEX`.
+
+---
+
+### 9.10 O turno-fantasma, a barreira de exclusão e o olho das senhas ✅ CONCLUÍDO — 2026-09-09
+
+Três pedidos do Vitor no mesmo bloco, sendo o primeiro um **defeito relatado**:
+
+> "Ao excluir um operador/turno na aba Funcionários, a exclusão não persiste
+> após reiniciar o software (ele ressurge na tela de Login e na lista de
+> funcionários). Além disso, a tela de Login sempre seleciona o primeiro item
+> da lista por padrão."
+
+---
+
+#### 9.10.1 O turno que voltava — duas causas, nenhuma delas na exclusão
+
+`FuncionarioService.excluir` sempre apagou a linha e sempre deu `commit`. O
+defeito estava em dois lugares que nada tinham a ver com a exclusão.
+
+**Causa 1 — o seed repovoava a cada boot.** `main.py` chama `run_seed()` em
+**toda** abertura do programa, logo depois das migrações. Cada `seed_*` é
+idempotente por nome — `seed_mesas` acrescenta a mesa que falta,
+`seed_cardapio` pula o produto cujo nome já existe, `seed_funcionarios_turno`
+pula o turno já cadastrado. E **idempotente é o mesmo que restaurador**: o
+registro apagado deixa de existir, o seed do boot seguinte não o encontra,
+conclui que "falta" e o cria de novo.
+
+Não era só dos turnos. O produto e a categoria excluídos no Cardápio voltavam
+pelo mesmo caminho, e a mesa voltaria no dia em que alguma tela apagasse mesa.
+Por isso a correção é do `run_seed()` **inteiro**, e não de um `if` dentro de
+`seed_funcionarios_turno`.
+
+A marca é uma linha em `preferencias` (tabela nova, chave → valor):
+`bootstrap_concluido`. Gravada **no mesmo commit** do povoamento — se a energia
+cair no meio, ou o cardápio inteiro está gravado e marcado, ou nada está, e o
+boot seguinte refaz do zero, que é o certo para um banco que nunca chegou a
+nascer.
+
+> **Por que a marca, e não "só povoa se as tabelas estiverem vazias".** Contar
+> linhas é a correção tentadora e traz o defeito de volta inteiro no dia em que
+> alguém apagar o último registro de alguma tabela. Trancado em
+> `test_a_marca_e_o_que_decide_e_nao_a_contagem_de_linhas`.
+
+**A migração `a4c9f1d70b52` marca o banco que já existe.** Um banco que já
+existe já foi povoado — é a definição de já existir. Sem isso, a primeira
+abertura depois da atualização rodaria o seed uma última vez e ressuscitaria,
+uma última vez, exatamente o que o Vitor apagou.
+
+O sinal de "já povoado" custou a acertar: **`usuarios` não serve**. As migrações
+`d3f8a1c4e6b9`, `f4b2c8e1a7d5` e `d23a4f888a77` inserem `Usuario` por conta
+própria, e a `f4b2c8e1a7d5` cria os dois operadores de turno em **todo** banco,
+inclusive num recém-criado — que portanto chega à migração com dois usuários e
+zero mesas. Usá-los como sinal marcaria o bootstrap antes de ele acontecer, e a
+instalação nasceria sem as 60 mesas e sem o cardápio. O sinal é `mesas` e
+`produtos`, que migração nenhuma toca. Trancado em
+`test_os_usuarios_criados_por_migracao_nao_contam_como_povoamento`.
+
+**Causa 2 — o login nunca era excluído.** `Funcionario` e `Usuario` são tabelas
+separadas (§3.11) e a tela de Funcionários sempre mexeu só na primeira. Para o
+Vitor, "Caixa Turno - Manhã" é **uma** coisa: excluí-lo em Funcionários e
+continuar vendo o mesmo nome no dropdown do login é a exclusão que "não pegou".
+
+`excluir` passou a aposentar o login de mesmo nome — o par casado por **nome**, a
+mesma convenção que `listar_operadores_caixa` já usava por não haver FK entre as
+duas.
+
+O login é **desativado, nunca apagado**: `usuarios.id` é chave estrangeira de
+`caixas.aberto_por_id`, `comandas.usuario_id` e `movimentos_caixa.usuario_id`, e
+apagar a linha arrancaria o nome de todo turno e toda venda que aquele operador
+registrou. Desativar preserva o histórico e some do login, que lista só ativos —
+que é exatamente o efeito que se espera de "excluí esse turno".
+
+A trava do último gerente ativo (sem ela ninguém autoriza cancelamento nem abre
+caixa, e não há tela de recuperação) é consultada **antes** de qualquer escrita:
+descobri-la no meio deixaria o funcionário excluído e o login de pé, que é meia
+exclusão. Para isso a regra saiu de dentro de `desativar_usuario` para
+`AuthService.motivo_para_nao_desativar`, que **devolve a mensagem em vez de
+levantar** — dois chamadores com necessidades opostas.
+
+#### 9.10.2 O dropdown abre no último operador
+
+Antes abria sempre no primeiro item, que é só quem tem o nome mais próximo do
+começo do alfabeto (`listar_ativos` ordena por nome). No food truck o mesmo
+turno abre o programa dezenas de vezes seguidas, e reescolher o operador a cada
+abertura é um passo que só existe para ser esquecido — e esquecer aqui grava a
+venda no `aberto_por_id` errado.
+
+`ultimo_operador_id` é a segunda chave de `preferencias`, gravada **depois** de a
+autenticação passar (a tela mostra o último que *entrou*, não o último que errou
+o PIN). A gravação degrada com `except` largo: se ela falhar, o login já
+aconteceu e não pode ser desfeito por causa de uma preferência de tela.
+
+O que se guarda é **só o id**. Quem confere se aquele operador ainda está no
+dropdown é a tela, contra a lista que ela mesma carregou — devolver o `Usuario`
+daqui faria a tela receber alguém que ela não tem para oferecer.
+
+De quebra, dois consertos na mesma tela:
+
+* o `userData` do combo passou a ser o **id**, e não a instância de `Usuario`:
+  o objeto do SQLAlchemy expira a cada `commit` e guardá-lo no widget prende no
+  dropdown uma linha do banco que pode já não existir;
+* `showEvent` recarrega a lista. É o único momento em que ela pode ter mudado
+  sem a tela saber — quem exclui ou desativa um operador faz isso na tela de
+  Funcionários, com o login escondido atrás. Sem isso, o dropdown continuaria
+  oferecendo, depois do logout, alguém que não existe mais.
+
+#### 9.10.3 Excluir funcionário passa a exigir a Senha Master
+
+Era um `QMessageBox.question` de Sim/Não. `exigir_gerente()` já valia, mas ele é
+satisfeito pela **sessão**: quem abriu o turno de manhã e deixou o programa
+aberto no balcão autoriza qualquer exclusão que alguém clicar à tarde. Um Sim/Não
+em cima disso separa a exclusão de um clique distraído por outro clique — e a
+linha some do banco de vez.
+
+`PinPadDialog.para_exclusao` é o terceiro construtor nomeado do modal de PIN, e
+usa **Nível 3** (`validar_pin_dono`) — a mesma credencial da Central de Loja, sem
+herança de baixo para cima. A Senha Operacional abre o Caixa e não pode apagar
+cadastro; está trancado em `test_nenhuma_credencial_abaixo_da_master_confirma`.
+
+O único widget novo do cartão é a faixa com a pergunta por extenso ("Você deseja
+confirmar a ação de apagar Caixa Turno - Manhã?"), com família de cor própria
+(`pin_exclusao_*`) em vez de `perigo` ou `pill_comanda_perigo_*` emprestados —
+mesma lição do §9.5. Título é o que a tela **é**; a mensagem é o que ela está
+prestes a **fazer**, e é ela que muda a cada clique.
+
+#### 9.10.4 O olho de "Senhas e Acesso" — e o preço que ele cobra
+
+Pedido: um olho ao lado de cada `Alterar` que, mediante o **CPF do Dono**, mostra
+o valor real por alguns segundos.
+
+**Isto contradiz uma regra escrita do §3.13**, e a contradição é o item mais
+importante desta seção. `LojaConfig` guardava só hash+salt, e a docstring dizia
+que "ver o valor não é uma operação que existe". Hash é via de mão única: para o
+olho existir, uma **segunda cópia recuperável** precisa existir.
+
+O que a cópia protege e o que não protege está escrito sem rodeios em
+`services/segredo_reversivel.py`:
+
+* **protege** contra leitura casual do banco — abrir o `.db` num navegador de
+  SQLite e enxergar a senha do caixa numa coluna. O que sai gravado é ruído em
+  Base64, com cifra de fluxo `HMAC-SHA256` e selo `encrypt-then-MAC` (biblioteca
+  padrão, nenhuma dependência nova para o `.exe`);
+* **não protege** contra quem tem o arquivo do banco **e** o programa. A chave
+  mora em `preferencias.chave_de_exibicao`, no mesmo banco, porque tem que estar
+  ao alcance do app sozinho — não há servidor, e o backup é uma cópia do `.db`
+  (`repository/backup.py`), então uma chave guardada fora dele tornaria todo
+  backup restaurado ilegível. É **ofuscação em repouso**, não criptografia
+  forte, e a barreira de verdade é o CPF exigido na tela.
+
+Na prática do food truck isso está dimensionado: as senhas são de 4 a 8 dígitos
+numéricos, e um ataque offline percorre esse espaço inteiro em segundos contra o
+hash — com ou sem a cópia. Quem quiser subir a barra troca o modelo de senha, não
+a cifra.
+
+**Nada disso participa de autenticação.** `senha_*_hash` continua sendo a única
+coisa contra a qual um PIN digitado é conferido, e `revelar()` devolve texto para
+a tela sem abrir porta nenhuma — trancado em `test_revelar_nao_e_autenticacao` e
+em `test_a_senha_continua_sendo_conferida_pelo_hash`.
+
+**O backfill confere o hash em vez de chutar** (migração `b6e2d80a3f14`, mesma
+técnica de `c1d5b8e37a42`): refaz o hash do padrão de fábrica com o salt gravado
+e compara. Bateu, o valor é conhecido e vira cópia; não bateu, a senha foi
+trocada, ninguém sabe qual é, e a coluna fica `NULL`. Chutar seria pior que não
+preencher — o olho mostraria "26407200" com ar de verdade para um dono que
+trocou a senha meses atrás. A tela então diz "altere-a uma vez para poder
+visualizá-la", e a próxima troca grava a cópia sozinha. O CPF não tem padrão de
+fábrica e fica sem cópia até o primeiro cadastro.
+
+`CpfDonoDialog` é o **oitavo modal em cartão** do app e o segundo que autentica.
+Visor com a máscara `•••.•••.•••-••` preenchida da esquerda, `TecladoNumerico`
+compartilhado, e o botão só liga com os onze dígitos — "Visualizar" que só pode
+dar erro é pior que botão desligado. CPF errado mantém o cartão aberto com aviso,
+igual ao modal de PIN. O que ele **não** faz é comparar: entrega os dígitos ao
+`revelar` e obedece.
+
+O segredo revelado sai da tela por **quatro** caminhos, todos no mesmo
+`ocultar_revelado()`: o timer de 8 segundos, o segundo clique no olho, a troca
+daquele segredo e o `hideEvent`. O último não é detalhe — sem ele, uma senha
+revelada e deixada em Configurações ficaria acesa atrás de qualquer outra página,
+e voltar dentro dos oito segundos a traria de volta à vista sem ninguém digitar
+CPF nenhum.
+
+Duas notas de desenho:
+
+* **o ícone é desenhado, não é o emoji `👁`.** É a única coisa aqui que não segue
+  o pedido ao pé da letra: `👁` mora no bloco de emoji, cai no Segoe UI Emoji,
+  sai colorido e chapado, ignora a paleta — e a máquina limpa do food truck pode
+  nem ter a fonte. Mesma decisão já registrada no cadeado do PIN, na lupa do §9.4
+  e no ramo do §9.9. O traço mora em `desenhar_olho()` e serve às duas peças
+  (`BotaoOlho` e `IconeOlho`), porque duas cópias divergiriam na primeira vez que
+  alguém ajustasse a curva;
+* **a seção virou `QGridLayout`.** Com quatro `QHBoxLayout` empilhados, layouts
+  irmãos não conversam sobre largura, e o botão do CPF ("Cadastrar", mais largo
+  que "Alterar") deslocava o olho daquela linha dos outros três. Na grade a
+  coluna é a mesma para as quatro e o alinhamento sai sem largura fixa chutada em
+  pixel.
+
+#### O que ficou de fora, de propósito
+
+- **Exclusão de produto/categoria no Cardápio não ganhou PIN.** A correção do
+  seed já fez a exclusão de lá persistir; a barreira de credencial foi pedida
+  para Funcionários, e estender por conta própria mudaria o fluxo de uma tela que
+  ninguém pediu para mudar.
+- **`revelar` não tem registro de auditoria.** Não existe tabela de log no
+  projeto, e criar uma por causa disto seria escopo novo. Fica anotado: se um dia
+  importar saber *quando* alguém olhou a Senha Master, é aqui que o gancho entra.
+- **O `_AlterarSegredoDialog` continua sendo o formulário antigo** (moldura do
+  sistema, `QFormLayout`). Ele é o nono candidato a virar cartão, e o pedido
+  desta rodada era o olho, não a troca.
+
+**Suíte: 1418 (de 1290), 128 testes novos**, conferidos com 24 mutações — as 24
+reprovam. Bancadas: **22 das 24 telas idênticas byte a byte**, diferindo só as
+duas de Configurações (que é a tela que ganhou os olhos), e os **2 cupons
+idênticos linha a linha**. Renderização nativa dos cartões novos: 360x487 (PIN de
+exclusão) e 400x492 (CPF do Dono), sob os 728px úteis de um monitor de 768px.
+Boot de ponta a ponta nos dois cenários que existem no mundo: banco novo (60
+mesas, 15 categorias, 113 produtos, WAL ligado, olho funcionando com as senhas de
+fábrica) e banco que já rodava (marcado pela migração, sem repovoar, com a
+exclusão sobrevivendo a duas reaberturas).
 
 ---
 

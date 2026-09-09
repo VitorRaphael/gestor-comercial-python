@@ -895,6 +895,105 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background: transparent;
     }}
 
+    /* ---- Modal "Confirmar identidade" (`cpf_dono_dialog.py`) e o olho de
+       "Senhas e Acesso" (`icone_olho.py`) ----
+       Oitavo modal em cartao. Cabecalho, cartao e rodape seguem o mesmo
+       desenho dos outros sete; o que e proprio daqui e o visor do CPF e o
+       botao de olho. O ✕, o Cancelar e o Confirmar entram nas familias
+       compartilhadas mais abaixo. */
+
+    QDialog#cpfDialog {{ background: transparent; }}
+    QWidget#iconeOlho {{ background: transparent; }}
+    QFrame#cpfDialogCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+    QFrame#cpfDialogIcone {{
+      background: {t['badge_icone_bg']};
+      border: 1px solid {t['badge_icone_borda']};
+      border-radius: 21px;
+    }}
+    QLabel#cpfDialogTitulo {{
+      color: {t['texto']};
+      font-size: 18px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#cpfDialogSubtitulo {{
+      color: {t['badge_icone_glifo']};
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+    QLabel#cpfDialogRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+    QFrame#cpfDialogContexto {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+    }}
+    QLabel#cpfDialogAlvo {{
+      color: {t['texto']};
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    /* O visor conta digitos com a pontuacao ja no lugar, entao o espacamento
+       entre caracteres e o que separa `123.456.789-01` de um borrao a um metro
+       de distancia -- e um metro e a distancia de quem esta de pe no balcao. */
+    QLabel#cpfDialogVisor {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+      padding: 12px 0px;
+      color: {t['texto']};
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 2px;
+    }}
+    QLabel#cpfDialogInstrucao {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    QLabel#cpfDialogInstrucao[estado="erro"] {{ color: {t['perigo']}; }}
+
+    /* O olho de cada linha de "Senhas e Acesso". `padding: 0` pelo mesmo
+       motivo do ✕ dos modais: num botao de 32px fixos, os 16px de padding
+       lateral da regra generica de QPushButton zeram a largura util. O miolo e
+       pintado pelo proprio widget (`icone_olho.py`), nao e caractere de fonte,
+       entao o que o QSS desenha aqui e so a moldura. */
+    QPushButton#botaoOlho {{
+      padding: 0;
+      background: {t['botao_circular_bg']};
+      border: 1px solid {t['botao_circular_borda']};
+      border-radius: 10px;
+    }}
+    QPushButton#botaoOlho:hover {{ background: {t['botao_circular_hover']}; }}
+    QPushButton#botaoOlho[revelado="true"] {{ border: 1px solid {t['acento']}; }}
+
+    /* O valor revelado, na propria linha do segredo. Cor de acento e fonte
+       maior que a mascara `••••••••` de proposito: e um estado temporario e
+       tem que ficar obvio que a tela esta mostrando algo que normalmente nao
+       mostra. */
+    QLabel#configValorSegredo[revelado="true"] {{
+      color: {t['acento']};
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+
     QLabel[variante="badge"] {{
       background: {t['sucesso']};
       color: white;
@@ -1150,6 +1249,19 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
     QLabel#pinPadInstrucao[estado="erro"] {{ color: {t['perigo']}; }}
 
+    /* A pergunta por extenso, so no PIN de exclusao (`para_exclusao`). Cartao
+       proprio com borda de perigo: e o unico uso do teclado de PIN em que
+       digitar certo APAGA alguma coisa, e o cartao tem que dizer isso antes do
+       primeiro digito. */
+    QLabel#pinPadMensagem {{
+      color: {t['texto']};
+      font-size: 12px;
+      background: {t['pin_exclusao_bg']};
+      border: 1px solid {t['pin_exclusao_borda']};
+      border-radius: 10px;
+      padding: 10px 12px;
+    }}
+
     QPushButton#pinPadFechar {{
       /* `padding: 0` NAO e decoracao: a regra generica de QPushButton la em
          cima pede 16px de padding lateral, e num botao de 32px fixos isso
@@ -1245,7 +1357,8 @@ def construir_qss_app(t: dict[str, str]) -> str:
        o Qt descarta o glifo -- o botao sai como um circulo vazio. Vale para o
        fechar e para os dois passos de quantidade. */
     QPushButton#addItemFechar, QPushButton#addItemPasso, QPushButton#funcDialogFechar,
-    QPushButton#movCaixaFechar, QPushButton#turnoFechar, QPushButton#subDialogFechar {{
+    QPushButton#movCaixaFechar, QPushButton#turnoFechar, QPushButton#subDialogFechar,
+    QPushButton#cpfDialogFechar {{
       padding: 0;
       background: {t['botao_circular_bg']};
       border: 1px solid {t['botao_circular_borda']};
@@ -1254,11 +1367,12 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
     QPushButton#addItemFechar, QPushButton#funcDialogFechar,
     QPushButton#movCaixaFechar, QPushButton#turnoFechar,
-    QPushButton#subDialogFechar {{ border-radius: 16px; font-size: 13px; }}
+    QPushButton#subDialogFechar, QPushButton#cpfDialogFechar {{ border-radius: 16px; font-size: 13px; }}
     QPushButton#addItemPasso {{ border-radius: 17px; font-size: 18px; }}
     QPushButton#addItemFechar:hover, QPushButton#addItemPasso:hover,
     QPushButton#funcDialogFechar:hover, QPushButton#movCaixaFechar:hover,
-    QPushButton#turnoFechar:hover, QPushButton#subDialogFechar:hover {{
+    QPushButton#turnoFechar:hover, QPushButton#subDialogFechar:hover,
+    QPushButton#cpfDialogFechar:hover {{
       background: {t['botao_circular_hover']};
       color: {t['texto']};
     }}
@@ -1400,6 +1514,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QLabel#addItemAviso[estado="sucesso"] {{ color: {t['sucesso']}; }}
 
     QPushButton#subDialogCancelar,
+    QPushButton#cpfDialogCancelar,
     QPushButton#addItemCancelar, QPushButton#funcDialogCancelar,
     QPushButton#movCaixaCancelar, QPushButton#turnoCancelar {{
       padding: 9px 20px;
@@ -1411,12 +1526,14 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-weight: 700;
     }}
     QPushButton#subDialogCancelar:hover,
+    QPushButton#cpfDialogCancelar:hover,
     QPushButton#addItemCancelar:hover, QPushButton#funcDialogCancelar:hover,
     QPushButton#movCaixaCancelar:hover,
     QPushButton#turnoCancelar:hover {{ background: {t['botao_circular_hover']}; }}
 
     QPushButton#addItemConfirmar, QPushButton#funcDialogConfirmar,
-    QPushButton#subDialogConfirmar {{
+    QPushButton#subDialogConfirmar,
+    QPushButton#cpfDialogConfirmar {{
       padding: 9px 22px;
       background: {t['acento']};
       border: 1px solid {t['acento']};
@@ -1426,12 +1543,14 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-weight: 800;
     }}
     QPushButton#addItemConfirmar:hover, QPushButton#funcDialogConfirmar:hover,
-    QPushButton#subDialogConfirmar:hover {{
+    QPushButton#subDialogConfirmar:hover,
+    QPushButton#cpfDialogConfirmar:hover {{
       background: {t['acento_hover']};
       border-color: {t['acento_hover']};
     }}
     QPushButton#addItemConfirmar:disabled, QPushButton#funcDialogConfirmar:disabled,
-    QPushButton#subDialogConfirmar:disabled {{
+    QPushButton#subDialogConfirmar:disabled,
+    QPushButton#cpfDialogConfirmar:disabled {{
       background: {t['pilula_disabled_bg']};
       border-color: {t['pilula_disabled_bg']};
       color: {t['pilula_disabled_texto']};

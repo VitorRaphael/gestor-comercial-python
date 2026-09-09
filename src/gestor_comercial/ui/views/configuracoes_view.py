@@ -19,13 +19,18 @@ as últimas vendas para trás — ver `repository/backup.py`.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from collections.abc import Callable
+from functools import partial
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QHideEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -35,6 +40,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.repository import backup
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.exceptions import (
@@ -43,11 +49,37 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
-from gestor_comercial.services.loja_config_service import MASCARA, LojaConfigService
+from gestor_comercial.services.loja_config_service import (
+    CAMPO_CPF_DONO,
+    CAMPO_SENHA_LOGIN,
+    CAMPO_SENHA_MASTER,
+    CAMPO_SENHA_OPERACIONAL,
+    MASCARA,
+    ROTULO_POR_CAMPO,
+    LojaConfigService,
+)
 from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.widgets.cpf_dono_dialog import CpfDonoDialog
+from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
+from gestor_comercial.ui.widgets.icone_olho import BotaoOlho
 from gestor_comercial.ui.widgets.modais import executar_modal
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
+
+# Quanto tempo um segredo revelado fica na tela antes de voltar a `••••••••`.
+#
+# Oito segundos é o que se leva para ler e anotar oito dígitos, e pouco demais
+# para alguém sair de perto do monitor com a senha da loja acesa. Quem precisar
+# de mais tempo clica de novo; quem terminou antes clica no olho e oculta na
+# hora — o timer é o teto, não a única saída.
+SEGUNDOS_REVELADO = 8
+
+# As colunas da grade de "Senhas e Acesso". Nomeadas porque três índices soltos
+# num `addWidget` são exatamente o tipo de coisa que alguém troca de lugar sem
+# perceber.
+_COLUNA_TEXTO = 0
+_COLUNA_OLHO = 1
+_COLUNA_BOTAO = 2
 
 
 class ConfiguracoesView(QWidget):
@@ -59,6 +91,17 @@ class ConfiguracoesView(QWidget):
         # A Session do app, e não o engine global do módulo `base`: mantém o
         # backup preso ao mesmo banco que a tela está usando.
         self._sessao = auth_service.uow.session
+
+        # Um segredo revelado por vez, e um timer só para todos: clicar no olho
+        # de outra linha oculta a anterior antes de abrir a nova. Dois valores
+        # acesos ao mesmo tempo seriam duas senhas da loja na tela de uma vez —
+        # o oposto do que uma barreira de visualização serve para fazer.
+        self._campo_revelado: str | None = None
+        self._olhos: dict[str, BotaoOlho] = {}
+        self._valores: dict[str, QLabel] = {}
+        self._timer_revelado = QTimer(self)
+        self._timer_revelado.setSingleShot(True)
+        self._timer_revelado.timeout.connect(self.ocultar_revelado)
 
         # As três seções somam mais altura do que a área de página oferece numa
         # tela de 768px (a classe de monitor da máquina do food truck): sem
@@ -280,60 +323,202 @@ class ConfiguracoesView(QWidget):
 
         descricao = QLabel(
             "Segredos operacionais da loja. Cada valor só é trocado informando o "
-            "segredo de nível acima — nunca são exibidos, só mascarados."
+            "segredo de nível acima. Para conferir um valor, use o olho ao lado: "
+            "ele exige o CPF do Dono e mostra o segredo por alguns segundos."
         )
         descricao.setProperty("variante", "fraco")
         descricao.setWordWrap(True)
         cartao_layout.addWidget(descricao)
         cartao_layout.addSpacing(12)
 
-        self._botao_senha_login, self._valor_senha_login = self._criar_linha_segredo(
-            cartao_layout, "Senha de Login", self._alterar_senha_login
+        # Grade, e não quatro `QHBoxLayout` empilhados: layouts irmãos não
+        # conversam sobre largura, e o botão do CPF ("Cadastrar") é mais largo
+        # que os três "Alterar" — em linhas independentes, o olho daquela linha
+        # ficava deslocado dos outros três. Numa grade, a coluna do botão é a
+        # mesma para as quatro e o alinhamento sai de graça, sem largura fixa
+        # chutada em pixel.
+        grade = QGridLayout()
+        grade.setContentsMargins(0, 0, 0, 0)
+        grade.setHorizontalSpacing(10)
+        grade.setVerticalSpacing(4)
+        grade.setColumnStretch(_COLUNA_TEXTO, 1)
+        cartao_layout.addLayout(grade)
+
+        self._botao_senha_login = self._criar_linha_segredo(
+            grade, 0, CAMPO_SENHA_LOGIN, self._alterar_senha_login
         )
-        self._botao_senha_operacional, self._valor_senha_operacional = self._criar_linha_segredo(
-            cartao_layout, "Senha Operacional (Gerente)", self._alterar_senha_operacional
+        self._botao_senha_operacional = self._criar_linha_segredo(
+            grade, 1, CAMPO_SENHA_OPERACIONAL, self._alterar_senha_operacional
         )
-        self._botao_senha_master, self._valor_senha_master = self._criar_linha_segredo(
-            cartao_layout, "Senha Master (Dono)", self._alterar_senha_master
+        self._botao_senha_master = self._criar_linha_segredo(
+            grade, 2, CAMPO_SENHA_MASTER, self._alterar_senha_master
         )
-        self._botao_cpf_dono, self._valor_cpf_dono = self._criar_linha_segredo(
-            cartao_layout, "CPF do Dono", self._alterar_cpf_dono
+        self._botao_cpf_dono = self._criar_linha_segredo(
+            grade, 3, CAMPO_CPF_DONO, self._alterar_cpf_dono
         )
+        self._valor_cpf_dono = self._valores[CAMPO_CPF_DONO]
 
         bloco_layout.addWidget(cartao)
         self._atualizar_secao_senhas()
         return bloco
 
-    def _criar_linha_segredo(self, layout_pai: QVBoxLayout, rotulo: str, ao_clicar) -> tuple[QPushButton, QLabel]:
-        linha = QHBoxLayout()
-        linha.setSpacing(10)
+    def _criar_linha_segredo(
+        self, grade: QGridLayout, linha: int, campo: str, ao_alterar: Callable[[], None]
+    ) -> QPushButton:
+        """Uma linha de "Senhas e Acesso": rótulo, valor mascarado, olho e Alterar.
 
+        Devolve só o botão "Alterar" — é o único que quem chama precisa segurar
+        (a linha do CPF troca o rótulo dele entre "Cadastrar" e "Alterar"). O
+        olho e o rótulo do valor ficam em `self._olhos`/`self._valores`,
+        indexados pelo campo, porque quem os procura depois é o fluxo de
+        revelação, que sabe o campo e não a ordem em que a linha foi montada.
+        """
         coluna_texto = QVBoxLayout()
         coluna_texto.setSpacing(2)
-        label_rotulo = QLabel(rotulo)
+        label_rotulo = QLabel(ROTULO_POR_CAMPO[campo])
         coluna_texto.addWidget(label_rotulo)
         label_valor = QLabel(MASCARA)
+        label_valor.setObjectName("configValorSegredo")
         label_valor.setProperty("variante", "fraco")
+        label_valor.setProperty("revelado", False)
         coluna_texto.addWidget(label_valor)
-        linha.addLayout(coluna_texto)
-        linha.addStretch()
+        grade.addLayout(coluna_texto, linha, _COLUNA_TEXTO)
+
+        olho = BotaoOlho()
+        # O campo viaja no PRÓPRIO botão, e a ligação é um método ligado — não
+        # uma `lambda` capturando `self` (§3.14): a conexão vive no botão, o
+        # botão é filho da tela, e o ciclo se fecharia sem ninguém para
+        # desfazê-lo. Quem apertou sai do `sender()`, mesmo padrão do numpad.
+        olho.setProperty("campo", campo)
+        olho.setToolTip(self._dica_do_olho(campo))
+        olho.clicked.connect(self._ao_clicar_olho)
+        grade.addWidget(olho, linha, _COLUNA_OLHO, Qt.AlignmentFlag.AlignVCenter)
 
         botao = QPushButton("Alterar")
         botao.setProperty("variante", "secundario")
-        botao.clicked.connect(ao_clicar)
-        linha.addWidget(botao, alignment=Qt.AlignmentFlag.AlignVCenter)
+        botao.clicked.connect(ao_alterar)
+        grade.addWidget(botao, linha, _COLUNA_BOTAO, Qt.AlignmentFlag.AlignVCenter)
 
-        layout_pai.addLayout(linha)
-        return botao, label_valor
+        self._olhos[campo] = olho
+        self._valores[campo] = label_valor
+        return botao
+
+    # ------------------------------------------------------------------
+    # Visualização de um segredo (o olho + o desafio do CPF do Dono)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _dica_do_olho(campo: str) -> str:
+        return f"Ver a {ROTULO_POR_CAMPO[campo]} — exige o CPF do Dono"
+
+    def _ao_clicar_olho(self) -> None:
+        """Segundo clique no mesmo olho oculta; clique em outro troca de campo."""
+        botao = self.sender()
+        if not isinstance(botao, BotaoOlho):
+            return
+        campo = botao.property("campo")
+        if campo == self._campo_revelado:
+            self.ocultar_revelado()
+            return
+        self.revelar_segredo(campo)
+
+    def revelar_segredo(self, campo: str) -> None:
+        """Pede o CPF do Dono e, se conferir, mostra o valor por alguns segundos.
+
+        A checagem de "CPF cadastrado" acontece ANTES de abrir o cartão: sem CPF
+        na loja não há desafio possível, e abrir um teclado que só pode terminar
+        em erro é pior que a mensagem direta. As demais recusas (CPF errado, ou
+        segredo sem cópia recuperável) acontecem dentro do cartão, que fica
+        aberto para o dono tentar de novo — quem decide é sempre
+        `LojaConfigService.revelar`.
+
+        Público porque é por onde a suíte entra: percorrer o clique do olho
+        exigiria abrir o modal de verdade, e `exec()` dentro de um teste trava.
+        """
+        self._label_erro.setText("")
+        if not self._loja_config.cpf_dono_definido():
+            self._label_erro.setText(
+                "Cadastre o CPF do Dono primeiro — é ele que libera a visualização."
+            )
+            return
+
+        # `partial` de um método ligado, e não `lambda`: o cartão guarda o
+        # revelador enquanto vive, e uma `lambda` prenderia esta tela a ele.
+        # Mesmo motivo pelo qual o `PinPadDialog` recebe `validar_pin_dono` já
+        # ligado, em vez de uma função anônima que chama o service.
+        modal = CpfDonoDialog(
+            ROTULO_POR_CAMPO[campo],
+            partial(self._loja_config.revelar, campo),
+            self,
+        )
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
+            return
+        valor = modal.resultado()
+        if valor is None:
+            return
+        self._mostrar_revelado(campo, valor)
+
+    def _mostrar_revelado(self, campo: str, valor: str) -> None:
+        self.ocultar_revelado()
+        self._campo_revelado = campo
+        rotulo = self._valores[campo]
+        rotulo.setText(valor)
+        aplicar_propriedade(rotulo, "revelado", True)
+        self._olhos[campo].definir_revelado(True)
+        self._olhos[campo].setToolTip("Ocultar de novo")
+        self._timer_revelado.start(SEGUNDOS_REVELADO * 1000)
+
+    def ocultar_revelado(self) -> None:
+        """Devolve o valor à máscara e para o timer. Sem nada revelado, não faz nada.
+
+        É o ponto único de saída dos quatro caminhos que ocultam: o timer
+        estourando, o segundo clique no olho, a tela sendo escondida
+        (`hideEvent`) e a troca de um segredo. Assim não existe estado
+        "revelado" que sobreviva a um deles.
+        """
+        self._timer_revelado.stop()
+        campo, self._campo_revelado = self._campo_revelado, None
+        if campo is None:
+            return
+        rotulo = self._valores[campo]
+        rotulo.setText(self._mascara_de(campo))
+        aplicar_propriedade(rotulo, "revelado", False)
+        self._olhos[campo].definir_revelado(False)
+        self._olhos[campo].setToolTip(self._dica_do_olho(campo))
+
+    def _mascara_de(self, campo: str) -> str:
+        """O que a linha mostra quando nada está revelado.
+
+        Só o CPF tem um segundo estado ("Não cadastrado"): as três senhas sempre
+        existem, porque nascem com o padrão de fábrica no bootstrap da loja.
+        """
+        if campo == CAMPO_CPF_DONO and not self._loja_config.cpf_dono_definido():
+            return "Não cadastrado"
+        return MASCARA
+
+    @nao_deixa_escapar()
+    def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802 (override Qt)
+        """Sair da tela oculta o que estiver revelado, sem esperar o timer.
+
+        Sem isto, uma senha revelada e deixada aqui continuaria acesa atrás de
+        qualquer outra página — e voltar a Configurações dentro dos oito
+        segundos a traria de volta à vista sem ninguém digitar CPF nenhum.
+        """
+        super().hideEvent(event)
+        self.ocultar_revelado()
 
     def _atualizar_secao_senhas(self) -> None:
         # Todos os valores ficam sempre mascarados (§3.13) — o único estado
         # visível que muda é se o CPF do Dono já foi cadastrado ou não, pra
         # trocar o rótulo do botão e o texto do diálogo (primeiro cadastro
         # não exige "CPF atual", porque ele nunca existiu).
+        # Uma troca de segredo invalida o que estivesse à mostra: o valor
+        # revelado passou a ser o ANTERIOR, e mostrá-lo depois da troca seria
+        # pior que não mostrar nada.
+        self.ocultar_revelado()
         cadastrado = self._loja_config.cpf_dono_definido()
         self._botao_cpf_dono.setText("Alterar" if cadastrado else "Cadastrar")
-        self._valor_cpf_dono.setText(MASCARA if cadastrado else "Não cadastrado")
+        self._valor_cpf_dono.setText(self._mascara_de(CAMPO_CPF_DONO))
 
     def _alterar_senha_login(self) -> None:
         modal = _AlterarSegredoDialog(

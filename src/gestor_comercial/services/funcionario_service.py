@@ -111,9 +111,38 @@ class FuncionarioService:
         return funcionario
 
     def excluir(self, funcionario_id: int) -> None:
-        """Exclusão física. Se houver histórico vinculado (comanda atendida,
-        consumo interno), bloqueia e sugere desativar — apagar destruiria
-        registro de venda/dívida já gravado."""
+        """Exclusão física do cadastro — e aposentadoria do login de mesmo nome.
+
+        Se houver histórico vinculado (comanda atendida, consumo interno),
+        bloqueia e sugere desativar: apagar destruiria registro de venda/dívida
+        já gravado.
+
+        ## Por que o `Usuario` entra aqui
+
+        `Funcionario` e `Usuario` são tabelas separadas (§3.11) e a tela de
+        Funcionários sempre mexeu só na primeira. Para o Vitor, porém, "Caixa
+        Turno - Manhã" é UMA coisa: excluí-lo em Funcionários e continuar
+        vendo o mesmo nome no dropdown da tela de login é a exclusão que
+        "não pegou" — foi metade do defeito relatado (a outra metade era o
+        seed repovoando, ver `repository/seed.run_seed`).
+
+        O par é casado por **nome**, a mesma convenção que
+        `listar_operadores_caixa` já usa por não haver FK entre as duas.
+
+        ## Por que o login é DESATIVADO e não apagado
+
+        `usuarios.id` é chave estrangeira de `caixas.aberto_por_id`,
+        `comandas.usuario_id` e `movimentos_caixa.usuario_id`: apagar a linha
+        arrancaria o nome de todo turno e toda venda que aquele operador
+        registrou. Desativar preserva o histórico e some da tela de login, que
+        lista só ativos (`UsuarioRepository.listar_ativos`) — que é exatamente
+        o efeito que se espera de "excluí esse turno".
+
+        Tudo num commit só: ou o cadastro sai e o login se aposenta, ou nada
+        acontece. Por isso a trava do último gerente é consultada ANTES de
+        apagar qualquer coisa — descobri-la no meio deixaria o funcionário
+        excluído e o login de pé.
+        """
         self.auth.exigir_gerente()
         funcionario = self.buscar(funcionario_id)
 
@@ -128,8 +157,30 @@ class FuncionarioService:
                 "e não pode ser excluído. Desative-o em vez de excluir."
             )
 
+        login = self._login_do_funcionario(funcionario)
+        if login is not None:
+            motivo = self.auth.motivo_para_nao_desativar(login)
+            if motivo is not None:
+                raise RegraDeNegocioError(
+                    f"{funcionario.nome} também é um operador de login. {motivo}"
+                )
+            login.ativo = False
+            self.uow.usuarios.salvar(login)
+
         self.uow.funcionarios.remover(funcionario)
         self.uow.commit()
+
+    def _login_do_funcionario(self, funcionario: Funcionario) -> Usuario | None:
+        """O `Usuario` de login com o mesmo nome, se estiver ativo.
+
+        Já inativo devolve `None` de propósito: não há o que aposentar, e
+        chamar `motivo_para_nao_desativar` num login já desativado poderia
+        barrar a exclusão do cadastro por uma trava que não se aplica.
+        """
+        login = self.uow.usuarios.buscar_por_nome(funcionario.nome)
+        if login is None or not login.ativo:
+            return None
+        return login
 
     @staticmethod
     def _validar_nome(nome: str) -> str:

@@ -38,7 +38,7 @@ ARQUIVO_DO_HELPER = "modais.py"
 # 31 no diagnóstico do §3.2; +3 com a subcategoria do §9.9 (o cadastro e a
 # renomeação, que reaproveitam o modal num `while`, e a confirmação de
 # exclusão, que é um `QMessageBox` comum).
-SITES_ESPERADOS = 34
+SITES_ESPERADOS = 36
 
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
@@ -160,10 +160,12 @@ def test_o_modal_reaproveitado_no_while_e_descartado_fora_do_laco():
 
 
 def test_os_sites_do_diagnostico_continuam_cobertos():
-    """§3.2 mapeou 31 pontos de abertura, e o §9.9 acrescentou 3. Se este número
-    cair sem uma tela sumir junto, alguém trocou `executar_modal` por `.exec()`
-    de novo; se subir, há site novo — e ele precisa entrar na conta de
-    propósito, não por acidente."""
+    """§3.2 mapeou 31 pontos de abertura e o §9.9 acrescentou 3. Os dois
+    últimos são as barreiras de credencial: o PIN Master antes de excluir um
+    funcionário e o CPF do Dono antes de revelar um segredo em Configurações.
+    Se este número cair sem uma tela sumir junto, alguém trocou
+    `executar_modal` por `.exec()` de novo; se subir, há site novo — e ele
+    precisa entrar na conta de propósito, não por acidente."""
     _, _, total = _varrer()
     assert total == SITES_ESPERADOS, f"{total} sites de modal, esperados {SITES_ESPERADOS}"
 

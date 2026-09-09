@@ -37,7 +37,10 @@ from PySide6.QtWidgets import (
 from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.domain.usuario import Usuario
 from gestor_comercial.services.auth_service import AuthService, PIN_MAX_DIGITOS
-from gestor_comercial.services.exceptions import NaoAutorizadoError
+from gestor_comercial.services.exceptions import (
+    NaoAutorizadoError,
+    RecursoNaoEncontradoError,
+)
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.theme.tokens import TEMA_CLARO_LOGIN as _TEMA_CLARO
 from gestor_comercial.ui.theme.tokens import TEMA_ESCURO_LOGIN as _TEMA_ESCURO
@@ -557,6 +560,12 @@ class LoginView(QWidget):
         # app e cada logout) -- garante que o PIN já é lido sem precisar de
         # um clique manual antes.
         self.setFocus()
+        # E é o único momento em que a lista de operadores pode ter mudado sem
+        # esta tela saber: quem exclui ou desativa um operador faz isso na tela
+        # de Funcionários, dentro do shell autenticado, com o login escondido
+        # atrás. Recarregar aqui é o que impede o dropdown de continuar
+        # oferecendo, depois do logout, alguém que não existe mais.
+        self._carregar_usuarios()
 
     @nao_deixa_escapar()
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 (override Qt)
@@ -577,22 +586,46 @@ class LoginView(QWidget):
     # ------------------------------------------------------------------
 
     def _carregar_usuarios(self) -> None:
-        funcionarios = self._auth_service.listar_ativos()
+        """Enche o dropdown com os operadores ATIVOS e seleciona o último usado.
 
-        if not funcionarios:
+        Chamado na construção e de novo a cada vez que a tela reaparece (ver
+        `showEvent`), por isso começa limpando: um operador desativado ou
+        excluído no shell autenticado tem que sumir daqui no logout seguinte,
+        sem precisar fechar o programa.
+
+        O que vai no `userData` é o **id**, não a instância de `Usuario`: o
+        objeto do SQLAlchemy expira a cada `commit` do app e guardá-lo no
+        widget prende no dropdown uma linha do banco que pode já não existir.
+
+        A seleção padrão é o último operador que entrou neste terminal
+        (`ultimo_operador_id`, gravado no login bem-sucedido) — não o primeiro
+        da lista. No food truck o mesmo turno abre o programa dezenas de vezes
+        seguidas, e o primeiro da lista é só quem tem o nome mais próximo do
+        começo do alfabeto. Sem histórico, ou com o histórico apontando para um
+        operador que não está mais ativo, cai no primeiro da lista.
+        """
+        self._combo_usuario.clear()
+        usuarios = self._auth_service.listar_ativos()
+
+        if not usuarios:
             self._label_erro.setText("Nenhum usuário disponível no sistema.")
             self._combo_usuario.setEnabled(False)
             self._botao_confirmar.setEnabled(False)
             return
 
-        for funcionario in funcionarios:
-            self._combo_usuario.addItem(funcionario.nome, funcionario)
-        self._combo_usuario.setCurrentIndex(0)
+        self._combo_usuario.setEnabled(True)
+        self._botao_confirmar.setEnabled(True)
+        for usuario in usuarios:
+            self._combo_usuario.addItem(usuario.nome, usuario.id)
+
+        ultimo = self._auth_service.ultimo_operador_id()
+        indice = self._combo_usuario.findData(ultimo) if ultimo is not None else -1
+        self._combo_usuario.setCurrentIndex(indice if indice >= 0 else 0)
 
     def _tentar_login(self) -> None:
-        funcionario_selecionado = self._combo_usuario.currentData()
+        usuario_id = self._combo_usuario.currentData()
 
-        if not funcionario_selecionado:
+        if usuario_id is None:
             self._label_erro.setText("Selecione um operador.")
             return
 
@@ -605,11 +638,15 @@ class LoginView(QWidget):
             # "qualquer usuário ativo cujo PIN bata" — necessário desde que
             # dois operadores (Caixa Turno - Manhã/Noite) passaram a poder
             # compartilhar o mesmo PIN (ver `AuthService.login_como`).
-            funcionario = self._auth_service.login_como(funcionario_selecionado.id, self._pin)
-        except NaoAutorizadoError as erro:
+            usuario = self._auth_service.login_como(usuario_id, self._pin)
+        except (NaoAutorizadoError, RecursoNaoEncontradoError) as erro:
+            # `RecursoNaoEncontradoError` cobre o dropdown que ficou velho: o
+            # operador foi excluído em outra tela entre o carregamento desta
+            # lista e o clique. Vira mensagem, não estouro — e a lista se
+            # corrige sozinha na próxima vez que a tela aparecer.
             self._label_erro.setText(str(erro))
             self._limpar_pin()
             return
 
         self._limpar_pin()
-        self.autenticado.emit(funcionario)
+        self.autenticado.emit(usuario)

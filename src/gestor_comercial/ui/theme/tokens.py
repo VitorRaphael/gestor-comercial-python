@@ -236,6 +236,15 @@ TEMA_ESCURO: dict[str, str] = {
     # marcado, nao uma segunda acao primaria.
     "pilula_ativo_bg": "#14291E",
     "pilula_ativo_texto": "#4ADE80",
+    # Familia PROPRIA do aviso de exclusao, e nao `perigo`/`pill_comanda_perigo_*`
+    # emprestados. Mesma licao do §9.5: `perigo` veste botao e texto de erro, e
+    # `pill_comanda_perigo_*` veste a pilula de comanda atrasada -- coincidir de
+    # hex hoje nao e significar a mesma coisa. Este par veste UM lugar: o cartao
+    # que diz o que esta prestes a ser apagado, dentro do teclado de PIN
+    # (`PinPadDialog.para_exclusao`). O dia em que o vermelho de erro mudar de
+    # tom nao pode arrastar junto a tela que confirma uma exclusao.
+    "pin_exclusao_bg": "#2D1214",
+    "pin_exclusao_borda": "rgba(220, 38, 38, 0.35)",
     "badge_icone_bg": "#132E35",
     "badge_icone_borda": "rgba(34, 211, 238, 0.22)",
     "badge_icone_glifo": "#22D3EE",
@@ -463,6 +472,15 @@ TEMA_CLARO: dict[str, str] = {
     # pilula marcada usa o verde escuro.
     "pilula_ativo_bg": "#DCFCE7",
     "pilula_ativo_texto": "#15803D",
+    # Familia PROPRIA do aviso de exclusao, e nao `perigo`/`pill_comanda_perigo_*`
+    # emprestados. Mesma licao do §9.5: `perigo` veste botao e texto de erro, e
+    # `pill_comanda_perigo_*` veste a pilula de comanda atrasada -- coincidir de
+    # hex hoje nao e significar a mesma coisa. Este par veste UM lugar: o cartao
+    # que diz o que esta prestes a ser apagado, dentro do teclado de PIN
+    # (`PinPadDialog.para_exclusao`). O dia em que o vermelho de erro mudar de
+    # tom nao pode arrastar junto a tela que confirma uma exclusao.
+    "pin_exclusao_bg": "#FEE2E2",
+    "pin_exclusao_borda": "#FCA5A5",
     "badge_icone_bg": "#CFFAFE",
     "badge_icone_borda": "#A5F3FC",
     "badge_icone_glifo": "#0E7490",

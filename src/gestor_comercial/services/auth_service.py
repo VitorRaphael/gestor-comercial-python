@@ -25,6 +25,7 @@ import os
 
 from gestor_comercial.domain.enums import PerfilUsuario
 from gestor_comercial.domain.usuario import Usuario
+from gestor_comercial.repository.preferencia_repository import ULTIMO_OPERADOR_ID
 from gestor_comercial.repository.unit_of_work import UnitOfWork
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
@@ -114,7 +115,39 @@ class AuthService:
         if not self.validar_pin_nivel(pin, nivel_minimo=1):
             raise NaoAutorizadoError("PIN inválido.")
         self._usuario_logado = usuario
+        self._lembrar_ultimo_operador(usuario)
         return usuario
+
+    def _lembrar_ultimo_operador(self, usuario: Usuario) -> None:
+        """Grava quem acabou de entrar, para o dropdown do próximo boot.
+
+        Depois de a autenticação passar, e não antes: a tela de login mostra o
+        último operador que **entrou**, não o último que errou o PIN.
+
+        `commit` próprio porque o login não faz parte de nenhuma outra
+        operação; um turno inteiro do food truck tem dois ou três logins, então
+        a gravação extra não pesa. Se ela falhar por qualquer motivo, o login
+        já aconteceu e não pode ser desfeito por causa de uma preferência de
+        tela — daí o `except` largo, que degrada para "o dropdown abre no
+        primeiro da lista" em vez de recusar a entrada de quem digitou o PIN
+        certo.
+        """
+        try:
+            self.uow.preferencias.definir(ULTIMO_OPERADOR_ID, str(usuario.id))
+            self.uow.commit()
+        except Exception:
+            self.uow.rollback()
+
+    def ultimo_operador_id(self) -> int | None:
+        """Quem entrou por último neste terminal, ou `None` no primeiro boot.
+
+        Só o id: quem confere se esse operador ainda existe e ainda está ativo
+        é a tela, contra a lista que ela mesma acabou de carregar
+        (`listar_ativos`). Devolver o `Usuario` daqui faria a tela receber um
+        operador que ela não tem no dropdown — o excluído ou desativado depois
+        do último login.
+        """
+        return self.uow.preferencias.obter_int(ULTIMO_OPERADOR_ID)
 
     def logout(self) -> None:
         self._usuario_logado = None
@@ -179,22 +212,36 @@ class AuthService:
         if not usuario.ativo:
             raise RegraDeNegocioError(f"O usuário {usuario.nome} já está desativado.")
 
-        # Sem nenhum gerente ativo ninguém mais autoriza cancelamento nem abre
-        # caixa, e não existe tela de recuperação: o sistema trava de vez.
-        # Por isso o último gerente não pode ser desativado nem por engano.
-        if (
-            usuario.perfil is PerfilUsuario.GERENTE
-            and self.uow.usuarios.contar_ativos_por_perfil(PerfilUsuario.GERENTE) <= 1
-        ):
-            raise RegraDeNegocioError(
-                "Não é possível desativar o último gerente ativo. "
-                "Cadastre outro gerente antes de desativar este."
-            )
+        motivo = self.motivo_para_nao_desativar(usuario)
+        if motivo is not None:
+            raise RegraDeNegocioError(motivo)
 
         usuario.ativo = False
         self.uow.usuarios.salvar(usuario)
         self.uow.commit()
         return usuario
+
+    def motivo_para_nao_desativar(self, usuario: Usuario) -> str | None:
+        """Por que este login NÃO pode ser desativado — ou `None` se pode.
+
+        Sem nenhum gerente ativo ninguém mais autoriza cancelamento nem abre
+        caixa, e não existe tela de recuperação: o sistema trava de vez. Por
+        isso o último gerente não pode ser desativado nem por engano.
+
+        Devolve a mensagem em vez de levantar porque há dois chamadores com
+        necessidades opostas: `desativar_usuario` transforma isto em erro, e
+        `FuncionarioService.excluir` precisa PERGUNTAR antes de começar a
+        apagar — descobrir a trava no meio deixaria o funcionário excluído e o
+        login dele de pé, que é meia exclusão.
+        """
+        if usuario.perfil is not PerfilUsuario.GERENTE:
+            return None
+        if self.uow.usuarios.contar_ativos_por_perfil(PerfilUsuario.GERENTE) > 1:
+            return None
+        return (
+            "Não é possível desativar o último gerente ativo. "
+            "Cadastre outro gerente antes de desativar este."
+        )
 
     # ------------------------------------------------------------------
     # Cascata de PIN da loja (§3.13)

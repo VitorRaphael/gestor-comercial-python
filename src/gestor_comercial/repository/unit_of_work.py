@@ -17,6 +17,7 @@ from gestor_comercial.repository.loja_config_repository import LojaConfigReposit
 from gestor_comercial.repository.mesa_repository import MesaRepository
 from gestor_comercial.repository.movimento_caixa_repository import MovimentoCaixaRepository
 from gestor_comercial.repository.pagamento_repository import PagamentoRepository
+from gestor_comercial.repository.preferencia_repository import PreferenciaRepository
 from gestor_comercial.repository.produto_repository import ProdutoRepository
 from gestor_comercial.repository.quitacao_consumo_repository import QuitacaoConsumoRepository
 from gestor_comercial.repository.subcategoria_repository import SubcategoriaRepository
@@ -56,6 +57,7 @@ class UnitOfWork:
         self.impressoras = ImpressoraRepository(self.session)
         self.fila_impressao = FilaImpressaoRepository(self.session)
         self.loja_config = LojaConfigRepository(self.session)
+        self.preferencias = PreferenciaRepository(self.session)
 
     def commit(self) -> None:
         self.session.commit()

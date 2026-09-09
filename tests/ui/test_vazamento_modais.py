@@ -46,6 +46,7 @@ from gestor_comercial.domain.enums import TipoMovimento
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 from gestor_comercial.ui.widgets.abertura_caixa_dialog import AberturaCaixaDialog
 from gestor_comercial.ui.widgets.adicionar_item_dialog import AdicionarItemDialog
+from gestor_comercial.ui.widgets.cpf_dono_dialog import CpfDonoDialog
 from gestor_comercial.ui.widgets.fechamento_caixa_dialog import FechamentoCaixaDialog
 from gestor_comercial.ui.widgets.funcionario_dialog import FuncionarioDialog
 from gestor_comercial.ui.widgets.movimentacao_caixa_dialog import MovimentacaoCaixaDialog
@@ -194,10 +195,16 @@ def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, assentar, auth):
     _abrir_e_fechar(
         lambda p: FechamentoCaixaDialog(Decimal("970.00"), Decimal("1600.00"), p), pai, vezes=10
     )
+    _abrir_e_fechar(
+        lambda p: PinPadDialog.para_exclusao(auth, "Maria Entregas", p), pai, vezes=10
+    )
+    _abrir_e_fechar(
+        lambda p: CpfDonoDialog("Senha Master (Dono)", lambda _cpf: "050727", p), pai, vezes=10
+    )
     assentar()
 
     vivos = pai.findChildren(QDialog)
-    assert vivos == [], f"{len(vivos)} diálogos de 70 aberturas continuam na memória"
+    assert vivos == [], f"{len(vivos)} diálogos de 90 aberturas continuam na memória"
 
 
 def test_construir_sem_abrir_deixa_o_dialogo_preso_a_view(qapp, assentar):
@@ -282,3 +289,34 @@ def test_novo_funcionario_nao_acumula(qapp, assentar):
     assentar()
 
     assert pai.findChildren(FuncionarioDialog) == []
+
+
+def test_pin_de_exclusao_nao_acumula(qapp, assentar, auth):
+    """Aberto a cada clique em "Excluir" na tela de Funcionários.
+
+    Mesma classe dos outros dois usos do PIN, e com teste próprio pelo mesmo
+    motivo: o que se mede aqui é o site de chamada. Este traz um widget que os
+    outros não têm — a faixa com o nome do registro —, e é a única variação de
+    montagem do `PinPadDialog` no app."""
+    pai = QWidget()
+
+    _abrir_e_fechar(lambda p: PinPadDialog.para_exclusao(auth, "Maria Entregas", p), pai)
+    assentar()
+
+    assert pai.findChildren(PinPadDialog) == []
+
+
+def test_cartao_de_cpf_do_dono_nao_acumula(qapp, assentar):
+    """Aberto a cada clique num dos quatro olhos de "Senhas e Acesso".
+
+    Frequência baixa, e entra nesta varredura exatamente por isso: o inventário
+    só serve enquanto for completo. O comportamento dele está em
+    `test_olho_de_senhas_e_acesso.py`."""
+    pai = QWidget()
+
+    _abrir_e_fechar(
+        lambda p: CpfDonoDialog("Senha Master (Dono)", lambda _cpf: "050727", p), pai
+    )
+    assentar()
+
+    assert pai.findChildren(CpfDonoDialog) == []

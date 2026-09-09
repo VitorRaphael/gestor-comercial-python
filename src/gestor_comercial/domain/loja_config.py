@@ -9,11 +9,14 @@ class LojaConfig(Base):
     Login (Nível 1), Senha Operacional/Caixa (Nível 2), Senha Master/Dono
     (Nível 3) — e CPF do Dono (§3.13, módulo "Senhas e Acesso").
 
-    Singleton (sempre id=1, ver `LojaConfigRepository.obter`). Guarda só
-    hash+salt de cada segredo — igual ao PIN antigo de `Usuario`, agora
-    removido — porque nenhuma tela precisa exibir o valor real de volta, só
-    confirmar que o que foi digitado bate com o que está cadastrado. A tela
-    sempre mostra `••••••••` no lugar do valor.
+    Singleton (sempre id=1, ver `LojaConfigRepository.obter`). A autenticação
+    usa só hash+salt de cada segredo — igual ao PIN antigo de `Usuario`, agora
+    removido —, e a tela mostra `••••••••` no lugar do valor.
+
+    Ao lado do hash existe hoje uma **segunda cópia recuperável** de cada
+    segredo (colunas `*_cifrada`/`*_cifrado`, ver o bloco no fim desta classe),
+    que só o botão de olho de "Senhas e Acesso" lê, e só depois de o CPF do
+    Dono ser digitado e conferir. Ela não participa de autenticação nenhuma.
 
     Cascata (nível acima autentica onde nível abaixo é pedido): quem digita a
     Senha Master passa também onde a Operacional ou a de Login é exigida;
@@ -67,3 +70,30 @@ class LojaConfig(Base):
     cpf_dono_hash: Mapped[str | None] = mapped_column(String(128))
     cpf_dono_salt: Mapped[str | None] = mapped_column(String(64))
     cpf_dono_definido: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # ------------------------------------------------------------------
+    # Cópia recuperável, para o botão de olho de "Senhas e Acesso"
+    # ------------------------------------------------------------------
+    # A docstring acima diz que nenhuma tela precisa exibir o valor real de
+    # volta. Deixou de ser verdade quando o Vitor pediu o olho: quem esquece a
+    # Senha Master não tem para onde ir, porque a única credencial acima dela é
+    # o CPF do Dono — que é justamente o que o olho exige para revelar.
+    #
+    # Estas colunas NÃO substituem o hash e não participam de autenticação
+    # nenhuma: quem confere o que foi digitado continua sendo `senha_*_hash`.
+    # São uma segunda cópia, embaralhada por `services/segredo_reversivel.py`,
+    # que só a tela lê e só depois do CPF conferir.
+    #
+    # `NULL` significa "não temos cópia deste valor": banco anterior a estas
+    # colunas cuja senha já tinha sido trocada (a migração `b6e2d80a3f14` só
+    # consegue recuperar as que ainda estão na senha de fábrica, conferindo
+    # contra o hash — mesma técnica de `c1d5b8e37a42`). A tela mostra
+    # "indisponível" e o valor entra sozinho na próxima troca de senha.
+    #
+    # O que isto entrega a quem tiver o arquivo do banco: ver
+    # `segredo_reversivel` — é ofuscação em repouso, não proteção contra quem
+    # tem o `.db` e o programa. A barreira de verdade é o CPF na tela.
+    senha_master_cifrada: Mapped[str | None] = mapped_column(String(255))
+    senha_operacional_cifrada: Mapped[str | None] = mapped_column(String(255))
+    senha_login_cifrada: Mapped[str | None] = mapped_column(String(255))
+    cpf_dono_cifrado: Mapped[str | None] = mapped_column(String(255))
