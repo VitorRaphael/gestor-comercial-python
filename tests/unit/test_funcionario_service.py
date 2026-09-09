@@ -27,3 +27,41 @@ def test_criar_recusa_cargo_fora_das_opcoes_fixas(funcionarios, gerente):
 def test_editar_recusa_cargo_fora_das_opcoes_fixas(funcionarios, gerente, funcionario):
     with pytest.raises(RegraDeNegocioError):
         funcionarios.editar(funcionario.id, funcionario.nome, "Cargo Inventado")
+
+
+# ---------------------------------------------------------------------------
+# Turno / horário
+# ---------------------------------------------------------------------------
+
+
+def test_criar_grava_o_turno_informado(funcionarios, gerente):
+    funcionario = funcionarios.criar("Caixa Turno - Noite", "Caixa", None, "T2 · Noite · 18h–00h")
+
+    assert funcionario.turno_horario == "T2 · Noite · 18h–00h"
+
+
+def test_editar_troca_o_horario_do_turno(funcionarios, gerente):
+    """O defeito relatado: o turno nascia no seed do primeiro boot e não havia
+    caminho nenhum para corrigir a faixa quando a escala mudasse."""
+    pessoa = funcionarios.criar("Caixa Turno - Noite", "Caixa", None, "T2 · Noite · 16h–00h")
+
+    atualizado = funcionarios.editar(
+        pessoa.id, pessoa.nome, "Caixa", None, "T2 · Noite · 18h–00h"
+    )
+
+    assert atualizado.turno_horario == "T2 · Noite · 18h–00h"
+
+
+def test_turno_em_branco_vira_none(funcionarios, gerente):
+    """`None`, e não `""`: é o que o painel de detalhe conta para desenhar o
+    travessão, e a linha da lista para não mostrar uma etiqueta vazia."""
+    pessoa = funcionarios.criar("Bruno", "Caixa", None, "   ")
+
+    assert pessoa.turno_horario is None
+
+
+def test_turno_maior_que_a_coluna_e_recusado(funcionarios, gerente):
+    """`funcionarios.turno_horario` é `String(60)`. Sem esta trava o banco
+    truncaria em silêncio e o horário voltaria cortado na tela seguinte."""
+    with pytest.raises(RegraDeNegocioError):
+        funcionarios.criar("Bruno", "Caixa", None, "T" * 61)

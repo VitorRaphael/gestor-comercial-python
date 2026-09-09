@@ -407,3 +407,46 @@ def test_trinta_aberturas_nao_deixam_nada_preso_a_view(
     assentar()
 
     assert view.findChildren(FuncionarioDialog) == []
+
+
+# ---------------------------------------------------------------------------
+# Turno / horário
+# ---------------------------------------------------------------------------
+
+
+def test_a_edicao_abre_com_o_turno_atual_no_campo(abrir, funcionarios, gerente):
+    """Quem abre a edição para corrigir a faixa tem que encontrar o rótulo
+    inteiro escrito: o campo é livre, e abrir vazio obrigaria a redigitar
+    "T2 · Noite ·" só para mexer na hora."""
+    pessoa = funcionarios.criar("Caixa Turno - Noite", "Caixa", None, "T2 · Noite · 16h–00h")
+
+    modal = abrir(pessoa)
+
+    assert modal._campo_turno.text() == "T2 · Noite · 16h–00h"
+
+
+def test_o_turno_editado_sai_no_resultado(abrir, funcionarios, gerente):
+    pessoa = funcionarios.criar("Caixa Turno - Noite", "Caixa", None, "T2 · Noite · 16h–00h")
+    modal = abrir(pessoa)
+
+    modal._campo_turno.setText("T2 · Noite · 18h–00h")
+
+    assert modal.resultado().turno_horario == "T2 · Noite · 18h–00h"
+
+
+def test_turno_vazio_vira_none(abrir):
+    """`None`, e não `""` — mesmo contrato do telefone."""
+    modal = abrir()
+    modal._campo_nome.setText("Pedro")
+
+    assert modal.resultado().turno_horario is None
+
+
+def test_o_cadastro_novo_nao_inventa_turno(abrir, funcionarios, gerente):
+    """Só os dois operadores do seed nascem com turno. Um garçom cadastrado no
+    balcão não pode sair daqui com a etiqueta do placeholder."""
+    modal = abrir()
+    modal._campo_nome.setText("Pedro")
+    _clicar_cargo(modal, "Garçom")
+
+    assert modal.resultado().turno_horario is None

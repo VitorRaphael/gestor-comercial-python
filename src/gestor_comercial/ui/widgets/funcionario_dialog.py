@@ -129,6 +129,7 @@ class DadosFuncionario:
     nome: str
     cargo: str | None
     telefone: str | None
+    turno_horario: str | None
     ativo: bool
 
 
@@ -295,6 +296,9 @@ class FuncionarioDialog(QDialog):
     COLUNAS_DE_CARGO = 2
     LIMITE_NOME = 120
     LIMITE_TELEFONE = 30
+    # `funcionarios.turno_horario` é `String(60)` — a mesma cópia
+    # deliberada da coluna que LIMITE_NOME e LIMITE_TELEFONE já fazem.
+    LIMITE_TURNO = 60
 
     def __init__(self, funcionario: Funcionario | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -328,6 +332,7 @@ class FuncionarioDialog(QDialog):
         corpo.addLayout(self._montar_cabecalho())
         corpo.addWidget(self._montar_identidade())
         corpo.addLayout(self._montar_cargos())
+        corpo.addLayout(self._montar_turno())
         corpo.addLayout(self._montar_contato_e_situacao())
         corpo.addWidget(self._montar_divisor())
         corpo.addLayout(self._montar_acoes())
@@ -422,6 +427,29 @@ class FuncionarioDialog(QDialog):
         coluna.addLayout(grade)
         return coluna
 
+    def _montar_turno(self) -> QVBoxLayout:
+        """O horário do turno que a lista e o painel de detalhe mostram.
+
+        Até aqui este campo só era escrito pelo seed do primeiro boot: os dois
+        operadores nasciam com "T1 · Manhã · 08h–16h" e "T2 · Noite · 16h–00h"
+        e não havia porta nenhuma para corrigir a faixa quando a escala do food
+        truck mudasse — o painel de detalhe mostrava um horário que ninguém
+        conseguia alterar. Esta é a porta.
+
+        Campo livre, e não dois relógios: o que está gravado é o rótulo
+        inteiro, e a edição abre com ele já no campo, para quem for corrigir
+        mexer só no pedaço que mudou.
+        """
+        coluna = QVBoxLayout()
+        coluna.setSpacing(5)
+        coluna.addWidget(self._rotulo("TURNO / HORÁRIO (opcional)"))
+        self._campo_turno = QLineEdit()
+        self._campo_turno.setObjectName("funcDialogCampo")
+        self._campo_turno.setPlaceholderText("T2 · Noite · 16h–00h")
+        self._campo_turno.setMaxLength(self.LIMITE_TURNO)
+        coluna.addWidget(self._campo_turno)
+        return coluna
+
     def _montar_contato_e_situacao(self) -> QHBoxLayout:
         linha = QHBoxLayout()
         linha.setSpacing(16)
@@ -498,6 +526,7 @@ class FuncionarioDialog(QDialog):
         if funcionario is not None:
             self._campo_nome.setText(funcionario.nome)
             self._campo_telefone.setText(formatar_telefone(funcionario.telefone))
+            self._campo_turno.setText(funcionario.turno_horario or "")
         self._pintar_cargos()
         self._pintar_situacao()
         self._ao_mudar_nome(self._campo_nome.text())
@@ -557,6 +586,7 @@ class FuncionarioDialog(QDialog):
             nome=self._campo_nome.text().strip(),
             cargo=self._cargo_escolhido,
             telefone=self._campo_telefone.text().strip() or None,
+            turno_horario=self._campo_turno.text().strip() or None,
             ativo=self._ativo,
         )
 

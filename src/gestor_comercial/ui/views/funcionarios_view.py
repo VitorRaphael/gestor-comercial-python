@@ -322,7 +322,9 @@ class FuncionariosView(QWidget):
 
         self._label_erro.setText("")
         try:
-            novo = self._funcionarios_service.criar(dados.nome, dados.cargo, dados.telefone)
+            novo = self._funcionarios_service.criar(
+                dados.nome, dados.cargo, dados.telefone, dados.turno_horario
+            )
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
@@ -344,7 +346,11 @@ class FuncionariosView(QWidget):
         self._label_erro.setText("")
         try:
             atualizado = self._funcionarios_service.editar(
-                funcionario.id, dados.nome, dados.cargo, dados.telefone
+                funcionario.id,
+                dados.nome,
+                dados.cargo,
+                dados.telefone,
+                dados.turno_horario,
             )
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))

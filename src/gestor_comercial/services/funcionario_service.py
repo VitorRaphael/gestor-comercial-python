@@ -21,6 +21,9 @@ from gestor_comercial.services.transacao import transacional
 
 CARGOS_VALIDOS = [cargo.value for cargo in CargoFuncionario]
 
+# `funcionarios.turno_horario` é `String(60)` (migração `d3f8a1c4e6b9`).
+LIMITE_TURNO_HORARIO = 60
+
 
 @transacional
 class FuncionarioService:
@@ -30,7 +33,13 @@ class FuncionarioService:
         self.uow = uow
         self.auth = auth
 
-    def criar(self, nome: str, cargo: str | None = None, telefone: str | None = None) -> Funcionario:
+    def criar(
+        self,
+        nome: str,
+        cargo: str | None = None,
+        telefone: str | None = None,
+        turno_horario: str | None = None,
+    ) -> Funcionario:
         self.auth.exigir_gerente()
         nome_limpo = self._validar_nome(nome)
         cargo_valido = self._validar_cargo(cargo)
@@ -39,6 +48,7 @@ class FuncionarioService:
             nome=nome_limpo,
             cargo=cargo_valido,
             telefone=self._limpar_texto(telefone),
+            turno_horario=self._validar_turno(turno_horario),
             ativo=True,
         )
         self.uow.funcionarios.salvar(funcionario)
@@ -51,13 +61,22 @@ class FuncionarioService:
         nome: str,
         cargo: str | None = None,
         telefone: str | None = None,
+        turno_horario: str | None = None,
     ) -> Funcionario:
+        """Reescreve o cadastro com o que o modal devolveu.
+
+        Todos os campos opcionais seguem a mesma regra, e sempre seguiram: o
+        que não vier vira `None`. O modal manda o estado completo da tela — e
+        é por isso que ele abre com o turno atual já escrito no campo. Omitir
+        um argumento aqui é apagar o dado, não "deixar como está".
+        """
         self.auth.exigir_gerente()
         funcionario = self.buscar(funcionario_id)
 
         funcionario.nome = self._validar_nome(nome)
         funcionario.cargo = self._validar_cargo(cargo)
         funcionario.telefone = self._limpar_texto(telefone)
+        funcionario.turno_horario = self._validar_turno(turno_horario)
         self.uow.funcionarios.salvar(funcionario)
         self.uow.commit()
         return funcionario
@@ -201,6 +220,23 @@ class FuncionarioService:
             opcoes = ", ".join(CARGOS_VALIDOS)
             raise RegraDeNegocioError(f"Cargo inválido. Escolha uma das opções: {opcoes}.")
         return cargo_limpo
+
+    @staticmethod
+    def _validar_turno(turno_horario: str | None) -> str | None:
+        """A etiqueta do turno ("T2 · Noite · 16h–00h"), como o seed grava.
+
+        Texto livre, e não dois campos de hora: o que está gravado é um rótulo
+        de exibição inteiro (turno, período e faixa) que a lista e o painel de
+        detalhe só imprimem. Só o tamanho é checado — a coluna é `String(60)`,
+        e o banco truncaria em silêncio, devolvendo o turno cortado na tela
+        seguinte.
+        """
+        texto = FuncionarioService._limpar_texto(turno_horario)
+        if texto is not None and len(texto) > LIMITE_TURNO_HORARIO:
+            raise RegraDeNegocioError(
+                f"O turno/horário deve ter no máximo {LIMITE_TURNO_HORARIO} caracteres."
+            )
+        return texto
 
     @staticmethod
     def _limpar_texto(texto: str | None) -> str | None:
