@@ -116,6 +116,89 @@ def test_agrupa_por_impressora_da_categoria(uow, impressao, driver, gerente, cai
     assert "Coca-Cola" not in driver.texto_de("Cozinha")
 
 
+def test_o_submodelo_nao_muda_a_impressora_de_destino(
+    uow, impressao, driver, gerente, caixa_aberto, mesa
+):
+    """A REGRA DE OURO do §9.8, medida onde ela vale: no papel que sai.
+
+    Dois lanches da MESMA categoria, com sub-modelos DIFERENTES, e um terceiro
+    sem sub-modelo nenhum. Os três têm que sair na impressora da categoria, no
+    mesmo cupom — o sub-modelo é organização de catálogo e não pode abrir uma
+    segunda fila.
+
+    É este teste que permite dizer ao Vitor que nenhuma impressora precisa ser
+    reconfigurada: se um dia alguém fizer `_destino_do_item` olhar para o
+    sub-modelo, três cupons saem no lugar de um e ele reprova aqui.
+    """
+    cozinha = nova_impressora(uow, "Cozinha")
+    bar = nova_impressora(uow, "Bar", padrao=True)
+    artesanal = nova_categoria_com_produto(uow, "Lanches", "X Artesanal", "22.00", cozinha)
+    artesanal.subcategoria = "Artesanal"
+    podrao = uow.produtos.salvar(
+        Produto(
+            nome="X Podrão",
+            preco=dinheiro("12.00"),
+            categoria_id=artesanal.categoria_id,
+            subcategoria="Podrão",
+        )
+    )
+    sem_submodelo = uow.produtos.salvar(
+        Produto(nome="X Burger", preco=dinheiro("13.00"), categoria_id=artesanal.categoria_id)
+    )
+    comanda = nova_comanda(uow, caixa_aberto, gerente, mesa)
+    for produto in (artesanal, podrao, sem_submodelo):
+        novo_item(uow, comanda, produto)
+
+    resultados = impressao.imprimir_comanda(comanda.id)
+
+    assert [r.impressora_nome for r in resultados] == ["Cozinha"], (
+        "o sub-modelo abriu uma segunda fila de impressão"
+    )
+    assert driver.cupons_de("Cozinha") == 1
+    texto = driver.texto_de("Cozinha")
+    assert "1x X Artesanal" in texto
+    assert "1x X Podrão" in texto
+    assert "1x X Burger" in texto
+    assert driver.texto_de("Bar") == ""
+
+
+def test_o_submodelo_nao_aparece_no_cupom_da_cozinha(
+    uow, impressao, driver, gerente, caixa_aberto, mesa
+):
+    """A bobina de 32 colunas é para quem produz o item, não para quem organiza
+    o cardápio. O cupom continua com nome, quantidade e observação — mais uma
+    linha de etiqueta empurraria o pedido para fora do olhar de quem cozinha."""
+    nova_impressora(uow, "Cozinha", padrao=True)
+    produto = nova_categoria_com_produto(uow, "Lanches", "X Podrão", "12.00")
+    produto.subcategoria = "Podrão do Bairro"
+    comanda = nova_comanda(uow, caixa_aberto, gerente, mesa)
+    novo_item(uow, comanda, produto)
+
+    impressao.imprimir_comanda(comanda.id)
+
+    assert "Podrão do Bairro" not in driver.texto_de("Cozinha")
+
+
+def test_o_roteamento_nao_le_o_submodelo_em_lugar_nenhum():
+    """Varredura de código, e não de comportamento — a outra metade da garantia.
+
+    Os testes acima provam o roteamento de HOJE. Este reprova a linha que o
+    quebraria amanhã: o `impressao_service` inteiro não pode nem mencionar o
+    sub-modelo. É a mesma varredura que o §9.5 usou para impedir que um
+    seletor voltasse a pegar a cor de mesa ocupada emprestada.
+    """
+    from pathlib import Path
+
+    from gestor_comercial.services import impressao_service
+
+    fonte = Path(impressao_service.__file__).read_text(encoding="utf-8")
+
+    assert "subcategoria" not in fonte, (
+        "o roteamento de impressão passou a enxergar o sub-modelo — a regra de "
+        "ouro do §9.8 é que quem decide a impressora é a CATEGORIA, e só"
+    )
+
+
 def test_categoria_sem_impressora_cai_na_padrao(uow, impressao, driver, gerente, caixa_aberto):
     balcao = nova_impressora(uow, "Balcão", padrao=True)
     doce = nova_categoria_com_produto(uow, "Sobremesas", "Pudim", "8.00")

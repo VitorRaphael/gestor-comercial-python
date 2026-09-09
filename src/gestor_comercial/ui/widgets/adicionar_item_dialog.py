@@ -1,6 +1,13 @@
 """Modal "Adicionar item": busca do cardápio com miniatura, filtro por
 categoria, quantidade e observação — o lançamento de produto na comanda.
 
+Desde o §9.8 a linha de metadados carrega também o **sub-modelo**
+("PORÇÕES · FRITAS"), e a busca casa contra ele: digitar "artesanal" lista os
+lanches desse sub-modelo. O filtro em pílulas continua sendo **por categoria** e
+só — é o que a impressora usa, e é o eixo que o operador tem na cabeça no
+balcão; uma segunda fileira de pílulas custaria altura num cartão que já foi
+medido contra os 728px úteis de um monitor de 768px.
+
 Substitui o `_AdicionarItemDialog` que morava dentro de `comanda_view.py`, um
 `QFormLayout` com a moldura de janela do sistema, `QSpinBox` de setinha e uma
 lista de texto corrido (`"Arroz — R$ 10,00 — Acompanhamentos"`). No balcão do
@@ -166,6 +173,13 @@ class _LinhaProduto:
     preco: Decimal
     preco_texto: str
     categoria: str
+    # O sub-modelo (§9.8) entra no instantâneo por DOIS motivos, e nenhum é
+    # decoração. O primeiro é a linha de metadados aqui embaixo. O segundo é a
+    # busca: `filtrar_produtos` casa o termo contra nome **e** sub-modelo, e é
+    # daqui que ele sai — sem este campo, digitar "artesanal" leria
+    # `produto.subcategoria` do SQLAlchemy a cada tecla, que é exatamente o que
+    # o instantâneo existe para não fazer.
+    subcategoria: str | None
     metadados: str
     imagem_path: str | None
 
@@ -177,7 +191,16 @@ def _instantaneo(produtos: list[Produto]) -> list[_LinhaProduto]:
         # O `[COMBO]` do modal antigo virava um sufixo no meio do nome. Aqui
         # ele desce para a linha de metadados, junto da categoria, e o nome do
         # produto fica limpo para a busca e para o olho.
-        metadados = f"{categoria} · COMBO" if produto.is_combo else categoria
+        #
+        # O sub-modelo entra entre os dois, no mesmo separador: "PORÇÕES ·
+        # FRITAS · COMBO" se lê como um caminho, do grupo maior para o menor.
+        # Usar `/` para a hierarquia e `·` para a etiqueta daria duas
+        # pontuações numa linha de 9px que já é a menor da tela.
+        partes = [categoria]
+        if produto.subcategoria:
+            partes.append(produto.subcategoria)
+        if produto.is_combo:
+            partes.append("COMBO")
         linhas.append(
             _LinhaProduto(
                 produto_id=produto.id,
@@ -185,7 +208,8 @@ def _instantaneo(produtos: list[Produto]) -> list[_LinhaProduto]:
                 preco=produto.preco,
                 preco_texto=formatar_reais(produto.preco),
                 categoria=categoria,
-                metadados=metadados.upper(),
+                subcategoria=produto.subcategoria,
+                metadados=" · ".join(partes).upper(),
                 imagem_path=produto.imagem_path,
             )
         )

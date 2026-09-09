@@ -603,6 +603,65 @@ def construir_qss_app(t: dict[str, str]) -> str:
       padding: 3px 10px;
       margin: 0px;
     }}
+
+    /* ---------- Sub-modelo do produto (§9.8, `views/cardapio_view.py`) ----
+       Tres pecas do mesmo assunto: o SELO ao lado do nome na tabela, o CAMPO
+       do modal de cadastro e as PILULAS (sugestao no modal, filtro no painel).
+
+       O selo e de proposito menor e mais apagado que o `badgeCombo` logo
+       acima: COMBO muda o que o item E; sub-modelo so diz onde ele fica no
+       cardapio. Se os dois tivessem o mesmo peso, a coluna "Produto" viraria
+       duas etiquetas brigando com o nome. */
+
+    /* Este bloco e a UNICA declaracao da fonte do selo, e e de proposito:
+       `cardapio_view._criar_badge_submodelo` polia o rotulo e MEDE o texto com
+       a fonte que sai daqui, para encurta-lo antes que ele empurre o nome do
+       produto para fora da celula. Nao ha copia em Python para divergir --
+       mexer nos numeros abaixo muda a medida junto. */
+    QLabel#badgeSubmodelo {{
+      background-color: {t['submodelo_badge_bg']};
+      border: 1px solid {t['submodelo_badge_borda']};
+      color: {t['submodelo_badge_texto']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      border-radius: 4px;
+      padding: 2px 7px;
+      margin: 0px;
+    }}
+
+    /* Input arredondado sobre a superficie rebaixada, com o anel do acento no
+       foco -- o mesmo desenho da busca do modal "Adicionar item", porque e a
+       mesma interacao (texto livre com sugestao ao lado). */
+    QLineEdit#campoSubmodelo {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 10px;
+      padding: 6px 12px;
+      color: {t['texto']};
+    }}
+    QLineEdit#campoSubmodelo:focus {{ border: 1px solid {t['acento']}; }}
+
+    /* Mesma pilula nos dois papeis. No modal de cadastro ela e SUGESTAO e
+       nunca fica marcada (clicar preenche o campo); no painel de produtos ela
+       e FILTRO e a ativa acende no acento -- o mesmo par de estados das
+       pilulas de categoria do modal "Adicionar item", de onde o desenho vem. */
+    QPushButton#pillSubmodelo {{
+      padding: 4px 11px;
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 11px;
+      color: {t['texto_fraco']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }}
+    QPushButton#pillSubmodelo:hover {{ color: {t['texto']}; }}
+    QPushButton#pillSubmodelo[ativa="true"] {{
+      background: {t['acento']};
+      border-color: {t['acento']};
+      color: {t['acento_texto']};
+    }}
     QLabel[variante="badge"] {{
       background: {t['sucesso']};
       color: white;

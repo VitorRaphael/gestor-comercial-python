@@ -388,6 +388,144 @@ def test_o_contexto_da_comanda_aparece_no_cabecalho(abrir):
 
 
 # ---------------------------------------------------------------------------
+# Sub-modelo (§9.8)
+# ---------------------------------------------------------------------------
+#
+# No balcão o sub-modelo tem UM trabalho: dizer, em um segundo, qual das
+# variações do mesmo tipo de item está destacada. Ele entra na linha de
+# metadados e na busca — e em nenhum outro lugar. Não há pílula de sub-modelo
+# aqui de propósito: o filtro em pílulas é por CATEGORIA, que é o eixo da
+# impressora, e uma segunda fileira custaria altura num cartão medido contra os
+# 728px úteis de um monitor de 768px.
+
+
+@pytest.fixture
+def cardapio_com_submodelo(uow):
+    """Uma categoria, três porções — duas do mesmo sub-modelo e uma solta."""
+    porcoes = uow.categorias.salvar(Categoria(nome="Porções"))
+    dados = [
+        ("Aipim", "20.00", "Fritas"),
+        ("Batata Frita", "18.00", "Fritas"),
+        ("Anel de Cebola", "12.00", None),
+    ]
+    return [
+        uow.produtos.salvar(
+            Produto(
+                nome=nome,
+                preco=Decimal(preco),
+                categoria_id=porcoes.id,
+                subcategoria=submodelo,
+            )
+        )
+        for nome, preco, submodelo in dados
+    ]
+
+
+@pytest.fixture
+def abrir_com_submodelo(qapp, cardapio_com_submodelo):
+    criados: list[AdicionarItemDialog] = []
+
+    def _abrir():
+        modal = AdicionarItemDialog(cardapio_com_submodelo, "Mesa 3", _Lancamentos())
+        criados.append(modal)
+        return modal
+
+    yield _abrir
+    for modal in criados:
+        modal.deleteLater()
+
+
+def _linha(modal: AdicionarItemDialog, indice: int):
+    return modal._lista.item(indice).data(Qt.ItemDataRole.UserRole)
+
+
+def test_o_submodelo_entra_nos_metadados_depois_da_categoria(abrir_com_submodelo):
+    """O exemplo do pedido: `Aipim — R$ 20,00 · Porções / Fritas`. Aqui o
+    caminho sai com o mesmo `·` que a linha já usava — duas pontuações
+    diferentes numa linha de 9px seriam ruído, não hierarquia."""
+    modal = abrir_com_submodelo()
+    _digitar(modal, "aipim")
+    modal._filtrar_agora()
+
+    linha = _linha(modal, 0)
+
+    assert linha.nome == "Aipim"
+    assert linha.metadados == "PORÇÕES · FRITAS"
+
+
+def test_produto_sem_submodelo_mostra_so_a_categoria(abrir_com_submodelo):
+    """A garantia do "não mudou nada": o cardápio de hoje inteiro está assim."""
+    modal = abrir_com_submodelo()
+    _digitar(modal, "cebola")
+    modal._filtrar_agora()
+
+    assert _linha(modal, 0).metadados == "PORÇÕES"
+
+
+def test_o_combo_continua_por_ultimo_na_linha(qapp, uow):
+    """Categoria, sub-modelo e COMBO na mesma linha: do grupo maior para o
+    menor, com a etiqueta de venda no fim."""
+    categoria = uow.categorias.salvar(Categoria(nome="Porções"))
+    combo = uow.produtos.salvar(
+        Produto(
+            nome="Combo Fritas",
+            preco=Decimal("15.00"),
+            categoria_id=categoria.id,
+            subcategoria="Fritas",
+            is_combo=True,
+        )
+    )
+    modal = AdicionarItemDialog([combo], "Mesa 1", _Lancamentos())
+
+    try:
+        assert _linha(modal, 0).metadados == "PORÇÕES · FRITAS · COMBO"
+    finally:
+        modal.deleteLater()
+
+
+def test_a_busca_acha_pelo_submodelo(abrir_com_submodelo):
+    """O pedido do §9.8, no caminho que o operador percorre: "fritas" traz as
+    duas porções desse sub-modelo, e a palavra não está no nome do Aipim."""
+    modal = abrir_com_submodelo()
+
+    _digitar(modal, "fritas")
+    modal._filtrar_agora()
+
+    assert sorted(_nomes(modal)) == ["Aipim", "Batata Frita"]
+
+
+def test_a_busca_pelo_submodelo_nao_vai_ao_banco(abrir_com_submodelo, uow):
+    """O sub-modelo não pode ter reaberto o caminho que o §9.4 fechou.
+
+    O instantâneo existe para a digitação não tocar o SQLAlchemy — e o commit
+    de um lançamento expira as instâncias, então ler `produto.subcategoria` na
+    tecla voltaria a bater no banco depois de cada item lançado. Aqui as
+    instâncias são expiradas de propósito e a busca segue funcionando: se ela
+    ainda dependesse do banco, o teste passaria mesmo assim, mas a contagem
+    abaixo denunciaria.
+    """
+    from sqlalchemy import event
+
+    modal = abrir_com_submodelo()
+    uow.session.expire_all()
+
+    consultas = {"n": 0}
+
+    def _contar(*_args, **_kwargs) -> None:
+        consultas["n"] += 1
+
+    event.listen(uow.session.bind, "before_cursor_execute", _contar)
+    try:
+        _digitar(modal, "fritas")
+        modal._filtrar_agora()
+    finally:
+        event.remove(uow.session.bind, "before_cursor_execute", _contar)
+
+    assert sorted(_nomes(modal)) == ["Aipim", "Batata Frita"]
+    assert consultas["n"] == 0, f"a busca por sub-modelo foi ao banco {consultas['n']}x"
+
+
+# ---------------------------------------------------------------------------
 # O cartão continua cabendo na tela
 # ---------------------------------------------------------------------------
 

@@ -196,6 +196,21 @@ TEMA_ESCURO: dict[str, str] = {
     "badge_desativado_texto": "#fafaf9",
     "badge_combo_bg": "#f59e0b",
     "badge_combo_texto": "#1c1917",
+    # ---- Sub-modelo do produto (§9.8) ----
+    # Familia PROPRIA, e nao `badge_combo_*` nem `badge_icone_*` emprestados.
+    # A licao e a mesma do §9.5, onde o badge de despesa e o link de pendencias
+    # tinham pegado o ciano de mesa ocupada emprestado: coincidir de hex hoje
+    # nao e significar a mesma coisa. COMBO e uma propriedade de VENDA (o item
+    # e composto por outros), o ambar dele grita de proposito; sub-modelo e
+    # organizacao de catalogo e tem que ser o selo mais quieto da linha -- ele
+    # aparece ao lado do nome do produto e nao pode competir com ele.
+    #
+    # Sem cor de marca: fundo levemente elevado e texto atenuado, o mesmo tom
+    # de "carimbo" que o app ja usa nos eyebrows. O sub-modelo informa, nao
+    # alerta.
+    "submodelo_badge_bg": "#26251F",
+    "submodelo_badge_borda": "rgba(255, 255, 255, 0.07)",
+    "submodelo_badge_texto": "#A8A29E",
     "campo_erro_texto": "#f43f5e",
     "campo_erro_bg": "#fdecea",
     # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`,
@@ -415,6 +430,13 @@ TEMA_CLARO: dict[str, str] = {
     "badge_desativado_texto": "#64748B",
     "badge_combo_bg": "#F59E0B",
     "badge_combo_texto": "#FFFFFF",
+    # Ver o comentario gemeo em TEMA_ESCURO: familia propria, o selo mais
+    # quieto da linha. No claro o par sai do cinza-pedra (o mesmo caminho de
+    # `badge_desativado_*` aqui), com borda um degrau acima do fundo para o
+    # selo ter contorno sobre a linha branca da tabela.
+    "submodelo_badge_bg": "#EFEDE7",
+    "submodelo_badge_borda": "#DAD6CC",
+    "submodelo_badge_texto": "#6B7280",
     "campo_erro_texto": "#DC2626",
     "campo_erro_bg": "#FEE2E2",
     # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`,

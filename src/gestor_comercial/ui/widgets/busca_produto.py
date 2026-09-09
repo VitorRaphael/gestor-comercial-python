@@ -6,11 +6,13 @@ Filtra a cada tecla, ignora acento e caixa (`"agua"` acha `"Água Mineral"`) e
 é operável 100% pelo teclado: `↑`/`↓` navegam, `Enter` confirma o item
 destacado, `Esc` limpa a busca (ou fecha, se já estiver vazia) — o operador
 não pode depender do mouse com as mãos ocupadas no caixa.
+
+Desde o §9.8 a busca enxerga também o **sub-modelo**: digitar "artesanal" lista
+todos os lanches desse sub-modelo, mesmo que a palavra não apareça no nome de
+nenhum deles.
 """
 
 from __future__ import annotations
-
-import unicodedata
 
 from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QIcon
@@ -24,25 +26,38 @@ from PySide6.QtWidgets import (
 
 from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.domain.produto import Produto
+from gestor_comercial.services.texto import sem_acento as _normalizar
 from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
 
 _TAMANHO_MINIATURA = 40
 
 
-def _normalizar(texto: str) -> str:
-    """Casefold + remove diacríticos, para comparação tolerante a acento."""
-    sem_acento = unicodedata.normalize("NFKD", texto)
-    sem_acento = "".join(c for c in sem_acento if not unicodedata.combining(c))
-    return sem_acento.casefold()
+def _texto_buscavel(produto: object) -> str:
+    """Nome + sub-modelo, que é o que a digitação tem permissão de casar.
+
+    Recebe `object` porque a mesma função serve duas classes: o `Produto` do
+    SQLAlchemy (aqui e no "Adicionar componente" do Cardápio) e o
+    `_LinhaProduto` do modal "Adicionar item", que é um instantâneo sem banco
+    atrás. O `getattr` com padrão é o que permite isso sem as duas terem que
+    herdar de uma base comum só para a busca.
+
+    Categoria e preço ficam de FORA de propósito. Quem quer filtrar por
+    categoria tem as pílulas ao lado da busca, e um preço no meio do texto
+    buscável faria digitar "12" trazer o cardápio inteiro pelo "R$ 12,00" de
+    dez itens — busca que traz tudo é busca que não serve.
+    """
+    subcategoria = getattr(produto, "subcategoria", None) or ""
+    return f"{produto.nome} {subcategoria}"
 
 
 def filtrar_produtos(produtos: list[Produto], termo: str) -> list[Produto]:
     """Filtra por substring tolerante a acento/caixa, palavra por palavra.
 
-    Cada palavra do termo digitado precisa aparecer em algum lugar do nome —
-    por isso `"coca cola k"` restringe para `"Coca-Cola KS"` mas já não casa
-    mais com `"Coca-Cola Lata"`.
+    Cada palavra do termo digitado precisa aparecer em algum lugar do nome ou
+    do sub-modelo — por isso `"coca cola k"` restringe para `"Coca-Cola KS"`
+    mas já não casa mais com `"Coca-Cola Lata"`, e `"artesanal"` traz os
+    lanches desse sub-modelo mesmo sem a palavra estar no nome de nenhum.
     """
     tokens = [_normalizar(t) for t in termo.split() if t]
     if not tokens:
@@ -50,7 +65,7 @@ def filtrar_produtos(produtos: list[Produto], termo: str) -> list[Produto]:
     return [
         produto
         for produto in produtos
-        if all(token in _normalizar(produto.nome) for token in tokens)
+        if all(token in _normalizar(_texto_buscavel(produto)) for token in tokens)
     ]
 
 
@@ -148,7 +163,13 @@ class BuscaProdutoWidget(QWidget):
     def _filtrar(self, termo: str) -> None:
         self._lista_resultados.clear()
         for produto in filtrar_produtos(self._produtos_ativos, termo):
-            texto = f"{produto.nome} — {formatar_reais(produto.preco)} — {produto.categoria.nome}"
+            # O sub-modelo entra colado na categoria, como um caminho: quem
+            # busca "artesanal" e recebe três lanches precisa VER por que eles
+            # vieram, senão o filtro parece ter trazido item errado.
+            setor = produto.categoria.nome
+            if produto.subcategoria:
+                setor = f"{setor} · {produto.subcategoria}"
+            texto = f"{produto.nome} — {formatar_reais(produto.preco)} — {setor}"
             if produto.is_combo:
                 texto += "  [COMBO]"
             item = QListWidgetItem(texto)

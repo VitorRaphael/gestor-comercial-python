@@ -1003,3 +1003,219 @@ def test_excluir_impressora_inexistente(cardapio):
 def test_excluir_impressora_exige_gerente(cardapio, como_atendente):
     with pytest.raises(AcessoNegadoError):
         cardapio.excluir_impressora(9999)
+
+
+# ----------------------------------------------------------------------
+# Sub-modelo (§9.8)
+# ----------------------------------------------------------------------
+#
+# O sub-modelo é a subdivisão DENTRO da categoria — "Lanches" se subdivide em
+# "Artesanal", "Podrão", "Combos". Os testes abaixo cobrem as três coisas que
+# fariam a subdivisão não servir para nada:
+#
+# 1. **a regra de ouro** — sub-modelo não é impressão. Cadastrar ou editar um
+#    não pode encostar no vínculo de impressora que já existe (o roteamento de
+#    verdade é conferido em `test_impressao_service.py`);
+# 2. **um grupo, e não dois** — "podrao" digitado numa categoria que já tem
+#    "Podrão" tem que cair no MESMO grupo. Sem isso o cardápio ganha dois
+#    blocos com o mesmo nome e nenhuma tela consegue juntá-los de volta;
+# 3. **opcional de verdade** — em branco é NULL, e o produto continua
+#    funcionando como sempre funcionou.
+
+
+def test_criar_produto_sem_submodelo_fica_nulo(cardapio, categoria):
+    """O estado da maioria do cardápio, e o que não pode ter mudado."""
+    novo = cardapio.criar_produto("Água", Decimal("5.00"), categoria.id)
+
+    assert novo.subcategoria is None
+
+
+def test_criar_produto_guarda_o_submodelo_aparado(cardapio, categoria):
+    novo = cardapio.criar_produto(
+        "X Podrão", Decimal("12.00"), categoria.id, subcategoria="  Podrão  "
+    )
+
+    assert novo.subcategoria == "Podrão"
+
+
+@pytest.mark.parametrize("digitado", ["", "   ", None])
+def test_submodelo_em_branco_vira_nulo(cardapio, categoria, digitado):
+    """Campo flexível: vazio não pode virar string vazia no banco, senão "sem
+    sub-modelo" passaria a ser um sub-modelo chamado ""."""
+    novo = cardapio.criar_produto(
+        "Água", Decimal("5.00"), categoria.id, subcategoria=digitado
+    )
+
+    assert novo.subcategoria is None
+
+
+def test_submodelo_colapsa_espaco_repetido(cardapio, categoria):
+    """"Lanche   Artesanal" e "Lanche Artesanal" são o mesmo grupo, e o que é
+    gravado é a forma limpa — senão as duas grafias virariam duas pílulas."""
+    novo = cardapio.criar_produto(
+        "X Tudo", Decimal("16.00"), categoria.id, subcategoria="Lanche   Artesanal"
+    )
+
+    assert novo.subcategoria == "Lanche Artesanal"
+
+
+def test_submodelo_adota_a_grafia_que_a_categoria_ja_usa(cardapio, categoria):
+    """O caso que existe para não haver dois grupos com o mesmo nome.
+
+    O gerente digitou "Podrão" no primeiro item e "podrao" no segundo, sem
+    clicar na pílula de sugestão. Os dois têm que cair no mesmo grupo, com a
+    grafia que já estava lá.
+    """
+    cardapio.criar_produto("X Podrão", Decimal("12.00"), categoria.id, subcategoria="Podrão")
+
+    segundo = cardapio.criar_produto(
+        "X Podrão Duplo", Decimal("16.00"), categoria.id, subcategoria="podrao"
+    )
+
+    assert segundo.subcategoria == "Podrão"
+    assert cardapio.listar_subcategorias(categoria.id) == ["Podrão"]
+
+
+def test_submodelo_novo_mantem_a_grafia_digitada(cardapio, categoria):
+    """A outra metade: sem equivalente na categoria, quem manda é a digitação."""
+    cardapio.criar_produto("X Podrão", Decimal("12.00"), categoria.id, subcategoria="Podrão")
+
+    novo = cardapio.criar_produto(
+        "X Artesanal", Decimal("22.00"), categoria.id, subcategoria="Artesanal"
+    )
+
+    assert novo.subcategoria == "Artesanal"
+    assert cardapio.listar_subcategorias(categoria.id) == ["Artesanal", "Podrão"]
+
+
+def test_a_grafia_de_uma_categoria_nao_vaza_para_outra(cardapio, categoria):
+    """Sub-modelo é subdivisão DE UMA categoria: o mesmo rótulo em duas
+    categorias são duas etiquetas independentes, e a de uma não reescreve a
+    outra."""
+    outra = cardapio.criar_categoria("Porções")
+    cardapio.criar_produto("X Podrão", Decimal("12.00"), categoria.id, subcategoria="Podrão")
+
+    porcao = cardapio.criar_produto("Batata", Decimal("15.00"), outra.id, subcategoria="podrao")
+
+    assert porcao.subcategoria == "podrao"
+
+
+def test_atualizar_produto_troca_o_submodelo(cardapio, categoria, produto):
+    cardapio.atualizar_produto(
+        produto.id,
+        produto.nome,
+        produto.preco,
+        produto.custo,
+        categoria.id,
+        subcategoria="Artesanal",
+    )
+
+    assert produto.subcategoria == "Artesanal"
+
+
+def test_atualizar_produto_sem_submodelo_limpa_o_campo(cardapio, categoria, produto):
+    """Substituição total, a mesma regra da descrição e da foto: a tela sempre
+    manda o estado atual do formulário, inclusive o campo apagado."""
+    cardapio.atualizar_produto(
+        produto.id,
+        produto.nome,
+        produto.preco,
+        produto.custo,
+        categoria.id,
+        subcategoria="Artesanal",
+    )
+
+    cardapio.atualizar_produto(
+        produto.id, produto.nome, produto.preco, produto.custo, categoria.id
+    )
+
+    assert produto.subcategoria is None
+
+
+def test_mudar_de_categoria_confere_a_grafia_no_destino(cardapio, categoria, produto):
+    """Mover "Lanches/podrao" para "Porções", onde já existe "Podrão", tem que
+    adotar a grafia de PORÇÕES — é lá que ele vai agrupar de agora em diante."""
+    porcoes = cardapio.criar_categoria("Porções")
+    cardapio.criar_produto("Batata", Decimal("15.00"), porcoes.id, subcategoria="Podrão")
+
+    cardapio.atualizar_produto(
+        produto.id,
+        produto.nome,
+        produto.preco,
+        produto.custo,
+        porcoes.id,
+        subcategoria="podrao",
+    )
+
+    assert produto.categoria_id == porcoes.id
+    assert produto.subcategoria == "Podrão"
+
+
+def test_listar_subcategorias_nao_repete_e_vem_em_ordem(cardapio, categoria):
+    for nome, submodelo in [
+        ("X Podrão", "Podrão"),
+        ("X Podrão Duplo", "Podrão"),
+        ("X Artesanal", "Artesanal"),
+    ]:
+        cardapio.criar_produto(nome, Decimal("12.00"), categoria.id, subcategoria=submodelo)
+
+    assert cardapio.listar_subcategorias(categoria.id) == ["Artesanal", "Podrão"]
+
+
+def test_listar_subcategorias_ignora_produto_sem_submodelo(cardapio, categoria, produto):
+    """Produto solto não pode virar uma sugestão vazia na tela de cadastro."""
+    cardapio.criar_produto("X Podrão", Decimal("12.00"), categoria.id, subcategoria="Podrão")
+
+    assert cardapio.listar_subcategorias(categoria.id) == ["Podrão"]
+
+
+def test_listar_subcategorias_inclui_produto_desativado(cardapio, categoria):
+    """Quem desativou o item de verão ainda organiza o cardápio por ele — a
+    sugestão sumir faria o gerente redigitar, que é a divergência de grafia que
+    a sugestão existe para evitar."""
+    fora_de_epoca = cardapio.criar_produto(
+        "X Podrão de Verão", Decimal("12.00"), categoria.id, subcategoria="Podrão"
+    )
+    cardapio.desativar_produto(fora_de_epoca.id)
+
+    assert cardapio.listar_subcategorias(categoria.id) == ["Podrão"]
+
+
+def test_listar_subcategorias_so_da_categoria_pedida(cardapio, categoria):
+    outra = cardapio.criar_categoria("Bebidas")
+    cardapio.criar_produto("X Podrão", Decimal("12.00"), categoria.id, subcategoria="Podrão")
+    cardapio.criar_produto("Coca Lata", Decimal("8.00"), outra.id, subcategoria="Refrigerante")
+
+    assert cardapio.listar_subcategorias(categoria.id) == ["Podrão"]
+    assert cardapio.listar_subcategorias(outra.id) == ["Refrigerante"]
+
+
+def test_listar_subcategorias_nao_exige_gerente(cardapio, categoria, como_atendente):
+    """Leitura de catálogo, igual a `listar_produtos`: quem lança item na
+    comanda precisa dela na tela."""
+    assert cardapio.listar_subcategorias(categoria.id) == []
+
+
+def test_o_submodelo_nao_mexe_na_categoria_nem_na_impressora(cardapio, categoria):
+    """A REGRA DE OURO, no nível do cadastro.
+
+    O roteamento de verdade é conferido em `test_impressao_service.py`; aqui o
+    que se prova é que cadastrar e editar sub-modelo não encosta no vínculo de
+    impressão que já existia — nenhuma impressora precisa ser reconfigurada por
+    causa desta funcionalidade.
+    """
+    impressora = cardapio.criar_impressora("Cozinha")
+    cardapio.associar_impressora(categoria.id, impressora.id)
+
+    novo = cardapio.criar_produto(
+        "X Podrão", Decimal("12.00"), categoria.id, subcategoria="Podrão"
+    )
+    cardapio.atualizar_produto(
+        novo.id, novo.nome, novo.preco, novo.custo, categoria.id, subcategoria="Artesanal"
+    )
+
+    assert novo.categoria_id == categoria.id
+    assert novo.categoria.impressora_id == impressora.id
+    assert [c.id for c in cardapio.listar_categorias_da_impressora(impressora.id)] == [
+        categoria.id
+    ]

@@ -6,6 +6,12 @@ ImpressoraService.java (§3.2, §3.3 e §3.12 da arquitetura). Produto tem
 `gestor_comercial.services.imagem_service`), nunca o caminho absoluto nem o
 arquivo original — a compressão acontece na UI antes de chamar este service.
 
+Produto tem também `subcategoria` opcional, o **sub-modelo** do §9.8: a
+subdivisão de catálogo dentro da categoria ("Lanches" → "Artesanal", "Podrão",
+"Combos"). É organização e nada mais — quem manda no roteamento do cupom
+continua sendo a categoria, via `produto.categoria.impressora`, e este service
+não tem um único caminho em que o sub-modelo toque em impressora.
+
 Cadastrar, editar, desativar e excluir são ações administrativas (§3.1) e
 exigem gerente. Listar e buscar não exigem: o atendente precisa do cardápio
 aberto na tela o tempo todo para lançar item na comanda.
@@ -31,6 +37,7 @@ from gestor_comercial.repository.unit_of_work import UnitOfWork
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
 from gestor_comercial.services.exceptions import RecursoNaoEncontradoError, RegraDeNegocioError
+from gestor_comercial.services.texto import chave_de_agrupamento
 from gestor_comercial.services.transacao import transacional
 
 # Abaixo de 20 colunas não cabe nem o nome do item; acima de 96 não existe
@@ -170,6 +177,7 @@ class CardapioService:
         descricao: str | None = None,
         is_combo: bool = False,
         imagem_path: str | None = None,
+        subcategoria: str | None = None,
     ) -> Produto:
         self.auth.exigir_gerente()
         nome_limpo = self._texto_obrigatorio(nome, "Informe o nome do produto.")
@@ -186,10 +194,19 @@ class CardapioService:
             ativo=True,
             is_combo=bool(is_combo),
             imagem_path=self._imagem_path_limpo(imagem_path),
+            subcategoria=self._subcategoria_canonica(subcategoria, categoria.id),
         )
         self.uow.produtos.salvar(produto)
         self.uow.commit()
         return produto
+
+    def listar_subcategorias(self, categoria_id: int) -> list[str]:
+        """Os sub-modelos já usados nesta categoria (§9.8).
+
+        Não exige gerente, pelo mesmo motivo de `listar_produtos`: é leitura de
+        catálogo, e quem lança item na comanda precisa dela na tela.
+        """
+        return self.uow.produtos.listar_subcategorias(categoria_id)
 
     def listar_produtos(self) -> list[Produto]:
         return self.uow.produtos.listar_todos()
@@ -212,6 +229,7 @@ class CardapioService:
         categoria_id: int,
         descricao: str | None = None,
         imagem_path: str | None = None,
+        subcategoria: str | None = None,
     ) -> Produto:
         self.auth.exigir_gerente()
         produto = self.buscar_produto(produto_id)
@@ -230,6 +248,11 @@ class CardapioService:
         # Substituição total, igual ao resto do formulário: a tela sempre manda
         # o estado atual da imagem (inclusive None, quando o gerente remove).
         produto.imagem_path = self._imagem_path_limpo(imagem_path)
+        # Mesma regra de substituição total, e a canonização olha para a
+        # categoria de DESTINO: mover um produto de "Lanches/Podrão" para
+        # "Porções" faz o sub-modelo ser conferido contra os de "Porções", que
+        # é onde ele vai passar a agrupar.
+        produto.subcategoria = self._subcategoria_canonica(subcategoria, categoria.id)
         self.uow.produtos.salvar(produto)
         self.uow.commit()
         return produto
@@ -711,6 +734,39 @@ class CardapioService:
         if not isinstance(descricao, str):
             return None
         return descricao.strip() or None
+
+    def _subcategoria_canonica(self, subcategoria: str | None, categoria_id: int) -> str | None:
+        """Limpa o sub-modelo e adota a grafia que a categoria já usa (§9.8).
+
+        Campo em branco é `None`, sem impacto nenhum: produto sem sub-modelo é
+        o estado da maioria do cardápio, e a tela inteira funciona como sempre
+        funcionou.
+
+        A parte que importa é a segunda. O sub-modelo não é uma tabela — é
+        texto livre — e o que agrupa dois produtos é a **string ser a mesma**.
+        Sem esta função, o gerente que digita "podrao" numa categoria onde já
+        existe "Podrão" cria um segundo grupo, e o cardápio passa a ter dois
+        blocos com o mesmo nome que ninguém consegue juntar de volta pela tela.
+        As pílulas de sugestão do modal reduzem a chance disso, mas só cobrem
+        quem clica na sugestão em vez de digitar.
+
+        Então a comparação ignora acento, caixa e espaço repetido, e o valor
+        gravado é o que a categoria **já tinha**. Quem digita "podrao" onde já
+        existe "Podrão" grava "Podrão" — a etiqueta não vira uma segunda.
+
+        A grafia nova só vale quando não há equivalente na categoria: aí é um
+        sub-modelo novo mesmo, e é a digitação do gerente que manda.
+        """
+        if not isinstance(subcategoria, str):
+            return None
+        texto = " ".join(subcategoria.split())
+        if not texto:
+            return None
+        chave = chave_de_agrupamento(texto)
+        for existente in self.uow.produtos.listar_subcategorias(categoria_id):
+            if chave_de_agrupamento(existente) == chave:
+                return existente
+        return texto
 
     @staticmethod
     def _imagem_path_limpo(imagem_path: str | None) -> str | None:

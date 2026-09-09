@@ -2248,6 +2248,163 @@ e tocou em "Dinheiro", o dígito seguinte tem que ir para a contagem.
 
 ---
 
+### 9.8 Sub-modelo: a subdivisão dentro da categoria ✅ CONCLUÍDO — 2026-09-09
+
+Pedido do Vitor. O cardápio real tem **15 categorias e 113 produtos**, e dentro
+de "Lanches" convivem coisas que não se parecem: artesanal, podrão, cachorro
+quente. A categoria não pode ser quebrada em três — ela é o que decide a
+impressora — então o produto ganhou uma segunda etiqueta, **puramente
+organizacional**, dentro dela.
+
+#### A regra de ouro, e como ela está trancada
+
+> **O roteamento de impressão continua 100% amarrado à CATEGORIA.** O
+> sub-modelo é catálogo, não produção. Nenhuma impressora precisa ser
+> reconfigurada, e nenhum vínculo existente muda.
+
+Isso não é uma promessa no texto: é o comportamento que a suíte trava, em três
+alturas diferentes.
+
+| Onde | O que prova |
+|---|---|
+| `test_impressao_service.test_o_submodelo_nao_muda_a_impressora_de_destino` | Três lanches da mesma categoria com sub-modelos diferentes (e um sem nenhum) saem **num cupom só**, na impressora da categoria |
+| `test_impressao_service.test_o_roteamento_nao_le_o_submodelo_em_lugar_nenhum` | Varredura de código: a palavra `subcategoria` não pode aparecer no `impressao_service`. Mesma varredura que o §9.5 usou para o ciano emprestado |
+| `test_migracao_submodelo.test_o_vinculo_de_impressao_nao_e_tocado` | Depois do upgrade, `categorias.impressora_id` está onde estava |
+
+E, fora da suíte, a bancada: `tools/comparar_cupons.py` gerou os cupons antes e
+depois, e os dois arquivos são **idênticos linha a linha** (130 e 49 linhas).
+
+#### O modelo de dados, e por que não é uma tabela
+
+`produtos.subcategoria`, `TEXT NULL`, `String(80)` (o mesmo teto de
+`Categoria.nome` — nomeia a mesma coisa, um grupo do cardápio). Migração
+`e2c7b4f9a613`, que também cria o índice composto
+`idx_produtos_categoria_sub (categoria_id, subcategoria)`.
+
+Uma FK para uma tabela `subcategorias` exigiria CRUD, tela, status, e
+tratamento de órfão — para não guardar dado nenhum além do próprio nome.
+Sub-modelo não tem impressora, não tem status e não tem regra: ele agrupa. O
+preço de ser texto livre é a **divergência de grafia**, e é ela que a próxima
+seção resolve.
+
+O índice é composto porque toda leitura de sub-modelo acontece **dentro de uma
+categoria**. Medido no banco de verdade, com o cardápio real:
+
+```
+EXPLAIN QUERY PLAN
+  SELECT DISTINCT subcategoria FROM produtos
+   WHERE categoria_id = 1 AND subcategoria IS NOT NULL
+  -> SEARCH produtos USING COVERING INDEX idx_produtos_categoria_sub
+```
+
+`COVERING INDEX`: a consulta que monta as sugestões do cadastro e as pílulas de
+filtro é respondida **sem abrir uma linha de produto**.
+
+#### "podrao" e "Podrão" são o mesmo grupo
+
+O que agrupa dois produtos é a string ser a mesma. As pílulas de sugestão
+reduzem a chance de divergência, mas só cobrem quem clica em vez de digitar — e
+quem digita "podrao" numa categoria que já tem "Podrão" criaria um **segundo
+grupo com o mesmo nome**, que nenhuma tela consegue juntar de volta.
+
+`CardapioService._subcategoria_canonica` fecha isso: a comparação ignora acento,
+caixa e espaço repetido, e o valor gravado é **o que a categoria já usava**.
+Grafia nova só vale quando não há equivalente ali — aí é sub-modelo novo mesmo,
+e manda a digitação. A conferência é por categoria: o mesmo rótulo em duas
+categorias são duas etiquetas independentes.
+
+A normalização saiu para `services/texto.py` porque a **busca** precisa da mesma
+regra, e as duas camadas não podem responder diferente — o dia em que uma
+passasse a ignorar hífen e a outra não, o sub-modelo agrupado numa tela
+apareceria separado na outra, sem erro nenhum para explicar. O `_normalizar` do
+`busca_produto` passou a ser um apelido do de lá.
+
+#### O que apareceu em cada tela
+
+| Tela | O que ganhou |
+|---|---|
+| **Cardápio**, cadastro de produto | Campo "Sub-modelo" (opcional, input arredondado sobre `superficie_2`, anel do acento no foco) + faixa de pílulas com os sub-modelos **daquela categoria**. Clicar preenche, clicar de novo limpa, e a pílula acende junto com o campo — inclusive para quem digita à mão |
+| **Cardápio**, lista de produtos | Selo discreto ao lado do nome + faixa de filtro (TODOS / cada sub-modelo / SEM SUB-MODELO). A busca passou a casar contra nome **e** sub-modelo |
+| **Adicionar item** (lançamento) | O sub-modelo entra na linha de metadados: `LANCHES · PODRÃO`. A busca acha por ele — digitar "artesanal" traz os lanches desse sub-modelo, mesmo sem a palavra estar no nome de nenhum |
+
+**Nada disso aparece enquanto não houver sub-modelo cadastrado**, e isso é
+deliberado: a faixa de filtro some quando a categoria não tem nenhum, e o selo
+só é criado para quem tem. O cardápio de hoje não tem — e a bancada
+`tools/comparar_telas.py` confirma: as **24 telas continuam idênticas byte a
+byte** ao código anterior. A funcionalidade é invisível até o Vitor usá-la.
+
+##### O defeito que só a renderização com dado real mostrou
+
+A suíte estava verde, e o selo estava errado. Com o sub-modelo "Cachorro
+Quente", ele crescia até o `QLabel` do nome — que corta **sem reticências** — e
+"Cachorro Quente Linguiça" aparecia como "Cachorro Quente Lin", sem nada na tela
+dizendo que faltava texto. O nome do produto é o dado; o sub-modelo é a dica, e
+é a dica que encurta.
+
+A correção teve duas armadilhas, e as duas custaram uma renderização cada:
+
+1. **`QFontMetrics.elidedText` ignora o `letterSpacing`.** Ele devolveu
+   `"CACHORRO Q…"` para um teto de 76px, e o texto devolvido ocupava 88px — o
+   selo saía com a **primeira** letra cortada, pior que o corte original. O
+   encurtamento passou a ser um laço sobre `horizontalAdvance`, que respeita o
+   espaçamento;
+2. **fonte de QSS vence `setFont`.** Medir com um `QFont()` montado em Python
+   media a `Segoe UI`; quem **pinta** é o QSS, com a `Archivo Black` da marca,
+   ~20% mais larga na mesma altura de 9px. A solução foi `ensurePolished()` e
+   medir a fonte do próprio rótulo: quem pinta e quem mede viraram o mesmo
+   objeto, e não há gêmeo para divergir.
+
+O teste que tranca isso precisou de **duas** asserções, e a segunda é a que
+importa: cortar demais também cabe no teto. Ele exige que o selo use toda a
+largura disponível (devolver uma letra tem que estourar o teto) e roda com a
+fonte da marca registrada — sem ela, a plataforma `offscreen` mede outra coisa e
+o teste passaria verde sem ter olhado, exatamente como no §9.5.
+
+#### `DadosProduto`: a tupla de seis virou sete, e isso não podia
+
+`_ProdutoDialog.resultado()` devolvia uma tupla desempacotada por **ordem** em
+dois lugares. Com o sub-modelo ela iria a sete posições, e `descricao` e
+`subcategoria` são ambas `str | None`: trocar as duas passaria pelo
+interpretador e gravaria a descrição no lugar do sub-modelo, calado. Virou
+`DadosProduto`, no mesmo formato de `DadosFuncionario`, `DadosMovimento` e
+`DadosAbertura` — o diálogo devolve dados, a view chama o service.
+
+#### Decisões
+
+| Data | Decisão | Por quê |
+|---|---|---|
+| 2026-09-09 | Coluna `TEXT NULL` em `produtos`, e não tabela `subcategorias` | Sub-modelo não tem impressora, status nem regra. Uma FK custaria CRUD, tela e órfãos para guardar só um nome |
+| 2026-09-09 | Código diz `subcategoria`, tela diz "Sub-modelo" | O nome da coluna veio do pedido do Vitor, escrito em SQL; "Sub-modelo" é a palavra que ele usa para explicar a coisa. Renomear um dos dois seria escolher por ele |
+| 2026-09-09 | O service adota a grafia que a categoria já usa | Sugestão de tela só cobre quem clica. É no service que "podrao" e "Podrão" param de virar dois grupos |
+| 2026-09-09 | `listar_subcategorias` inclui produto **desativado** | Quem desativou o item de verão ainda organiza o cardápio por ele; a sugestão sumir faria o gerente redigitar — a divergência que ela existe para evitar |
+| 2026-09-09 | A faixa de filtro **some** quando a categoria não tem sub-modelo | Faixa vazia permanente é altura gasta numa tela já medida contra os 768px do monitor do food truck (`test_telas_cabem_na_tela.py`) |
+| 2026-09-09 | Trocar de categoria **solta** o filtro de sub-modelo | Filtrar Lanches por "Podrão" e clicar em Bebidas deixaria a tabela vazia, com a faixa escondida e nada explicando por que a categoria "não tem produto" |
+| 2026-09-09 | Família de token própria (`submodelo_badge_*`), sem cor de marca | A lição do §9.5. COMBO é propriedade de **venda** e o âmbar dele grita de propósito; sub-modelo é organização, e tem que ser o selo mais quieto da linha — ele fica ao lado do nome e não pode competir com ele |
+| 2026-09-09 | Separador `·` também entre categoria e sub-modelo | `LANCHES · PODRÃO · COMBO` se lê como um caminho, do grupo maior para o menor. Duas pontuações diferentes numa linha de 9px seriam ruído, não hierarquia |
+| 2026-09-09 | **Sem** pílula de sub-modelo no modal "Adicionar item" | O filtro em pílulas de lá é por categoria, que é o eixo da impressora e o que o operador tem na cabeça. Uma segunda fileira custaria altura num cartão medido contra os 728px úteis |
+| 2026-09-09 | O `seed.py` **não** classifica nada | O seed pula produto que já existe pelo nome, então classificar lá só valeria para instalação nova — a máquina do Vitor e uma máquina limpa ficariam com cardápios diferentes. A classificação é dele, na tela |
+| 2026-09-09 | `ensurePolished()` em vez de fonte gêmea em Python | Ver a armadilha nº 2 acima: gêmeo é coisa que diverge, e aqui a divergência produz reticência no lugar errado |
+
+##### Ficou de fora, e por quê
+
+- **Sub-modelo no cupom da cozinha.** A bobina de 32 colunas é para quem produz
+  o item, não para quem organiza o cardápio; mais uma linha de etiqueta
+  empurraria o pedido para fora do olhar de quem cozinha. Trancado por
+  `test_o_submodelo_nao_aparece_no_cupom_da_cozinha`.
+- **Relatórios por sub-modelo.** "Quanto vendeu de Podrão no mês" é uma pergunta
+  legítima e não estava no pedido. O dado já está gravado e indexado para quando
+  for.
+- **O N+1 do `_instantaneo`** (§9.4) continua onde estava: o sub-modelo entrou
+  no instantâneo justamente para não reabrir aquele caminho, e a suíte mede que
+  a busca por sub-modelo faz **0 consultas** em qualquer estado.
+
+**Suíte: 1241 (de 1179), 62 testes novos**, conferidos com 18 mutações — as 18
+reprovam. Bancadas: 24 telas idênticas byte a byte, 2 cupons idênticos linha a
+linha. Boot de ponta a ponta num banco novo (migrations + seed, duas vezes): 60
+mesas, 15 categorias, 113 produtos, 4 combos, WAL ligado.
+
+---
+
 ## 10. As melhores mudanças que o programa teve — em português de balcão
 
 > **Por que esta seção existe.** Todo o resto do documento é escrito para quem

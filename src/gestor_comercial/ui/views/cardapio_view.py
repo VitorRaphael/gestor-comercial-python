@@ -19,11 +19,12 @@ da tela "Impressoras".
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from decimal import Decimal
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
-from PySide6.QtGui import QKeySequence, QResizeEvent, QShortcut
+from PySide6.QtGui import QFont, QFontMetrics, QKeySequence, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -70,6 +71,7 @@ from gestor_comercial.ui.formatacao import (
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
+from gestor_comercial.ui.widgets.flow_layout import FlowLayout
 from gestor_comercial.ui.widgets.modais import descartar_modal, executar_modal
 from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
 from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
@@ -80,6 +82,44 @@ _COLUNAS_COMPONENTES = ["Componente", "Quantidade"]
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
 _ID_CATEGORIA = Qt.ItemDataRole.UserRole
+
+# Mesmo teto de `Produto.subcategoria` no banco. Cortar aqui, no campo, é o que
+# faz o limite ser visível: o `String(80)` do SQLite não recusa nada (ele não
+# checa tamanho de VARCHAR), então sem o `setMaxLength` o gerente digitaria um
+# rótulo comprido, ele seria gravado inteiro e estouraria o desenho da pílula.
+_LIMITE_SUBMODELO = 80
+
+# Chave da pílula "todos" e da "sem sub-modelo" na faixa de filtro do painel de
+# produtos. São `object()` e não strings porque QUALQUER string é um sub-modelo
+# válido: usar `""` para "todos" faria um sub-modelo chamado "" (impossível
+# hoje, mas a garantia é do service e não desta tela) colidir com o filtro.
+_SUBMODELO_TODOS = "\x00todos"
+_SUBMODELO_NENHUM = "\x00nenhum"
+
+
+@dataclass(frozen=True, slots=True)
+class DadosProduto:
+    """O que o modal de produto devolve — o formulário inteiro, de uma vez.
+
+    Era uma tupla de seis posições desempacotada em dois lugares
+    (`_ProdutosPainel.criar` e `.editar`). O sub-modelo do §9.8 seria a sétima,
+    e uma tupla de sete que se desempacota por ORDEM é o tipo de coisa que
+    quebra calada: trocar duas posições do mesmo tipo — `descricao` e
+    `subcategoria`, ambas `str | None` — passaria pelo interpretador e gravaria
+    a descrição no lugar do sub-modelo.
+
+    Mesma decisão (e mesmo formato) de `DadosFuncionario`, `DadosMovimento` e
+    `DadosAbertura`: o diálogo devolve dados, a view chama o service.
+    """
+
+    nome: str
+    preco: Decimal
+    custo: Decimal
+    categoria_id: int
+    descricao: str | None
+    imagem_path: str | None
+    subcategoria: str | None
+
 
 def _por_nome(itens: list) -> list:
     """Ordem alfabética (A-Z) case-insensitive, como pedido na tela."""
@@ -523,7 +563,13 @@ class _CategoriasPainel(QFrame):
 
 class _ProdutosPainel(QFrame):
     """Bloco da direita: busca + tabela de produtos da categoria selecionada,
-    com barra de ações contextual (Editar/Desativar/Excluir) no rodapé."""
+    com barra de ações contextual (Editar/Desativar/Excluir) no rodapé.
+
+    Entre a busca e a tabela mora a faixa de filtro por **sub-modelo** (§9.8),
+    que só aparece quando a categoria selecionada tem algum: numa categoria sem
+    sub-modelo — o estado de todo o cardápio de hoje — a tela é exatamente a
+    que sempre foi, sem uma faixa vazia comendo altura num monitor de 768px.
+    """
 
     alterado = Signal()
     produto_selecionado = Signal(object)  # Produto | None
@@ -540,6 +586,8 @@ class _ProdutosPainel(QFrame):
         self._mostrar_erro = mostrar_erro
         self._categoria: Categoria | None = None
         self._produtos: list[Produto] = []
+        self._submodelo_ativo: str = _SUBMODELO_TODOS
+        self._pills_submodelo: dict[str, QPushButton] = {}
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
@@ -563,6 +611,11 @@ class _ProdutosPainel(QFrame):
         self._campo_busca.textChanged.connect(self._filtrar)
         cabecalho.addWidget(self._campo_busca)
         layout.addLayout(cabecalho)
+
+        self._faixa_submodelos = QWidget()
+        self._fluxo_submodelos = FlowLayout(self._faixa_submodelos, spacing=6)
+        self._faixa_submodelos.setVisible(False)
+        layout.addWidget(self._faixa_submodelos)
 
         self.tabela = QTableWidget(0, len(_COLUNAS_PRODUTOS))
         self.tabela.setHorizontalHeaderLabels(_COLUNAS_PRODUTOS)
@@ -634,6 +687,8 @@ class _ProdutosPainel(QFrame):
                 [p for p in self._service.listar_produtos() if p.categoria_id == categoria.id]
             )
 
+        self._montar_pills_submodelo()
+
         limpar_tabela(self.tabela, linhas=len(self._produtos), preservar_selecao=True)
         for linha, produto in enumerate(self._produtos):
             definir_celula(self.tabela, linha, 0, _criar_celula_produto(produto))
@@ -648,10 +703,90 @@ class _ProdutosPainel(QFrame):
         self._filtrar(self._campo_busca.text())
         self._emitir_selecao()
 
+    def _montar_pills_submodelo(self) -> None:
+        """(Re)desenha a faixa de filtro a partir dos produtos já carregados.
+
+        Não vai ao banco: os sub-modelos saem da lista que `atualizar()` acabou
+        de montar. Assim a faixa e a tabela não podem discordar — uma pílula que
+        não filtra nada seria pior que pílula nenhuma.
+
+        A ordem é a de `listar_subcategorias` (alfabética), e "SEM SUB-MODELO"
+        vai por último, quando existe algum produto solto: numa categoria em
+        organização, ela é a lista de trabalho de quem está classificando.
+        """
+        while (item := self._fluxo_submodelos.takeAt(0)) is not None:
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+        self._pills_submodelo.clear()
+
+        presentes = sorted({p.subcategoria for p in self._produtos if p.subcategoria})
+        if not presentes:
+            # Categoria sem sub-modelo: some a faixa e o filtro volta ao neutro,
+            # senão uma categoria filtrada por "Podrão" esconderia a tabela
+            # inteira da categoria seguinte, sem nada na tela explicando.
+            self._submodelo_ativo = _SUBMODELO_TODOS
+            self._faixa_submodelos.setVisible(False)
+            return
+
+        pares = [(_SUBMODELO_TODOS, "TODOS")] + [(nome, nome.upper()) for nome in presentes]
+        if any(p.subcategoria is None for p in self._produtos):
+            pares.append((_SUBMODELO_NENHUM, "SEM SUB-MODELO"))
+
+        chaves = {chave for chave, _ in pares}
+        if self._submodelo_ativo not in chaves:
+            self._submodelo_ativo = _SUBMODELO_TODOS
+
+        for chave, rotulo in pares:
+            pill = QPushButton(rotulo)
+            pill.setObjectName("pillSubmodelo")
+            pill.setCursor(Qt.CursorShape.PointingHandCursor)
+            pill.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            pill.setProperty("submodelo", chave)
+            pill.setProperty("ativa", chave == self._submodelo_ativo)
+            pill.clicked.connect(self._submodelo_clicado)
+            self._fluxo_submodelos.addWidget(pill)
+            self._pills_submodelo[chave] = pill
+
+        self._faixa_submodelos.setVisible(True)
+
+    def _submodelo_clicado(self) -> None:
+        botao = self.sender()
+        if not isinstance(botao, QPushButton):
+            return
+        self._submodelo_ativo = str(botao.property("submodelo") or _SUBMODELO_TODOS)
+        for chave, pill in self._pills_submodelo.items():
+            ativa = chave == self._submodelo_ativo
+            # Só quem trocou de estado paga o recálculo de estilo — mesma
+            # economia das pílulas de categoria do modal "Adicionar item".
+            if pill.property("ativa") != ativa:
+                aplicar_propriedade(pill, "ativa", ativa)
+        self._filtrar(self._campo_busca.text())
+
+    def _combina_com_o_submodelo(self, produto: Produto) -> bool:
+        if self._submodelo_ativo == _SUBMODELO_TODOS:
+            return True
+        if self._submodelo_ativo == _SUBMODELO_NENHUM:
+            return produto.subcategoria is None
+        return produto.subcategoria == self._submodelo_ativo
+
     def _filtrar(self, texto: str) -> None:
+        """Busca digitada E pílula de sub-modelo valem juntas.
+
+        A busca casa contra nome **ou** sub-modelo: digitar "artesanal" acha os
+        lanches desse sub-modelo mesmo que nenhum tenha a palavra no nome — é o
+        mesmo comportamento do modal de lançamento (§9.8), e telas que buscam
+        diferente sobre o mesmo cardápio é como o gerente conclui que o produto
+        sumiu.
+        """
         alvo = texto.strip().casefold()
         for linha, produto in enumerate(self._produtos):
-            self.tabela.setRowHidden(linha, bool(alvo) and alvo not in produto.nome.casefold())
+            procurado = f"{produto.nome} {produto.subcategoria or ''}".casefold()
+            self.tabela.setRowHidden(
+                linha,
+                (bool(alvo) and alvo not in procurado) or not self._combina_com_o_submodelo(produto),
+            )
 
     def produto_atual(self) -> Produto | None:
         linha = self.tabela.currentRow()
@@ -676,22 +811,49 @@ class _ProdutosPainel(QFrame):
     def _categorias_ativas(self) -> list[Categoria]:
         return _por_nome(self._service.listar_categorias_ativas())
 
+    def _subcategorias_por_categoria(self, categorias: list[Categoria]) -> dict[int, list[str]]:
+        """Instantâneo das sugestões de sub-modelo, uma consulta por categoria.
+
+        Montado na ABERTURA do modal e não a cada troca do seletor: o cadastro
+        tem 15 categorias no cardápio real, e ir ao banco a cada clique no
+        `QComboBox` colocaria consulta no caminho de um gesto que o gerente
+        repete enquanto procura a categoria certa. Quinze `SELECT DISTINCT`
+        sobre um índice, uma vez, custam menos que isso — e o instantâneo já é
+        a decisão que o modal "Adicionar item" tomou pelo mesmo motivo (§9.4).
+        """
+        return {
+            categoria.id: self._service.listar_subcategorias(categoria.id)
+            for categoria in categorias
+        }
+
     def criar(self) -> None:
         categorias = self._categorias_ativas()
         if not categorias:
             self._mostrar_erro("Cadastre uma categoria ativa antes de criar um produto.")
             return
         categoria_inicial_id = self._categoria.id if self._categoria else None
-        modal = _ProdutoDialog("Novo produto", categorias, self, categoria_id_inicial=categoria_inicial_id)
+        modal = _ProdutoDialog(
+            "Novo produto",
+            categorias,
+            self,
+            categoria_id_inicial=categoria_inicial_id,
+            subcategorias_por_categoria=self._subcategorias_por_categoria(categorias),
+        )
         self._mostrar_erro("")
         try:
             while modal.exec() == QDialog.DialogCode.Accepted:
-                nome, preco, custo, categoria_id, descricao, imagem_path = modal.resultado()
-                if self._produto_duplicado(nome) and not self._confirmar_duplicidade(nome):
+                dados = modal.resultado()
+                if self._produto_duplicado(dados.nome) and not self._confirmar_duplicidade(dados.nome):
                     continue
                 try:
                     self._service.criar_produto(
-                        nome, preco, categoria_id, custo, descricao, imagem_path=imagem_path
+                        dados.nome,
+                        dados.preco,
+                        dados.categoria_id,
+                        dados.custo,
+                        dados.descricao,
+                        imagem_path=dados.imagem_path,
+                        subcategoria=dados.subcategoria,
                     )
                 except _ERROS_SERVICE as erro:
                     modal.mostrar_erro_servico(str(erro))
@@ -719,16 +881,27 @@ class _ProdutosPainel(QFrame):
             descricao_inicial=produto.descricao,
             imagem_path_inicial=produto.imagem_path,
             nome_produto_inicial=produto.nome,
+            subcategoria_inicial=produto.subcategoria,
+            subcategorias_por_categoria=self._subcategorias_por_categoria(categorias),
         )
         self._mostrar_erro("")
         try:
             while modal.exec() == QDialog.DialogCode.Accepted:
-                nome, preco, custo, categoria_id, descricao, imagem_path = modal.resultado()
-                if self._produto_duplicado(nome, ignorar_id=produto.id) and not self._confirmar_duplicidade(nome):
+                dados = modal.resultado()
+                if self._produto_duplicado(
+                    dados.nome, ignorar_id=produto.id
+                ) and not self._confirmar_duplicidade(dados.nome):
                     continue
                 try:
                     self._service.atualizar_produto(
-                        produto.id, nome, preco, custo, categoria_id, descricao, imagem_path=imagem_path
+                        produto.id,
+                        dados.nome,
+                        dados.preco,
+                        dados.custo,
+                        dados.categoria_id,
+                        dados.descricao,
+                        imagem_path=dados.imagem_path,
+                        subcategoria=dados.subcategoria,
                     )
                 except _ERROS_SERVICE as erro:
                     modal.mostrar_erro_servico(str(erro))
@@ -948,10 +1121,19 @@ class _CategoriaDialog(QDialog):
 
 
 class _ProdutoDialog(QDialog):
-    """Modal de criação/edição de produto: nome, preço, custo, categoria e descrição.
+    """Modal de criação/edição de produto: nome, preço, custo, categoria,
+    sub-modelo e descrição.
 
     Não tem campo "é combo": isso o service decide sozinho, a partir de o
     produto ter ou não componentes (ver `_ComboComponentesDialog`).
+
+    **Categoria é obrigatória; sub-modelo é opcional** — e a diferença entre os
+    dois não é só a validação. A categoria é o que decide em qual impressora o
+    item sai (`produto.categoria.impressora`, §3.12); o sub-modelo (§9.8) não
+    decide nada, só agrupa o catálogo. É por isso que a categoria continua
+    sendo um `QComboBox` fechado, com as opções que existem, e o sub-modelo é
+    texto livre com sugestões: inventar um sub-modelo novo é uma decisão de
+    organização e não pode exigir cadastro prévio.
     """
 
     def __init__(
@@ -967,9 +1149,18 @@ class _ProdutoDialog(QDialog):
         descricao_inicial: str | None = None,
         imagem_path_inicial: str | None = None,
         nome_produto_inicial: str = "",
+        subcategoria_inicial: str | None = None,
+        subcategorias_por_categoria: dict[int, list[str]] | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(titulo)
+
+        # Instantâneo dos sub-modelos por categoria, montado por quem abre o
+        # modal. O diálogo não conhece o `CardapioService` — é a mesma linha
+        # que `categorias` já seguia — e assim trocar de categoria no seletor
+        # troca as sugestões sem ir ao banco de novo a cada clique.
+        self._subcategorias_por_categoria = subcategorias_por_categoria or {}
+        self._pills_submodelo: list[QPushButton] = []
 
         # Estado interno da foto: só é gravado no banco quando o modal fecha
         # com OK. `_imagem_path_processada` é o nome do arquivo JÁ comprimido
@@ -1027,6 +1218,31 @@ class _ProdutoDialog(QDialog):
             if indice >= 0:
                 self._seletor_categoria.setCurrentIndex(indice)
         formulario.addRow("Categoria", self._seletor_categoria)
+
+        self._campo_submodelo = QLineEdit(subcategoria_inicial or "")
+        self._campo_submodelo.setObjectName("campoSubmodelo")
+        self._campo_submodelo.setMaxLength(_LIMITE_SUBMODELO)
+        self._campo_submodelo.setPlaceholderText("Opcional — ex.: Podrão, Artesanal")
+        # O acender/apagar da pílula segue o CAMPO, e não o clique: assim quem
+        # digita "Podrão" à mão vê a pílula acender do mesmo jeito de quem
+        # clicou nela, e a mensagem é sempre a mesma — "este item vai para este
+        # grupo". Sem isto o segundo clique (que limpa) não teria sinal nenhum
+        # na tela e a pílula pareceria travada.
+        self._campo_submodelo.textChanged.connect(self._ao_digitar_submodelo)
+        formulario.addRow("Sub-modelo", self._campo_submodelo)
+
+        # A faixa de sugestões nasce logo abaixo do campo, na mesma coluna, e
+        # some quando a categoria não tem sub-modelo nenhum: numa tela de
+        # cadastro, uma faixa vazia permanente é só altura gasta. Com o cardápio
+        # de hoje (nenhum sub-modelo cadastrado) ela fica escondida, e o modal
+        # tem exatamente a altura que sempre teve.
+        self._faixa_submodelos = QWidget()
+        self._fluxo_submodelos = FlowLayout(self._faixa_submodelos, spacing=6)
+        formulario.addRow("", self._faixa_submodelos)
+        # Sem `lambda` (§3.14): a troca de categoria troca as sugestões, e o
+        # que mudou sai do próprio seletor.
+        self._seletor_categoria.currentIndexChanged.connect(self._ao_trocar_categoria)
+        self._montar_sugestoes()
 
         self._campo_descricao = QLineEdit(descricao_inicial or "")
         self._campo_descricao.setPlaceholderText("Opcional")
@@ -1119,7 +1335,83 @@ class _ProdutoDialog(QDialog):
         )
         self._preview_imagem.setPixmap(pixmap)
 
-    def resultado(self) -> tuple[str, Decimal, Decimal, int, str | None, str | None]:
+    # ------------------------------------------------------------------
+    # Sugestões de sub-modelo (§9.8)
+    # ------------------------------------------------------------------
+
+    def _ao_trocar_categoria(self, _indice: int) -> None:
+        """As sugestões são por categoria, então trocar de categoria as troca.
+
+        O texto já digitado **não** é apagado junto: quem escolheu a categoria
+        errada e corrige não pode perder o sub-modelo que acabou de escrever. Se
+        a grafia dele já existir na categoria nova, quem resolve é o service
+        (`_subcategoria_canonica`), que adota a grafia de lá.
+        """
+        self._montar_sugestoes()
+
+    def _montar_sugestoes(self) -> None:
+        """(Re)desenha as pílulas da categoria atualmente selecionada.
+
+        Destrói as antigas de verdade, e não só as esconde: cada troca de
+        categoria passaria por aqui, e um `QPushButton` órfão por volta, numa
+        tela que fica aberta o turno inteiro, é o vazamento que o RNF do Celeron
+        proíbe. `takeAt` tira do layout, `setParent(None)` tira da posse do
+        widget e `deleteLater` marca o lado C++ para morrer no laço de eventos.
+        """
+        while (item := self._fluxo_submodelos.takeAt(0)) is not None:
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+        self._pills_submodelo.clear()
+
+        sugestoes = self._subcategorias_por_categoria.get(
+            self._seletor_categoria.currentData(), []
+        )
+        for sugestao in sugestoes:
+            pill = QPushButton(sugestao)
+            pill.setObjectName("pillSubmodelo")
+            pill.setCursor(Qt.CursorShape.PointingHandCursor)
+            # O texto vive na propriedade e o clique num método ligado: o
+            # `sender()` diz quem foi, sem `lambda` capturando `self` (§3.14).
+            pill.setProperty("submodelo", sugestao)
+            # Nasce já com o estado final, então o `setProperty` cru basta — o
+            # primeiro `polish` ainda não aconteceu (ver `widgets/estilo.py`).
+            pill.setProperty("ativa", sugestao == self._campo_submodelo.text().strip())
+            pill.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            pill.clicked.connect(self._sugestao_clicada)
+            self._fluxo_submodelos.addWidget(pill)
+            self._pills_submodelo.append(pill)
+
+        self._faixa_submodelos.setVisible(bool(sugestoes))
+
+    def _sugestao_clicada(self) -> None:
+        """Clicar preenche; clicar de novo na mesma limpa.
+
+        O segundo clique importa: sem ele, quem clica na pílula errada tem que
+        selecionar o texto e apagar à mão — e a alternativa comum (ignorar o
+        clique repetido) faz a pílula parecer travada.
+        """
+        botao = self.sender()
+        if not isinstance(botao, QPushButton):
+            return
+        escolhido = str(botao.property("submodelo") or "")
+        ja_estava = self._campo_submodelo.text().strip() == escolhido
+        # `setText` dispara `textChanged`, e é ele quem acende/apaga a pílula
+        # (`_ao_digitar_submodelo`). Repintar aqui também seria a mesma coisa
+        # feita duas vezes, e a segunda poderia divergir da primeira.
+        self._campo_submodelo.setText("" if ja_estava else escolhido)
+
+    def _ao_digitar_submodelo(self, texto: str) -> None:
+        """Acende a pílula que corresponde ao que está escrito no campo."""
+        escrito = texto.strip()
+        for pill in self._pills_submodelo:
+            ativa = str(pill.property("submodelo") or "") == escrito
+            # Só quem trocou de estado paga o recálculo de estilo.
+            if pill.property("ativa") != ativa:
+                aplicar_propriedade(pill, "ativa", ativa)
+
+    def resultado(self) -> DadosProduto:
         # Só é chamado depois de `_validar()` aprovar o preço, então o `or ZERO`
         # é cinto de segurança e não regra: se alguém inverter a ordem um dia, o
         # produto nasce com preço zero e visível na tela, em vez de o clique
@@ -1129,9 +1421,18 @@ class _ProdutoDialog(QDialog):
         # Custo em branco é legítimo (produto sem custo cadastrado ainda), e é
         # por isso que este usa o padrão zero em vez de `None`.
         custo = safe_decimal(self._campo_custo.text()) or ZERO
-        categoria_id = self._seletor_categoria.currentData()
-        descricao = self._campo_descricao.text().strip() or None
-        return nome, preco, custo, categoria_id, descricao, self._imagem_path_processada
+        return DadosProduto(
+            nome=nome,
+            preco=preco,
+            custo=custo,
+            categoria_id=self._seletor_categoria.currentData(),
+            descricao=self._campo_descricao.text().strip() or None,
+            imagem_path=self._imagem_path_processada,
+            # Só aparado aqui. Quem decide se "podrao" vira "Podrão" é o
+            # service, que é quem enxerga os sub-modelos já gravados — a tela
+            # tem só o instantâneo da abertura do modal.
+            subcategoria=self._campo_submodelo.text().strip() or None,
+        )
 
     def confirmar_remocao_de_imagem_trocada(self) -> None:
         """Apaga do disco a foto antiga que foi trocada/removida neste modal.
@@ -1272,11 +1573,15 @@ _TAMANHO_MINIATURA_PRODUTO = 28
 
 
 def _criar_celula_produto(produto: Produto) -> QWidget:
-    """Miniatura + nome do produto, coluna "Produto" da tabela do cardápio.
+    """Miniatura + nome do produto + badge do sub-modelo, coluna "Produto".
 
-    Sem isso, a única foto visível no fluxo inteiro era o preview dentro do
-    dialog de edição — impossível saber de relance quais itens já têm foto e
+    Sem a miniatura, a única foto visível no fluxo inteiro era o preview dentro
+    do dialog de edição — impossível saber de relance quais itens já têm foto e
     quais ainda dependem do placeholder (ver pedido do Vitor).
+
+    A badge do sub-modelo (§9.8) só é criada quando o produto tem um: produto
+    solto não ganha um selo "—" nem um espaço reservado, e uma categoria sem
+    sub-modelo nenhum desenha a célula exatamente como antes.
     """
     celula = QWidget()
     celula.setStyleSheet("background: transparent;")
@@ -1292,7 +1597,83 @@ def _criar_celula_produto(produto: Produto) -> QWidget:
     rotulo = QLabel(produto.nome)
     rotulo.setStyleSheet("background: transparent;")
     layout.addWidget(rotulo, stretch=1)
+
+    if produto.subcategoria:
+        layout.addWidget(_criar_badge_submodelo(produto.subcategoria), stretch=0)
     return celula
+
+
+# Teto do selo, e o nome do produto tem a preferência sobre ele.
+#
+# Não é um número de gosto: com um sub-modelo comprido ("Cachorro Quente") o
+# selo crescia até o `QLabel` do nome, que corta sem reticências — "Cachorro
+# Quente Linguiça" aparecia como "Cachorro Quente Lin", e nada na tela dizia
+# que faltava texto. Entre cortar o nome do produto em silêncio e encurtar a
+# etiqueta com um "…" visível, encurta-se a etiqueta: o nome é o dado, o
+# sub-modelo é a dica.
+_LARGURA_MAXIMA_BADGE_PX = 92
+# Os 7px de padding de cada lado, as duas bordas, e 2px de folga. A folga não é
+# margem de gosto: o `sizeHint()` do `QLabel` arredonda para cima o avanço que a
+# métrica devolve em inteiros, e sem ela o selo mais comprido saía com 93px
+# contra um teto de 92 — um pixel, que o `setMaximumWidth` corta, e o corte
+# reaparece de raspão bem no caso que estas linhas existem para resolver.
+_RECUO_INTERNO_BADGE_PX = 18
+
+def _encurtar_para_o_badge(texto: str, fonte: QFont, largura_px: int) -> str:
+    """Corta o texto com "…" até caber em `largura_px`, letter-spacing incluído.
+
+    Feito à mão, e não com `QFontMetrics.elidedText`, porque o `elidedText`
+    **ignora o `letterSpacing` da fonte** — e o selo tem 0,8px dele. Medido: o
+    `elidedText` devolveu "CACHORRO Q…" para um teto de 76px, e o texto que ele
+    devolveu ocupava 88px. `horizontalAdvance`, que é o que o laço abaixo usa,
+    respeita o espaçamento.
+
+    O laço é barato: sub-modelo é um rótulo de catálogo, tem uma ou duas
+    palavras, e este caminho só roda para os poucos que passam do teto.
+    """
+    metrica = QFontMetrics(fonte)
+    if metrica.horizontalAdvance(texto) <= largura_px:
+        return texto
+    cortado = texto
+    while cortado and metrica.horizontalAdvance(f"{cortado}…") > largura_px:
+        cortado = cortado[:-1]
+    return f"{cortado}…"
+
+
+def _criar_badge_submodelo(subcategoria: str) -> QLabel:
+    """O selo do sub-modelo, já encurtado para não empurrar o nome do produto.
+
+    O `ensurePolished()` no meio não é cerimônia: é ele que aplica a folha de
+    estilo ao rótulo e, com ela, a fonte com que o selo vai ser **pintado**.
+    Medir antes disso mede a fonte do sistema, e foi o que produziu o defeito na
+    primeira renderização com dado real — o QSS pinta com a fonte da marca
+    (`Archivo Black`), 20% mais larga que a `Segoe UI` do app na mesma altura de
+    9px. O texto era encurtado para um teto calculado na fonte errada, o
+    resultado ainda passava do selo, e ele saía com a PRIMEIRA letra cortada.
+
+    Medindo o rótulo já polido não existe fonte gêmea para divergir: quem pinta
+    e quem mede são o mesmo objeto.
+    """
+    texto = subcategoria.upper()
+
+    badge = QLabel()
+    # Cor e fonte vêm do QSS global pelo `objectName` (§3.15): pintar aqui
+    # congelaria o selo na paleta do boot, e ele seria a única coisa da tela a
+    # não acompanhar o alternador Claro/Escuro.
+    badge.setObjectName("badgeSubmodelo")
+    badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    badge.setMaximumWidth(_LARGURA_MAXIMA_BADGE_PX)
+    badge.ensurePolished()
+
+    encurtado = _encurtar_para_o_badge(
+        texto, badge.font(), _LARGURA_MAXIMA_BADGE_PX - _RECUO_INTERNO_BADGE_PX
+    )
+    badge.setText(encurtado)
+    if encurtado != texto:
+        # O que a reticência comeu continua alcançável — o gerente passa o
+        # mouse e lê o sub-modelo inteiro sem abrir o cadastro.
+        badge.setToolTip(subcategoria)
+    return badge
 
 
 def _criar_badge_tipo(is_combo: bool) -> QWidget:
