@@ -16,6 +16,11 @@ class Caixa(Base):
     valor_abertura: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     valor_contado_dinheiro: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     valor_contado_maquininha: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    # As duas anotações livres do turno, uma por ponta. A de abertura chegou
+    # com o modal do §9.7 ("fundo recebido do cofre"); a de fechamento já
+    # existia e sai no relatório impresso. Ambas opcionais: turno sem anotação
+    # é o caso comum.
+    observacao_abertura: Mapped[str | None] = mapped_column(String(500))
     observacao_fechamento: Mapped[str | None] = mapped_column(String(500))
     aberto_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     fechado_em: Mapped[datetime | None] = mapped_column(DateTime)

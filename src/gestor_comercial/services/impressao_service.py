@@ -895,6 +895,15 @@ class ImpressaoService:
                     negrito=True,
                 )
             )
+        # As duas anotações do turno, na ordem em que aconteceram. A de abertura
+        # é a que explica o fundo de troco declarado ("fundo recebido do
+        # cofre"), e é justamente na conferência da gaveta que alguém precisa
+        # dela — sem esta linha, ela ficaria gravada e nunca lida.
+        if caixa.observacao_abertura:
+            for linha in cupom.linha_secundaria(
+                caixa.observacao_abertura, largura, prefixo="Obs. abertura: "
+            ):
+                documento.append(BlocoTexto(linha))
         if caixa.observacao_fechamento:
             for linha in cupom.linha_secundaria(
                 caixa.observacao_fechamento, largura, prefixo="Obs: "

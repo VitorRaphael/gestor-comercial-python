@@ -880,7 +880,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QFrame#pinPadDot[estado="cheio"] {{ background: {t['pin_dot_cheio']}; }}
     QFrame#pinPadDot[estado="erro"] {{ background: {t['perigo']}; }}
 
-    QPushButton#pinPadTecla, QPushButton#movCaixaTecla {{
+    QPushButton#pinPadTecla, QPushButton#teclaNumerica {{
       padding: 0;
       background: {t['tecla_numerica_bg']};
       border: 1px solid {t['tecla_numerica_borda']};
@@ -890,9 +890,9 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-weight: 700;
     }}
     QPushButton#pinPadTecla:hover,
-    QPushButton#movCaixaTecla:hover {{ background: {t['tecla_numerica_hover']}; }}
+    QPushButton#teclaNumerica:hover {{ background: {t['tecla_numerica_hover']}; }}
     QPushButton#pinPadTecla:pressed,
-    QPushButton#movCaixaTecla:pressed {{ background: {t['tecla_numerica_pressed']}; }}
+    QPushButton#teclaNumerica:pressed {{ background: {t['tecla_numerica_pressed']}; }}
 
     QPushButton#pinPadConfirmar {{
       padding: 0 8px;
@@ -953,7 +953,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
        o Qt descarta o glifo -- o botao sai como um circulo vazio. Vale para o
        fechar e para os dois passos de quantidade. */
     QPushButton#addItemFechar, QPushButton#addItemPasso, QPushButton#funcDialogFechar,
-    QPushButton#movCaixaFechar {{
+    QPushButton#movCaixaFechar, QPushButton#turnoFechar {{
       padding: 0;
       background: {t['botao_circular_bg']};
       border: 1px solid {t['botao_circular_borda']};
@@ -961,10 +961,11 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-weight: 700;
     }}
     QPushButton#addItemFechar, QPushButton#funcDialogFechar,
-    QPushButton#movCaixaFechar {{ border-radius: 16px; font-size: 13px; }}
+    QPushButton#movCaixaFechar, QPushButton#turnoFechar {{ border-radius: 16px; font-size: 13px; }}
     QPushButton#addItemPasso {{ border-radius: 17px; font-size: 18px; }}
     QPushButton#addItemFechar:hover, QPushButton#addItemPasso:hover,
-    QPushButton#funcDialogFechar:hover, QPushButton#movCaixaFechar:hover {{
+    QPushButton#funcDialogFechar:hover, QPushButton#movCaixaFechar:hover,
+    QPushButton#turnoFechar:hover {{
       background: {t['botao_circular_hover']};
       color: {t['texto']};
     }}
@@ -1106,7 +1107,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QLabel#addItemAviso[estado="sucesso"] {{ color: {t['sucesso']}; }}
 
     QPushButton#addItemCancelar, QPushButton#funcDialogCancelar,
-    QPushButton#movCaixaCancelar {{
+    QPushButton#movCaixaCancelar, QPushButton#turnoCancelar {{
       padding: 9px 20px;
       background: {t['superficie_2']};
       border: 1px solid {t['borda']};
@@ -1116,7 +1117,8 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-weight: 700;
     }}
     QPushButton#addItemCancelar:hover, QPushButton#funcDialogCancelar:hover,
-    QPushButton#movCaixaCancelar:hover {{ background: {t['botao_circular_hover']}; }}
+    QPushButton#movCaixaCancelar:hover,
+    QPushButton#turnoCancelar:hover {{ background: {t['botao_circular_hover']}; }}
 
     QPushButton#addItemConfirmar, QPushButton#funcDialogConfirmar {{
       padding: 9px 22px;
@@ -1270,7 +1272,8 @@ def construir_qss_app(t: dict[str, str]) -> str:
       color: {t['texto']};
     }}
 
-    QFrame#funcDialogDivisor, QFrame#movCaixaDivisor {{ background: {t['borda']}; border: none; }}
+    QFrame#funcDialogDivisor, QFrame#movCaixaDivisor,
+    QFrame#turnoDivisor {{ background: {t['borda']}; border: none; }}
 
     /* ---------- Modal de sangria/reforco/despesa (`widgets/movimentacao_caixa_dialog.py`)
        Quarto modal em cartao do app, e por isso o quarto a NAO poder herdar o
@@ -1290,6 +1293,9 @@ def construir_qss_app(t: dict[str, str]) -> str:
        QWidget crus, e a regra generica `QWidget {{ background: bg_marca }}` la
        do topo os pintaria de cor de fundo do app por cima do cartao. */
     QWidget#movCaixaFaixa {{ background: transparent; }}
+    /* Mesmo motivo para o teclado compartilhado (`widgets/teclado_numerico.py`),
+       que também é um QWidget cru servindo de moldura para a grade de teclas. */
+    QWidget#tecladoNumerico {{ background: transparent; }}
 
     QFrame#movCaixaCard {{
       background: {t['superficie']};
@@ -1330,10 +1336,10 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background: transparent;
     }}
 
-    /* O visor e REBAIXADO em relacao ao cartao (ver `mov_visor_bg`): o numero
+    /* O visor e REBAIXADO em relacao ao cartao (ver `visor_valor_bg`): o numero
        e leitura, nao controle, e um degrau para cima o faria parecer botao. */
     QFrame#movCaixaVisor {{
-      background: {t['mov_visor_bg']};
+      background: {t['visor_valor_bg']};
       border: 1px solid {t['borda']};
       border-radius: 12px;
     }}
@@ -1431,6 +1437,217 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background: {t['pilula_disabled_bg']};
       border-color: {t['pilula_disabled_bg']};
       color: {t['pilula_disabled_texto']};
+    }}
+
+
+    /* ---------- Modais de abertura e fechamento de turno
+       (`widgets/cartao_de_turno.py` + os dois dialogos que herdam dele, §9.7)
+
+       Quinto e sexto modais em cartao do app, e os dois primeiros a dividirem
+       UMA familia de estilo: a moldura e literalmente a mesma classe base, e o
+       que separa abrir de fechar entra por `[papel="..."]` nos DOIS lugares
+       onde a cerimonia tem cor -- o badge do cabecalho e o botao que grava. O
+       resto (visor, contagens, diferenca, campo, teclado, rodape) e identico
+       nos dois e e declarado uma vez so. O X, o Cancelar, as teclas do numpad e
+       o divisor nem aparecem aqui: ja estao nas familias que os quatro modais
+       anteriores usam. */
+
+    QDialog#turnoDialog {{ background: transparent; }}
+    /* QWidget cru herdaria `QWidget {{ background: bg_marca }}` do topo e
+       pintaria a cor de fundo do app por cima do cartao. */
+    QWidget#turnoGlifo, QWidget#turnoColuna, QWidget#turnoFaixa {{ background: transparent; }}
+
+    QFrame#turnoCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+
+    QFrame#turnoBadge {{ border-radius: 12px; border: 1px solid transparent; }}
+    QFrame#turnoBadge[papel="abertura"] {{
+      background: {t['caixa_abertura_tinta']};
+      border-color: {t['caixa_abertura_glifo']};
+    }}
+    QFrame#turnoBadge[papel="fechamento"] {{
+      background: {t['caixa_fechamento_tinta']};
+      border-color: {t['caixa_fechamento_glifo']};
+    }}
+
+    QLabel#turnoTitulo {{
+      color: {t['texto']};
+      font-size: 18px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#turnoSubtitulo {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QLabel#turnoRotulo, QLabel#turnoDica {{
+      color: {t['texto_fraquissimo']};
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+
+    /* O visor e REBAIXADO em relacao ao cartao (ver `visor_valor_bg`): o numero
+       e leitura, nao controle, e um degrau para cima o faria parecer botao. */
+    QFrame#turnoVisor {{
+      background: {t['visor_valor_bg']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+    }}
+    QLabel#turnoVisorRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
+    QLabel#turnoVisorValor {{
+      color: {t['texto']};
+      font-size: 28px;
+      font-weight: 700;
+      background: transparent;
+    }}
+
+    QPushButton#turnoAtalho {{
+      padding: 5px 14px;
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+      color: {t['texto']};
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    QPushButton#turnoAtalho:hover {{ background: {t['botao_circular_hover']}; }}
+
+    QFrame#turnoContexto {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+    }}
+    QLabel#turnoContextoTitulo {{
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel#turnoContextoTexto {{
+      color: {t['texto_fraco']};
+      font-size: 11px;
+      background: transparent;
+    }}
+
+    QLineEdit#turnoCampo {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: {t['texto']};
+      font-size: 13px;
+    }}
+
+    /* A linha de conferencia e um QFrame clicavel (ver `_LinhaDeContagem`):
+       tocar nela e o que aponta o teclado para aquela contagem. */
+    QFrame#turnoContagem {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+    }}
+    QLabel#turnoContagemTitulo {{
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel#turnoContagemEsperado {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      background: transparent;
+    }}
+    QLabel#turnoContagemValor {{
+      color: {t['texto']};
+      font-size: 17px;
+      font-weight: 700;
+      background: transparent;
+    }}
+
+    QFrame#turnoDiferenca {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+    }}
+    QLabel#turnoDiferencaValor {{
+      color: {t['texto']};
+      font-size: 17px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    /* Falta e a noticia ruim, sobra e um dado a explicar e zero e a noticia boa
+       -- tres leituras diferentes, e por isso tres cores e nao um numero com
+       sinal. `ciano_metrica` na sobra porque sobra e DADO a conferir (de onde
+       veio esse dinheiro?), nao erro. */
+    QLabel#turnoDiferencaValor[tom="falta"] {{ color: {t['perigo']}; }}
+    QLabel#turnoDiferencaValor[tom="exato"] {{ color: {t['sucesso']}; }}
+    QLabel#turnoDiferencaValor[tom="sobra"] {{ color: {t['ciano_metrica']}; }}
+
+    /* Botao fantasma de proposito: ele e o atalho que permite fechar o turno
+       sem contar a gaveta. Serve, mas nao convida. */
+    QPushButton#turnoPreencher {{
+      padding: 7px 10px;
+      background: transparent;
+      border: 1px solid {t['borda']};
+      border-radius: 8px;
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }}
+    QPushButton#turnoPreencher:hover {{
+      background: {t['superficie']};
+      color: {t['texto']};
+    }}
+
+    /* O anel de foco, nos tres lugares para onde o teclado pode estar
+       apontando. E o unico sinal que o operador tem de para onde vai o proximo
+       digito. */
+    QFrame#turnoVisor[ativa="true"],
+    QFrame#turnoContagem[ativa="true"],
+    QLineEdit#turnoCampo:focus {{ border: 1px solid {t['foco_teclado_anel']}; }}
+    QFrame#turnoContagem[ativa="true"] {{ background: {t['foco_teclado_tinta']}; }}
+    QFrame#turnoContagem:hover {{ border-color: {t['foco_teclado_anel']}; }}
+
+    QPushButton#turnoConfirmar {{
+      padding: 10px 22px;
+      border: 1px solid transparent;
+      border-radius: 18px;
+      font-size: 12px;
+      font-weight: 800;
+    }}
+    /* Abrir o caixa e a acao PRIMARIA da tela e usa o acento do app; fechar e a
+       unica destrutiva e usa vermelho proprio. Nenhum dos dois pede token novo
+       de "primario": o acento ja e esse papel em todo botao de confirmar do
+       sistema. */
+    QPushButton#turnoConfirmar[papel="abertura"] {{
+      background: {t['acento']};
+      border-color: {t['acento']};
+      color: {t['acento_texto']};
+    }}
+    QPushButton#turnoConfirmar[papel="abertura"]:hover {{
+      background: {t['acento_hover']};
+      border-color: {t['acento_hover']};
+    }}
+    QPushButton#turnoConfirmar[papel="fechamento"] {{
+      background: {t['caixa_fechamento_acao']};
+      border-color: {t['caixa_fechamento_acao']};
+      color: {t['caixa_fechamento_acao_texto']};
+    }}
+    QPushButton#turnoConfirmar[papel="fechamento"]:hover {{
+      background: {t['caixa_fechamento_acao_hover']};
+      border-color: {t['caixa_fechamento_acao_hover']};
     }}
 
     /* ---------- Tela de Impressoras ---------- */

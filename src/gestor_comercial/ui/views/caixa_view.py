@@ -9,19 +9,17 @@ aqui só se mostra o erro que o service levantar.
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
-    QFormLayout,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -34,7 +32,11 @@ from PySide6.QtWidgets import (
 from gestor_comercial.domain.caixa import Caixa
 from gestor_comercial.domain.enums import FormaPagamento, TipoMovimento
 from gestor_comercial.domain.movimento_caixa import MovimentoCaixa
-from gestor_comercial.services.caixa_service import CaixaService, ResumoCaixa
+from gestor_comercial.services.caixa_service import (
+    CaixaService,
+    ResumoCaixa,
+    periodo_do_turno,
+)
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
     NaoAutorizadoError,
@@ -42,9 +44,11 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 from gestor_comercial.services.impressao_service import ImpressaoService
-from gestor_comercial.ui.formatacao import formatar_reais, safe_decimal
+from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.widgets.abertura_caixa_dialog import AberturaCaixaDialog
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
+from gestor_comercial.ui.widgets.fechamento_caixa_dialog import FechamentoCaixaDialog
 from gestor_comercial.ui.widgets.layout_utils import limpar_layout
 from gestor_comercial.ui.widgets.modais import executar_modal
 from gestor_comercial.ui.widgets.movimentacao_caixa_dialog import (
@@ -58,8 +62,6 @@ from gestor_comercial.ui.widgets.estilo import repolir
 from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
 
 _COLUNAS_MOVIMENTOS = ["Quando", "Tipo", "Descrição", "Valor"]
-
-_ERRO_VALOR = "Valor inválido. Informe um valor em reais, como 50,00."
 
 # O rótulo do tipo ("Sangria") e a chave de estilo do badge ("sangria") moram
 # em `movimentacao_caixa_dialog.OPERACOES`, junto do título, do subtítulo e das
@@ -541,37 +543,60 @@ class CaixaView(QWidget):
     # ------------------------------------------------------------------
 
     def _abrir_caixa(self) -> None:
-        modal = _ValorDialog("Abrir caixa", "Valor de abertura", self)
+        """Abre o cartão do fundo de troco e manda ao service o que ele devolver.
+
+        Quem decide se PODE continua sendo o service: abertura exige gerente
+        (§3.1), valor negativo é recusado lá e turno anterior esquecido levanta
+        `TurnoAnteriorPendenteError` (§3.13) — todos aparecem na linha de erro
+        da tela, como antes. O que sumiu deste caminho foi a checagem de "valor
+        ilegível": o modal monta o valor em centavos pelo numpad, e não há mais
+        texto para `safe_decimal` recusar.
+        """
+        modal = AberturaCaixaDialog(self._turno_a_abrir(), self._nome_do_operador(), self)
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-        valor = modal.valor()
-        if valor is None:
-            self._label_erro.setText(_ERRO_VALOR)
-            return
+        dados = modal.resultado()
 
         self._label_erro.setText("")
         try:
-            self._caixa_service.abrir(valor)
+            self._caixa_service.abrir(dados.valor, observacao=dados.observacao)
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
         self.atualizar()
 
+    def _turno_a_abrir(self) -> str:
+        """"Turno da Noite" — o turno que está prestes a começar.
+
+        Deriva de `periodo_do_turno`, a mesma heurística de hora que
+        `identificacao_turno` usa para nomear um turno já existente (§3.1). Não
+        dá para chamar `identificacao_turno` aqui porque ela recebe um `Caixa`,
+        e neste ponto ele ainda não existe — é justamente o que o modal vai
+        criar.
+        """
+        return f"Turno da {periodo_do_turno(datetime.now())}"
+
     def _fechar_caixa(self) -> None:
+        """Abre o cartão de conferência e fecha o turno com o que ele devolver.
+
+        O `resumo` é lido ANTES de abrir o modal porque é dele que saem os dois
+        esperados que o operador confere (saldo da gaveta e total da
+        maquininha). É leitura, não gravação: quem apura de verdade continua
+        sendo o service, que recalcula tudo dentro de `fechar` — a prévia da
+        diferença que o modal mostra é conferência visual, não a conta gravada.
+        """
         if self._caixa_id is None:
             return
-        modal = _FecharCaixaDialog(self)
+        resumo = self._caixa_service.resumo(self._caixa_id)
+        modal = FechamentoCaixaDialog(resumo.saldo_esperado, resumo.total_maquininha, self)
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-        valor_contado_dinheiro, valor_contado_maquininha, observacao = modal.resultado()
-        if valor_contado_dinheiro is None or valor_contado_maquininha is None:
-            self._label_erro.setText(_ERRO_VALOR)
-            return
+        dados = modal.resultado()
 
         self._label_erro.setText("")
         try:
             self._caixa_service.fechar(
-                self._caixa_id, valor_contado_dinheiro, valor_contado_maquininha, observacao
+                self._caixa_id, dados.dinheiro, dados.maquininha, dados.observacao
             )
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
@@ -635,76 +660,6 @@ class CaixaView(QWidget):
         """
         usuario = self._caixa_service.auth.usuario_logado
         return usuario.nome if usuario is not None else None
-
-
-class _ValorDialog(QDialog):
-    """Modal simples de um único valor em reais (abertura do caixa)."""
-
-    def __init__(self, titulo: str, rotulo_campo: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(titulo)
-
-        layout = QVBoxLayout(self)
-        formulario = QFormLayout()
-
-        self._campo_valor = QLineEdit()
-        formulario.addRow(rotulo_campo, self._campo_valor)
-        layout.addLayout(formulario)
-
-        botoes = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        botoes.accepted.connect(self.accept)
-        botoes.rejected.connect(self.reject)
-        layout.addWidget(botoes)
-
-    def valor(self) -> Decimal | None:
-        """`None` quando o campo não é um valor legível — ver `safe_decimal`."""
-        return safe_decimal(self._campo_valor.text(), padrao=None)
-
-
-class _FecharCaixaDialog(QDialog):
-    """Modal de fechamento: valor contado na gaveta, na maquininha, e observação livre."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Fechar caixa")
-
-        layout = QVBoxLayout(self)
-        formulario = QFormLayout()
-
-        self._campo_valor_contado_dinheiro = QLineEdit()
-        formulario.addRow("Valor em Dinheiro", self._campo_valor_contado_dinheiro)
-
-        self._campo_valor_contado_maquininha = QLineEdit()
-        formulario.addRow("Valor de vendas na Maquininha", self._campo_valor_contado_maquininha)
-
-        self._campo_observacao = QLineEdit()
-        self._campo_observacao.setPlaceholderText("Opcional")
-        formulario.addRow("Observação", self._campo_observacao)
-
-        layout.addLayout(formulario)
-
-        botoes = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        botoes.button(QDialogButtonBox.StandardButton.Ok).setText("Fechar caixa")
-        botoes.accepted.connect(self.accept)
-        botoes.rejected.connect(self.reject)
-        layout.addWidget(botoes)
-
-    def resultado(self) -> tuple[Decimal | None, Decimal | None, str | None]:
-        # `padrao=None` nos dois: num fechamento de caixa, ler "não consegui
-        # entender o que ele contou" como "ele contou zero" inventaria uma
-        # diferença de caixa do tamanho do turno.
-        valor_contado_dinheiro = safe_decimal(
-            self._campo_valor_contado_dinheiro.text(), padrao=None
-        )
-        valor_contado_maquininha = safe_decimal(
-            self._campo_valor_contado_maquininha.text(), padrao=None
-        )
-        observacao = self._campo_observacao.text().strip() or None
-        return valor_contado_dinheiro, valor_contado_maquininha, observacao
 
 
 def _criar_card() -> tuple[QFrame, QVBoxLayout]:

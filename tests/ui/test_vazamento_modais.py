@@ -35,6 +35,8 @@ O contrato dos utilitários em si é testado em `test_modais.py`. Aqui é o app.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QDialog, QWidget
@@ -42,7 +44,9 @@ from PySide6.QtWidgets import QDialog, QWidget
 from gestor_comercial.domain.enums import TipoMovimento
 
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
+from gestor_comercial.ui.widgets.abertura_caixa_dialog import AberturaCaixaDialog
 from gestor_comercial.ui.widgets.adicionar_item_dialog import AdicionarItemDialog
+from gestor_comercial.ui.widgets.fechamento_caixa_dialog import FechamentoCaixaDialog
 from gestor_comercial.ui.widgets.funcionario_dialog import FuncionarioDialog
 from gestor_comercial.ui.widgets.movimentacao_caixa_dialog import MovimentacaoCaixaDialog
 from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
@@ -139,6 +143,37 @@ def test_movimentacao_de_caixa_nao_acumula(qapp, assentar):
     assert pai.findChildren(MovimentacaoCaixaDialog) == []
 
 
+def test_abertura_de_caixa_nao_acumula(qapp, assentar):
+    """Um diálogo por turno aberto. É o menos frequente do inventário — e
+    entra nele exatamente por isso: modal que abre uma vez por dia é o que
+    ninguém percebe segurando memória, porque o vazamento leva semanas para
+    aparecer numa máquina que fica ligada.
+
+    O comportamento completo está em `test_abertura_caixa_dialog.py`.
+    """
+    pai = QWidget()
+
+    _abrir_e_fechar(lambda p: AberturaCaixaDialog("Turno da Noite", "Gerente", p), pai)
+    assentar()
+
+    assert pai.findChildren(AberturaCaixaDialog) == []
+
+
+def test_fechamento_de_caixa_nao_acumula(qapp, assentar):
+    """Par do anterior, e o mais caro de errar: é o modal que encerra o turno.
+
+    O comportamento completo está em `test_fechamento_caixa_dialog.py`.
+    """
+    pai = QWidget()
+
+    _abrir_e_fechar(
+        lambda p: FechamentoCaixaDialog(Decimal("970.00"), Decimal("1600.00"), p), pai
+    )
+    assentar()
+
+    assert pai.findChildren(FechamentoCaixaDialog) == []
+
+
 def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, assentar, auth):
     """Rede larga: qualquer `QDialog` pendurado na view, de qualquer tipo.
 
@@ -155,10 +190,14 @@ def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, assentar, auth):
     _abrir_e_fechar(
         lambda p: MovimentacaoCaixaDialog(TipoMovimento.SANGRIA, "Gerente", p), pai, vezes=10
     )
+    _abrir_e_fechar(lambda p: AberturaCaixaDialog("Turno da Noite", "Gerente", p), pai, vezes=10)
+    _abrir_e_fechar(
+        lambda p: FechamentoCaixaDialog(Decimal("970.00"), Decimal("1600.00"), p), pai, vezes=10
+    )
     assentar()
 
     vivos = pai.findChildren(QDialog)
-    assert vivos == [], f"{len(vivos)} diálogos de 50 aberturas continuam na memória"
+    assert vivos == [], f"{len(vivos)} diálogos de 70 aberturas continuam na memória"
 
 
 def test_construir_sem_abrir_deixa_o_dialogo_preso_a_view(qapp, assentar):

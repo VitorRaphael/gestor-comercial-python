@@ -37,14 +37,15 @@ digitar `5`, `0`, `0`, `0` mostra `R$ 0,05` → `R$ 0,50` → `R$ 5,00` → `R$ 
 Isso apaga uma classe inteira de defeito que o modal antigo tinha: não existe
 mais "valor ilegível". `safe_decimal` continua existindo e continua certo, mas
 ele resolve o problema de **ler** o que foi digitado — e aqui não há o que ler,
-porque nunca houve texto. O `_ERRO_VALOR` da view deixou de ter como acontecer
-neste caminho (a abertura e o fechamento do caixa, que ainda são campos de
-texto, continuam precisando dele).
+porque nunca houve texto.
 
-O teto vem de `dinheiro.LIMITE`, não de um número escolhido aqui: é o mesmo
-`NUMERIC(10,2)` das colunas monetárias. Assim o numpad não consegue montar um
-valor que o service recusaria com `ValueError` — que, por não estar em
-`_ERROS_SERVICE`, subiria como estouro em vez de virar mensagem na tela.
+A conta e o teclado que a alimenta **não moram mais neste arquivo**: saíram
+para `teclado_numerico.py` no §9.7, quando a abertura e o fechamento do caixa
+ganharam o mesmo numpad e a quarta cópia do laço `novo = novo * 10 + dígito`
+ficaria pendurada em quatro telas que gravam dinheiro. O teto continua vindo de
+`dinheiro.LIMITE`, pelo mesmo motivo de sempre: assim o numpad não consegue
+montar um valor que o service recusaria com `ValueError` — que, por não estar
+em `_ERROS_SERVICE`, subiria como estouro em vez de virar mensagem na tela.
 
 ## Ciclo de vida (o RNF do Celeron, e §3.2/§3.9/§3.14)
 
@@ -97,7 +98,6 @@ from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPainterPath, QPaintEvent
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -108,13 +108,16 @@ from PySide6.QtWidgets import (
 
 from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.domain.enums import TipoMovimento
-from gestor_comercial.services.dinheiro import LIMITE
 from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets import cartao_modal
 from gestor_comercial.ui.widgets.cartao_modal import Backdrop
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 from gestor_comercial.ui.widgets.flow_layout import FlowLayout
+from gestor_comercial.ui.widgets.teclado_numerico import (
+    AcumuladorDeCentavos,
+    TecladoNumerico,
+)
 
 # Desenhos possíveis do badge do cabeçalho (ver `_IconeMovimento`). São nomes
 # de forma, e não de operação, porque é a forma que o `QPainter` escolhe.
@@ -322,15 +325,16 @@ class MovimentacaoCaixaDialog(QDialog):
     MARGEM_LATERAL_PX = 22
     LARGURA_UTIL_PX = LARGURA_CARTAO_PX - 2 * MARGEM_LATERAL_PX - 2
     LADO_BOTAO_FECHAR_PX = 32
-    ALTURA_TECLA_PX = 46
     ALTURA_VISOR_PX = 80
     LIMITE_DESCRICAO = 120
     # O teto do visor é o do banco, não um número escolhido aqui: as colunas
     # monetárias são `NUMERIC(10,2)` e `dinheiro()` recusa acima disso. Sem
     # amarrar os dois, o numpad conseguiria montar um valor que `registrar_movimento`
     # rejeitaria com `ValueError` — que não está em `_ERROS_SERVICE` e subiria
-    # como estouro, não como mensagem na tela.
-    TETO_EM_CENTAVOS = int(LIMITE * 100)
+    # como estouro, não como mensagem na tela. Mora no acumulador compartilhado
+    # (`teclado_numerico.py`) desde o §9.7; o nome fica aqui porque é por ele
+    # que a suíte confere a amarração.
+    TETO_EM_CENTAVOS = AcumuladorDeCentavos.TETO_EM_CENTAVOS
 
     def __init__(
         self,
@@ -350,11 +354,18 @@ class MovimentacaoCaixaDialog(QDialog):
                 f"Aceitos: {', '.join(t.value for t in OPERACOES)}."
             )
         self._operacao = operacao
-        self._centavos = 0
+        self._valor = AcumuladorDeCentavos()
         self._backdrop: Backdrop | None = None
         self._atalhos: dict[int, QPushButton] = {}
-        self._teclas: dict[str, QPushButton] = {}
         self._chips: dict[str, QPushButton] = {}
+
+        # O numpad é o mesmo dos modais de abertura e fechamento de caixa
+        # (§9.7): o que muda entre os três é para onde os dígitos vão, e isso
+        # quem decide é o slot daqui, não o teclado.
+        self._teclado = TecladoNumerico()
+        self._teclado.digitou.connect(self._digitar)
+        self._teclado.apagou.connect(self._apagar)
+        self._teclas = self._teclado.teclas
 
         self.setObjectName("movCaixaDialog")
         self.setWindowTitle(operacao.titulo)
@@ -433,7 +444,7 @@ class MovimentacaoCaixaDialog(QDialog):
         coluna.setSpacing(10)
         coluna.addWidget(self._montar_visor())
         coluna.addWidget(self._montar_atalhos())
-        coluna.addLayout(self._montar_teclado())
+        coluna.addWidget(self._teclado)
         coluna.addWidget(self._rotulo("DESCRIÇÃO"))
         coluna.addWidget(self._montar_campo_descricao())
         coluna.addWidget(self._montar_chips())
@@ -482,31 +493,6 @@ class MovimentacaoCaixaDialog(QDialog):
             fluxo.addWidget(pill)
             self._atalhos[reais] = pill
         return self._faixa_atalhos
-
-    def _montar_teclado(self) -> QGridLayout:
-        grade = QGridLayout()
-        grade.setSpacing(8)
-
-        for indice, digito in enumerate("123456789"):
-            grade.addWidget(self._tecla(digito), indice // 3, indice % 3)
-        # Última fileira do mockup: `00` para os valores redondos (que são a
-        # maioria no caixa), `0` e o apagar.
-        grade.addWidget(self._tecla("00"), 3, 0)
-        grade.addWidget(self._tecla("0"), 3, 1)
-
-        apagar = self._tecla("⌫")
-        apagar.setToolTip("Apagar o último dígito (Backspace)")
-        grade.addWidget(apagar, 3, 2)
-        return grade
-
-    def _tecla(self, rotulo: str) -> QPushButton:
-        botao = QPushButton(rotulo)
-        botao.setObjectName("movCaixaTecla")
-        botao.setMinimumHeight(self.ALTURA_TECLA_PX)
-        cartao_modal.preparar_botao(botao)
-        botao.clicked.connect(self._tecla_clicada)
-        self._teclas[rotulo] = botao
-        return botao
 
     def _montar_campo_descricao(self) -> QLineEdit:
         self._campo_descricao = QLineEdit()
@@ -594,36 +580,23 @@ class MovimentacaoCaixaDialog(QDialog):
     def _digitar(self, digitos: str) -> None:
         """Empurra dígitos pela direita, como máquina de cartão.
 
-        Passar do teto simplesmente não faz nada: cortar o número pela metade,
-        ou zerar, seria pior que ignorar a tecla — o operador olha para o visor,
-        não para a tecla.
+        A conta mora em `AcumuladorDeCentavos` (§9.7) e é a mesma dos modais de
+        abertura e fechamento: o que este método faz é repintar depois.
         """
-        novo = self._centavos
-        for digito in digitos:
-            novo = novo * 10 + int(digito)
-            if novo > self.TETO_EM_CENTAVOS:
-                return
-        self._centavos = novo
+        self._valor.digitar(digitos)
         self._pintar_valor()
 
     def _apagar(self) -> None:
-        self._centavos //= 10
+        self._valor.apagar()
         self._pintar_valor()
 
     def _somar(self, reais: int) -> None:
-        novo = self._centavos + reais * 100
-        if novo > self.TETO_EM_CENTAVOS:
-            return
-        self._centavos = novo
+        self._valor.somar_reais(reais)
         self._pintar_valor()
 
     def valor(self) -> Decimal:
-        """Os centavos do visor como `Decimal` de duas casas.
-
-        `scaleb(-2)` e não `/ 100`: é deslocamento de expoente, exato por
-        construção, e não depende da precisão do contexto decimal.
-        """
-        return Decimal(self._centavos).scaleb(-2)
+        """O que está no visor, como `Decimal` de duas casas."""
+        return self._valor.valor
 
     def _pintar_valor(self) -> None:
         # `formatar_reais` é o mesmo do resto do app e do cupom (§3.8): o valor
@@ -633,21 +606,11 @@ class MovimentacaoCaixaDialog(QDialog):
         # Sem valor não há movimento: `registrar_movimento` recusa zero, e
         # deixar o botão aceso só faria o operador levar o erro de volta para a
         # linha vermelha da tela de trás.
-        self._botao_confirmar.setEnabled(self._centavos > 0)
+        self._botao_confirmar.setEnabled(self._valor.centavos > 0)
 
     # ------------------------------------------------------------------
     # Cliques (nenhum ligado por lambda — §3.14)
     # ------------------------------------------------------------------
-
-    def _tecla_clicada(self) -> None:
-        botao = self.sender()
-        if not isinstance(botao, QPushButton):
-            return
-        rotulo = botao.text()
-        if rotulo.isdigit():
-            self._digitar(rotulo)
-        else:
-            self._apagar()
 
     def _atalho_clicado(self) -> None:
         botao = self.sender()
@@ -668,7 +631,7 @@ class MovimentacaoCaixaDialog(QDialog):
         self._campo_descricao.setText(botao.text())
 
     def _confirmar(self) -> None:
-        if self._centavos <= 0:
+        if self._valor.centavos <= 0:
             return
         self.accept()
 
@@ -776,8 +739,8 @@ class MovimentacaoCaixaDialog(QDialog):
         Confirmar, Cancelar, o ✕ e o Esc passam todos por aqui; `closeEvent`
         sozinho não serviria, porque `done()` faz `hide()`, não `close()`
         (§3.9). Saem juntos o filtro de eventos do campo de descrição, as três
-        tabelas de widgets e o escurecedor, que é filho da JANELA e não do
-        diálogo.
+        tabela de atalhos, a de chips, a de teclas (que mora no teclado
+        compartilhado) e o escurecedor, que é filho da JANELA e não do diálogo.
 
         O valor digitado NÃO é zerado aqui: `resultado()` é lido depois do
         `exec()`, e limpá-lo faria toda sangria ser gravada como R$ 0,00 — o
@@ -786,7 +749,7 @@ class MovimentacaoCaixaDialog(QDialog):
         """
         self._campo_descricao.removeEventFilter(self)
         self._atalhos.clear()
-        self._teclas.clear()
+        self._teclado.soltar()
         self._chips.clear()
         backdrop, self._backdrop = self._backdrop, None
         cartao_modal.descartar(backdrop)

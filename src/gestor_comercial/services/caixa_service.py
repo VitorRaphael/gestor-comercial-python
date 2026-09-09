@@ -251,6 +251,7 @@ class CaixaService:
         self,
         valor_abertura: Decimal,
         senha_fechamento_cego: str | None = None,
+        observacao: str | None = None,
     ) -> Caixa:
         # §3.1: o Java já documentava "atendente tentando abrir o caixa" como
         # acesso negado — quem declara o fundo de troco é quem responde por ele.
@@ -290,6 +291,10 @@ class CaixaService:
             valor_abertura=valor,
             aberto_em=datetime.now(),
             aberto_por_id=gerente.id,
+            # Anotação livre da abertura (§9.7), do mesmo feitio da de
+            # fechamento: passa por `_texto_ou_nulo` para "   " não virar uma
+            # linha em branco no relatório impresso.
+            observacao_abertura=self._texto_ou_nulo(observacao),
         )
         self.uow.caixas.salvar(caixa)
         self.uow.commit()

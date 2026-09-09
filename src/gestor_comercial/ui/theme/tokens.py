@@ -274,8 +274,44 @@ TEMA_ESCURO: dict[str, str] = {
     # O visor de valor é REBAIXADO, não elevado: `superficie_2` (#1C1C1A) é
     # mais claro que o cartão e faria o número parecer um botão. O mockup pede
     # o contrário — um recorte mais escuro que o cartão, como o vidro de uma
-    # maquininha.
-    "mov_visor_bg": "#111110",
+    # maquininha. Chamava-se `mov_visor_bg` enquanto só o modal de movimentação
+    # o usava; o §9.7 trouxe o visor da abertura de caixa e o nome passou a ser
+    # o papel, não a tela — mesmo critério de `tecla_numerica_*` (§9.6) e
+    # `botao_circular_*` (§9.4).
+    "visor_valor_bg": "#111110",
+    # ---- Abertura e fechamento de turno (`cartao_de_turno.py`, §9.7) ----
+    # Família própria pelo mesmo motivo das operações de gaveta acima, e a
+    # armadilha aqui é ainda mais visível: `caixa_abertura_tinta` é hoje o mesmo
+    # hex de `pilula_ativo_bg` e `caixa_fechamento_tinta` o mesmo de
+    # `mov_sangria_tinta`. Coincidem porque a paleta é pequena, não porque
+    # signifiquem a mesma coisa — abrir o caixa não é "estar ativo" e fechar o
+    # caixa não é uma sangria. Com nome próprio, mudar um não repinta o outro.
+    "caixa_abertura_tinta": "#14291E",
+    "caixa_abertura_glifo": "#22C55E",
+    "caixa_fechamento_tinta": "#2D1517",
+    "caixa_fechamento_glifo": "#EF4444",
+    # O botão que encerra o turno. Vermelho Ferrari `#DC2626` — o MESMO da mesa
+    # ocupada (§9.5), e de propósito: é o vermelho que este app reserva para o
+    # que o operador precisa reconhecer de longe. Fechar o caixa é a única ação
+    # destrutiva desta tela (depois dela o turno vira histórico e não reabre),
+    # então aqui o vermelho está sendo gasto onde deve.
+    "caixa_fechamento_acao": "#DC2626",
+    "caixa_fechamento_acao_hover": "#EF4444",
+    "caixa_fechamento_acao_texto": "#FFFFFF",
+    # Os ícones das duas linhas de conferência. Nomeados pela conferência, e não
+    # pela cor: o dia em que o verde de sucesso mudar não pode mexer no ícone
+    # da cédula, que não está dizendo "deu certo" — está dizendo "dinheiro".
+    "conferencia_dinheiro": "#4ADE80",
+    "conferencia_maquininha": "#22D3EE",
+    # O anel que diz PARA ONDE o próximo dígito vai — o visor da abertura, o
+    # cartão de contagem ativo do fechamento e o campo de observação em foco.
+    # Ciano porque é o que os dois mockups pedem, e porque é a cor que os
+    # modais em cartão já usam para feedback (o marcador do PIN é o mesmo hex).
+    # O modal de movimentação segue com o anel âmbar do `acento`: mudá-lo não
+    # foi pedido, e trocar a cor de uma tela que o Vitor já validou por
+    # simetria seria decidir por ele.
+    "foco_teclado_anel": "#22D3EE",
+    "foco_teclado_tinta": "#132225",
 }
 
 TEMA_CLARO: dict[str, str] = {
@@ -437,5 +473,23 @@ TEMA_CLARO: dict[str, str] = {
     "mov_despesa_acao_texto": "#FFFBEB",
     # Rebaixado em relação ao cartão, como no escuro — só que aqui o cartão é
     # branco puro, então "mais fundo" é o bege do terminal.
-    "mov_visor_bg": "#F0EFE9",
+    "visor_valor_bg": "#F0EFE9",
+    # ---- Abertura e fechamento de turno (`cartao_de_turno.py`, §9.7) ----
+    # Ver o comentário gêmeo em TEMA_ESCURO. O arranjo é o do claro: badge
+    # pastel com o glifo escuro (o inverso do escuro, que é tinta escura com
+    # glifo aceso).
+    "caixa_abertura_tinta": "#DCFCE7",
+    "caixa_abertura_glifo": "#15803D",
+    "caixa_fechamento_tinta": "#FEE2E2",
+    "caixa_fechamento_glifo": "#DC2626",
+    # O `#DC2626` do botão é o único token de status que NÃO muda entre os dois
+    # temas, igual à borda da mesa ocupada e pela mesma razão: é ele que o
+    # operador procura de longe.
+    "caixa_fechamento_acao": "#DC2626",
+    "caixa_fechamento_acao_hover": "#B91C1C",
+    "caixa_fechamento_acao_texto": "#FFFFFF",
+    "conferencia_dinheiro": "#15803D",
+    "conferencia_maquininha": "#0E7490",
+    "foco_teclado_anel": "#0891B2",
+    "foco_teclado_tinta": "#ECFEFF",
 }

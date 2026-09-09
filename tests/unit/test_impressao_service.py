@@ -871,6 +871,47 @@ def test_fechamento_de_caixa_fechado_mostra_contado_e_diferenca(
     assert "Diferença" in texto and "40,00" in texto
 
 
+def test_fechamento_imprime_as_duas_anotacoes_do_turno(
+    uow, impressao, driver, gerente, caixa_aberto
+):
+    """A anotação da abertura (§9.7) e a do fechamento saem no mesmo papel.
+
+    É na conferência da gaveta que alguém precisa saber de onde veio o fundo de
+    troco declarado: sem esta linha, `observacao_abertura` ficaria gravada e
+    nunca lida. As duas aparecem na ordem em que aconteceram.
+    """
+    caixa_aberto.observacao_abertura = "fundo recebido do cofre"
+    caixa_aberto.status = StatusCaixa.FECHADO
+    caixa_aberto.fechado_em = datetime(2026, 8, 21, 23, 0)
+    caixa_aberto.valor_contado_dinheiro = dinheiro("100.00")
+    caixa_aberto.valor_contado_maquininha = dinheiro("0.00")
+    caixa_aberto.observacao_fechamento = "conferido com o gerente"
+    uow.caixas.salvar(caixa_aberto)
+    nova_impressora(uow, "Balcão", padrao=True)
+
+    impressao.imprimir_fechamento_caixa(caixa_aberto.id)
+    texto = driver.texto_de("Balcão")
+
+    # A anotação quebra em 32 colunas como qualquer linha secundária do cupom
+    # (`linha_secundaria`), então o que se confere é o prefixo e o texto, não a
+    # linha inteira montada.
+    assert "Obs. abertura: fundo recebido" in texto and "do cofre" in texto
+    assert "Obs: conferido com o gerente" in texto
+    assert texto.index("Obs. abertura") < texto.index("Obs: ")
+
+
+def test_fechamento_sem_anotacao_de_abertura_nao_ganha_linha_em_branco(
+    uow, impressao, driver, gerente, caixa_aberto
+):
+    """Turno aberto antes da coluna existir tem `None` ali, e o papel não pode
+    ganhar um "Obs. abertura:" pendurado no vazio por causa disso."""
+    nova_impressora(uow, "Balcão", padrao=True)
+
+    impressao.imprimir_fechamento_caixa(caixa_aberto.id)
+
+    assert "Obs. abertura" not in driver.texto_de("Balcão")
+
+
 def test_fechamento_separa_as_bandeiras_da_maquininha(
     uow, impressao, driver, gerente, caixa_aberto
 ):

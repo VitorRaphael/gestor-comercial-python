@@ -1930,8 +1930,8 @@ cartão: `5`,`0`,`0`,`0` mostra `R$ 0,05` → `R$ 0,50` → `R$ 5,00` → `R$ 50
 Isso **apaga a classe inteira de defeito**: não existe mais "valor ilegível",
 porque nunca houve texto para ler de volta. `safe_decimal` continua existindo e
 continua certo — ele resolve o problema de *ler* o que foi digitado, e a
-abertura e o fechamento do caixa, que ainda são campos de texto, continuam
-precisando dele.
+abertura e o fechamento do caixa ganharam numpad no §9.7, e outros campos de
+valor do app continuam usando `safe_decimal`.
 
 O teto do visor sai de `dinheiro.LIMITE`, e não de um número escolhido na tela.
 A razão é específica: `NUMERIC(10,2)` é o teto das colunas monetárias, e um
@@ -2022,13 +2022,229 @@ cursor na descrição, dígito é texto de descrição — e é assim que tem qu
 
 ##### Ficou de fora, e por quê
 
-- **A abertura e o fechamento do caixa** continuam em `_ValorDialog` e
+- **A abertura e o fechamento do caixa** continuavam em `_ValorDialog` e
   `_FecharCaixaDialog`, com a moldura do sistema e campos de texto. Não estavam
   no pedido, e o fechamento tem três campos com semântica diferente (dinheiro
-  contado, maquininha, observação) — merece o próprio mockup, não uma cópia
-  deste. São eles que ainda justificam o `_ERRO_VALOR` na view.
+  contado, maquininha, observação) — mereciam o próprio mockup, não uma cópia
+  deste. Eram eles que ainda justificavam o `_ERRO_VALOR` na view. **Feitos no
+  §9.7 (2026-09-09), e com eles o `_ERRO_VALOR` saiu da `caixa_view`.**
 - **O `_QuitarConsumoDialog`** e o modal "Adicionar componente" do Cardápio
   continuam como estavam (§9.5, §9.4).
+
+---
+
+### 9.7 A abertura e o fechamento do caixa em cartão com numpad ✅ CONCLUÍDO — 2026-09-09
+
+Pedido do Vitor com dois mockups, e é o item que o §9.6 tinha deixado
+explicitamente para trás ("ficou de fora, e por quê"): as duas mini-telas que
+abrem e encerram o turno (`_ValorDialog` e `_FecharCaixaDialog`, 60 linhas
+dentro de `caixa_view.py`, com a moldura de janela do sistema e campos de
+texto) viraram cartões split-screen com teclado numérico na própria tela.
+São o **quinto** e o **sexto** modais em cartão do app.
+
+| Antes | Depois |
+|---|---|
+| `_ValorDialog` — 1 `QLineEdit` num `QFormLayout` | `widgets/abertura_caixa_dialog.py` |
+| `_FecharCaixaDialog` — 3 `QLineEdit` num `QFormLayout` | `widgets/fechamento_caixa_dialog.py` |
+
+#### O que saiu para peça compartilhada, e por quê
+
+O §9.6 trouxe o segundo numpad do app e, com ele, o acumulador de centavos.
+Este item traria o terceiro e o quarto. **Quatro cópias** do laço
+`novo = novo * 10 + dígito` não é repetição de decoração: é repetição da conta
+que vira dinheiro gravado — e a suíte já reprova corpo de função duplicado na
+camada de UI (`test_paineis_de_relatorio.py`). Saíram dois módulos:
+
+* **`widgets/teclado_numerico.py`** — `AcumuladorDeCentavos` (a regra do visor,
+  sem Qt, testável sem tela) e `TecladoNumerico` (a grade 3×4, que só avisa qual
+  tecla foi apertada). O modal de movimentação do §9.6 **migrou** para as duas:
+  hoje existe uma implementação só do numpad de dinheiro no app, e o token
+  `movCaixaTecla` virou `teclaNumerica` pelo mesmo critério de nomear o papel.
+* **`widgets/cartao_de_turno.py`** — `CartaoDeTurnoDialog`, a moldura que abrir e
+  fechar dividem (cabeçalho, coluna do teclado, rodapé, roteamento de teclado,
+  `done()`), mais o `IconeDeGaveta`, que é o **mesmo móvel** nos dois estados:
+  gaveta com puxadores na abertura, gaveta com cadeado no fechamento.
+
+O `pin_pad_dialog` ficou de fora **de propósito**: o teclado dele não tem `00`,
+tem uma tecla ENTRAR no lugar do apagar e alimenta marcadores de dígito, não um
+valor em reais. Forçar as duas coisas na mesma classe custaria mais condicional
+do que as vinte linhas que ele tem hoje.
+
+##### Por que uma base, e não uma classe parametrizada como no §9.6
+
+Lá, sangria/reforço/despesa eram a mesma tela com outro rótulo, e **uma** classe
+parametrizada era o certo. Aqui não: a abertura tem visor, quatro pílulas e um
+cartão de contexto; o fechamento tem duas contagens selecionáveis, uma diferença
+que se recalcula a cada tecla e um atalho de preenchimento. Espremer as duas num
+`if modo is ...` produziria a classe em que metade dos atributos é `None`
+conforme o modo — e num modal que grava dinheiro, "este atributo às vezes
+existe" é como um valor sai errado sem ninguém ver. O que elas repetiriam de
+verdade (cabeçalho, rodapé, teclado, ciclo de vida) é o que a base entrega
+pronto.
+
+#### O visor conta centavos — e o `_ERRO_VALOR` acabou
+
+O modal antigo pedia o valor num `QLineEdit`: o operador digitava `"100,00"`,
+`"R$ 100"` ou `"100.00"` e `safe_decimal` lia de volta com `padrao=None`, daí a
+linha `_ERRO_VALOR` ("Valor inválido. Informe um valor em reais, como 50,00.")
+na tela de trás. Com o numpad **não existe texto para ler de volta**, e com este
+item o `_ERRO_VALOR` saiu de `caixa_view.py`: era o último caminho que o
+justificava, exatamente como o §9.6 previu. `safe_decimal` continua existindo e
+continua certo — ele resolve o problema de *ler* o que foi digitado, e outros
+campos do app ainda o usam.
+
+No fechamento, o `padrao=None` daquele campo estava certo pelo motivo que a
+própria view documentava: ler "não consegui entender o que ele contou" como "ele
+contou zero" inventaria uma diferença do tamanho do turno. O que mudou é que
+agora essa leitura não acontece.
+
+#### O fechamento: um destino por vez, e a diferença ao vivo
+
+É a tela mais cara do sistema — o único momento em que a gaveta física e o banco
+se encontram. Três decisões:
+
+1. **A diferença aparece enquanto se digita.** Antes, o operador confirmava às
+   cegas e descobria a quebra no papel impresso, com o turno já encerrado. Agora
+   o cartão se refaz a cada tecla: falta em vermelho, exato em verde
+   ("R$ 0,00 · Sem diferença"), sobra em ciano. Sobra é ciano e não verde porque
+   sobra é uma **pergunta** ("de onde veio esse dinheiro?"), não um parabéns.
+2. **O teclado tem um destino só, e ele é dito em voz alta.** O rótulo da
+   direita alterna entre `DIGITANDO DINHEIRO` e `DIGITANDO MAQUININHAS`, e a
+   linha ativa fica com o anel ciano aceso. Sem isso, o extrato da maquininha é
+   digitado por cima da contagem da gaveta e nada avisa.
+3. **A prévia é a mesma conta que o service grava, e há teste provando.** A
+   prévia não pode chamar `resumo()` (nada foi gravado ainda), então a igualdade
+   não é garantida por código compartilhado: `test_a_previa_da_diferenca_e_a_
+   mesma_conta_que_o_service_grava` fecha o caixa de verdade com contagens que
+   dão quebra e compara o número que o operador viu com o
+   `ResumoCaixa.diferenca_total` que sai do banco.
+
+O atalho **PREENCHER VALORES ESPERADOS** existe porque o turno que fecha
+certinho é o caso comum, e obrigar a redigitar dois valores que já estão na tela
+convida ao erro. Mas ele é, por construção, o botão que permite fechar o turno
+**sem contar a gaveta** — por isso é um botão fantasma, discreto, e não um
+caminho em destaque. E ele recusa esperado negativo: o saldo da gaveta fica
+negativo quando as sangrias passam do que entrou, e preencher a contagem física
+com um número negativo seria afirmar que a gaveta deve dinheiro.
+
+#### A observação da abertura, que é a única mudança de dado
+
+O mockup da abertura pede um campo de observação ("Ex.: fundo recebido do
+cofre"). Um campo que o operador preenche e o sistema descarta é pior que campo
+nenhum — numa tela que declara dinheiro, é o tipo de coisa que só se descobre
+quando alguém procura a anotação e ela nunca existiu. Então entraram, nesta
+ordem:
+
+* `Caixa.observacao_abertura` (`String(500)`, nullable), migração
+  **`d9b4c7e21f30`**;
+* `CaixaService.abrir(..., observacao=None)` — parâmetro opcional, passando pelo
+  mesmo `_texto_ou_nulo` da observação de fechamento (`"   "` vira `None`);
+* a linha `Obs. abertura:` no relatório de fechamento impresso, logo antes da
+  `Obs:` que já saía. É na conferência da gaveta que alguém precisa saber de
+  onde veio o fundo declarado — gravar e nunca mostrar seria meio caminho.
+
+**Nenhuma regra financeira mudou por causa disso.** É uma anotação livre: não
+entra em conta nenhuma, não muda validação nenhuma, e turno gravado antes da
+coluna existir simplesmente tem `NULL` ali.
+
+#### O que NÃO mudou
+
+Os dois diálogos não conhecem `CaixaService`. A abertura devolve
+`DadosAbertura` (valor + observação) e o fechamento devolve `DadosFechamento`
+(dinheiro + maquininha + observação); a view chama `abrir(...)` e
+`fechar(caixa_id, dinheiro, maquininha, observacao)` com a mesma assinatura,
+mesmo tipo e mesma ordem de antes. Continuam sendo do service: exigir gerente
+(§3.1), recusar valor negativo, barrar o turno anterior esquecido
+(`TurnoAnteriorPendenteError`, §3.13), barrar comanda em aberto, numerar o turno
+do dia e congelar o mix de vendas. O erro que o service levantar continua
+aparecendo na linha vermelha da tela de trás.
+
+A impressão do comprovante também **não** mudou: continua saindo na view, pelo
+`executar_impressao` isolado pelo disjuntor (§3.12), **depois** do fechamento —
+para que impressora quebrada nunca impeça o caixa de fechar.
+
+#### Ciclo de vida (§3.2/§3.9/§3.14, e o RNF do Celeron)
+
+O briefing pediu, no vocabulário do Tkinter, `destroy()` + `unbind()` +
+`after_cancel`. Os três equivalentes em PySide6 passam por `done()`, o único
+portão por onde saem Confirmar, Cancelar, ✕ e Esc:
+
+* **destroy** — `executar_modal()` faz o `deleteLater()` depois de ler o
+  resultado; `done()` acrescenta soltar o escurecedor (filho da **janela**, não
+  do diálogo) e a tabela de teclas do numpad;
+* **unbind** — os `eventFilter` dos campos de observação são removidos
+  explicitamente. `QShortcut` não existe: o teclado é lido no `keyPressEvent` do
+  próprio diálogo, que morre com ele;
+* **after_cancel** — não há timer nenhum, e isso é decisão: cada tecla
+  recalcula um `Decimal` e repinta rótulos, nada é agendado.
+
+E o **oposto** da limpeza: `done()` **não** zera os valores. Aqui `resultado()`
+é lido depois do `exec()`, e limpar faria todo fechamento ser gravado como
+R$ 0,00 contados — com uma quebra do tamanho do faturamento da noite. Tem teste
+próprio, nos dois modais.
+
+#### Teclado
+
+`0`-`9` e o numpad USB alimentam o destino ativo, `Backspace` apaga, `Enter`
+confirma, `Esc` fecha sem gravar e `Tab` percorre os destinos na ordem: na
+abertura, valor → observação; no fechamento, dinheiro → maquininha →
+observação, e volta. Tocar numa linha de conferência aponta o teclado para ela e
+**traz o foco de volta do campo de texto** — se o operador estava na observação
+e tocou em "Dinheiro", o dígito seguinte tem que ir para a contagem.
+
+#### Como foi conferido
+
+- **Suíte 1179** (de 1086), **93 testes novos**: 19 do teclado compartilhado, 35
+  da abertura, 32 do fechamento, 2 no inventário de vazamento de modais, 3 do
+  service e 2 do cupom impresso. Zero falhas, zero xfail.
+- **Os testes que importam foram conferidos desfazendo a correção**, como manda
+  o §9.2. Doze mutações, **onze reprovações**: sem o teto do banco, o dígito
+  extra passa; zerando o valor em `done()`, os dois modais caem; sem o
+  `removeEventFilter`, o `unbind` reprova; sem soltar o escurecedor, os dois
+  reprovam; com a pílula somando em vez de definir, uma; com o dígito indo
+  sempre para a primeira contagem, uma; com a diferença invertida, uma; com as
+  duas contagens trocadas na volta para a view, uma; com o `definir` aceitando
+  negativo, duas; descartando a observação no service, duas; sem o rótulo
+  dinâmico do teclado, uma. A décima segunda (tecla do numpad a 120px) **não**
+  reprovou, e está certo não reprovar: com 120px o cartão ainda cabe nos 728px
+  úteis. Aferido: a 200px o teste reprova nos dois modais — ele mede a restrição
+  real, não a altura da tecla.
+- **Bancada visual** (`tools/comparar_telas.py`, 24 renderizações): **as 24
+  idênticas byte a byte** ao código anterior. A mudança está contida nos dois
+  modais — nenhuma das onze telas mudou um pixel.
+- **Renderização nativa** (plataforma `windows`, não `offscreen`): 640×441 para
+  a abertura e 640×520 para o fechamento, nos dois temas, bem abaixo dos 728px
+  úteis de um monitor de 768px.
+- **Migração** `d9b4c7e21f30` aplicada e revertida num banco novo, com
+  `PRAGMA table_info` conferindo a coluna nos dois sentidos.
+- **Ciclo de vida** — 30 aberturas com `exec()` a partir da `CaixaView` não
+  deixam diálogo preso; 10 aberturas não deixam escurecedor pendurado na janela.
+
+#### Decisões
+
+| Data | Decisão | Motivo |
+|---|---|---|
+| 2026-09-09 | Base compartilhada, e **não** uma classe parametrizada | O oposto do §9.6, e pelo mesmo raciocínio: lá as três telas eram a mesma; aqui as duas colunas da esquerda não têm nada em comum. Parametrizar produziria a classe com metade dos atributos `None` conforme o modo |
+| 2026-09-09 | Numpad e acumulador extraídos, com o §9.6 **migrado** junto | Quatro cópias do acumulador de centavos em quatro telas que gravam dinheiro. Migrar a tela antiga foi mais barato que manter duas implementações — e deixou o app com um numpad de dinheiro só |
+| 2026-09-09 | Pílulas da abertura **definem**, as do §9.6 **somam** | O rótulo manda: `+50` soma, `R$ 50` troca. Uma pílula que diz "R$ 100" e produz R$ 150 mente para quem apertou |
+| 2026-09-09 | Anel de foco **ciano** nos dois modais novos; o §9.6 segue **âmbar** | Ciano é o que os dois mockups pedem, e é o que os modais em cartão já usam para feedback (o marcador do PIN é o mesmo hex). Trocar a cor do modal de movimentação por simetria não foi pedido — seria decidir pelo Vitor numa tela que ele já validou |
+| 2026-09-09 | "Confirmar fechamento" em `#DC2626`, o mesmo Vermelho Ferrari da mesa ocupada | Fechar o caixa é a única ação **destrutiva** desta tela: depois dela o turno vira histórico e não reabre. É onde o vermelho de reconhecer-de-longe (§9.5) deve ser gasto. "Abrir caixa" usa o acento do app, que já é o papel de ação primária |
+| 2026-09-09 | Famílias de token próprias (`caixa_abertura_*`, `caixa_fechamento_*`) mesmo coincidindo com hex existentes | `caixa_abertura_tinta` é hoje o mesmo hex de `pilula_ativo_bg` e `caixa_fechamento_tinta` o mesmo de `mov_sangria_tinta`. Coincidem porque a paleta é pequena, não porque signifiquem o mesmo: abrir o caixa não é "estar ativo" e fechar não é uma sangria. É a armadilha que o §9.5 desarmou |
+| 2026-09-09 | Contagens começam **zeradas**, e não pré-preenchidas com o esperado | Pré-preencher transformaria a conferência num "Enter" e a gaveta nunca seria contada. Quem quiser o atalho tem o botão fantasma, e ele é uma escolha explícita |
+| 2026-09-09 | R$ 0,00 é abertura válida e o botão nasce **aceso** | `abrir` só recusa negativo, e existe turno que começa sem fundo de troco. É a diferença para o §9.6, onde o service recusa zero e o botão nasce desligado |
+| 2026-09-09 | Coluna e migração para a observação da abertura | Campo de mockup que o sistema descartasse seria uma anotação perdida numa tela que declara dinheiro. Custou uma coluna nullable e uma linha no cupom |
+| 2026-09-09 | A linha de conferência é `QFrame` clicável, não `QPushButton` | Medido: `QPushButton` calcula o `sizeHint` a partir do próprio texto e ignora o layout que se ponha dentro — a linha nascia com 15px e os três rótulos saíam com altura zero. O `QFrame` respeita o layout, ao custo de um único override |
+| 2026-09-09 | O `pin_pad_dialog` **não** migrou para o teclado compartilhado | Teclado sem `00`, com ENTRAR no lugar do apagar, alimentando marcadores em vez de um valor. Unificar custaria mais condicional do que as vinte linhas que ele tem |
+
+##### Ficou de fora, e por quê
+
+- **O `_QuitarConsumoDialog`** (Funcionários) e o modal "Adicionar componente"
+  do Cardápio continuam como estavam, com campo de texto e `safe_decimal`. Não
+  estavam no pedido.
+- **O fluxo de senha do fechamento cego** (§3.13) continua mostrando a mensagem
+  do service na linha de erro, sem pedir a senha em tela. Mexer nele seria mexer
+  no caminho de autorização, que o pedido não pediu.
+- **O anel âmbar do modal de movimentação** (§9.6) — ver a tabela de decisões.
 
 ---
 

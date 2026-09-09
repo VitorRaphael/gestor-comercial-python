@@ -123,6 +123,26 @@ def test_abrir_aceita_gaveta_zerada(caixas, gerente):
     assert caixas.abrir(Decimal("0")).valor_abertura == Decimal("0.00")
 
 
+def test_abrir_grava_a_observacao_da_abertura(caixas, gerente):
+    """O campo do modal de abertura (§9.7) chega ao banco. Sem esta coluna ele
+    seria uma caixa de texto que o sistema joga fora — e ninguém descobriria
+    até procurar a anotação e ela não existir."""
+    caixa = caixas.abrir(Decimal("150.00"), observacao="fundo recebido do cofre")
+
+    assert caixa.observacao_abertura == "fundo recebido do cofre"
+
+
+def test_abrir_sem_observacao_grava_nulo(caixas, gerente):
+    """`None` e não `""`: uma string vazia faria o relatório impresso ganhar uma
+    linha "Obs. abertura:" em branco, que parece anotação perdida em vez de
+    campo não preenchido. Mesmo critério do `_texto_ou_nulo` do fechamento."""
+    assert caixas.abrir(Decimal("150.00")).observacao_abertura is None
+
+
+def test_abrir_com_observacao_em_branco_grava_nulo(caixas, gerente):
+    assert caixas.abrir(Decimal("150.00"), observacao="   ").observacao_abertura is None
+
+
 def test_abrir_bloqueia_se_ja_existe_caixa_aberto(caixas, gerente, caixa_aberto):
     with pytest.raises(RegraDeNegocioError):
         caixas.abrir(Decimal("100.00"))
