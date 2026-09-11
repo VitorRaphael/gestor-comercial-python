@@ -12,9 +12,14 @@ Excluir/Combo apagando na cara dele. Mesma coisa na tela de Impressoras, onde a
 linha selecionada é o que decide qual impressora aparece no painel lateral.
 
 `test_tabelas.py` prova a mecânica de `preservar_selecao`. Estes daqui provam a
-consequência, nas duas telas reais que leem `currentRow()` logo depois de
-repopular: são eles que ficam vermelhos se alguém tirar o `preservar_selecao=True`
-de `cardapio_view` ou de `impressoras_view`.
+consequência, nas duas telas reais que leem a seleção logo depois de repopular:
+são eles que ficam vermelhos se alguém tirar o `preservar_selecao=True` de
+`impressoras_view`, ou a volta da seleção de `ListaDeProdutos.definir_itens` no
+Cardápio.
+
+No §9.11 a tabela do Cardápio virou uma lista pintada (`painel.lista`), e a
+seleção passou a voltar pelo **id do produto**, e não pelo número da linha —
+`test_cardapio_cartoes.py` cobra a diferença. O contrato daqui é o mesmo.
 """
 
 from __future__ import annotations
@@ -43,13 +48,13 @@ def test_cardapio_mantem_o_produto_selecionado_depois_de_atualizar(
 ):
     view = _cardapio_com_produtos(cardapio, categoria)
     painel = view._painel_produtos
-    painel.tabela.selectRow(LINHA_ESCOLHIDA)
+    painel.lista.setCurrentRow(LINHA_ESCOLHIDA)
     escolhido = painel.produto_atual()
     assert escolhido is not None, "o teste precisa de um produto selecionado para valer"
 
     view.atualizar()
 
-    assert painel.tabela.currentRow() == LINHA_ESCOLHIDA
+    assert painel.lista.currentRow() == LINHA_ESCOLHIDA
     assert painel.produto_atual().id == escolhido.id
 
 
@@ -60,7 +65,7 @@ def test_cardapio_mantem_os_botoes_do_rodape_habilitados_depois_de_atualizar(
     ele que liga/desliga Editar, Ativar/Desativar e Excluir pela seleção."""
     view = _cardapio_com_produtos(cardapio, categoria)
     painel = view._painel_produtos
-    painel.tabela.selectRow(LINHA_ESCOLHIDA)
+    painel.lista.setCurrentRow(LINHA_ESCOLHIDA)
 
     view.atualizar()
 
@@ -74,7 +79,7 @@ def test_cardapio_nao_avisa_selecao_vazia_durante_o_refresh(qapp, cardapio, cate
     quem escuta, a seleção nunca deixou de existir."""
     view = _cardapio_com_produtos(cardapio, categoria)
     painel = view._painel_produtos
-    painel.tabela.selectRow(LINHA_ESCOLHIDA)
+    painel.lista.setCurrentRow(LINHA_ESCOLHIDA)
     avisos: list[object] = []
     painel.produto_selecionado.connect(avisos.append)
 

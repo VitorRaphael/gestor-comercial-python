@@ -215,6 +215,48 @@ TEMA_ESCURO: dict[str, str] = {
     "subcategoria_grupo_texto": "#A8B29E",
     "subcategoria_grupo_contagem": "#6F7568",
     "subcategoria_glifo": "#8FBF7A",
+    # ---- Cardapio em cartoes (§9.11) ----
+    # Familia PROPRIA da tela, pela licao do §9.5: os hex coincidem com
+    # `superficie` e com o ambar da marca hoje, e e exatamente por isso que o
+    # emprestimo seria perigoso — mudar a superficie do app nao pode repintar os
+    # blocos do Cardapio, e vice-versa.
+    #
+    # A escada de fundos e o que faz o bloco parecer ELEVADO sem sombra (sombra
+    # e `QGraphicsEffect`, que o Celeron paga a cada repintura): pagina
+    # `#0F0F0E` < painel `#121211` < bloco `#161615` < topo do bloco `#1A1A18`
+    # < linha sob o mouse `#1C1C1A`.
+    "cardapio_card_bg": "#161615",
+    "cardapio_card_borda": "rgba(255, 255, 255, 0.06)",
+    "cardapio_painel_bg": "#121211",
+    "cardapio_painel_borda": "rgba(255, 255, 255, 0.06)",
+    "cardapio_rodape_bg": "#161615",
+    # Insignia redonda dos KPIs, do cabecalho do painel e do cabecalho de cada
+    # bloco: tinta ambar escura com o glifo aceso, o arranjo do escuro.
+    "cardapio_icone_tinta": "#2B2113",
+    "cardapio_icone_borda": "rgba(229, 169, 60, 0.22)",
+    "cardapio_icone_glifo": "#E5A93C",
+    "cardapio_bloco_bg": "#161615",
+    "cardapio_bloco_topo_bg": "#1A1A18",
+    "cardapio_bloco_borda": "rgba(255, 255, 255, 0.06)",
+    "cardapio_bloco_divisor": "rgba(255, 255, 255, 0.05)",
+    "cardapio_linha_hover_bg": "#1C1C1A",
+    "cardapio_linha_selecionada_bg": "#221E16",
+    # Verde esmeralda da barra de margem. Nao e `sucesso`: margem alta nao e
+    # "deu certo", e o dia em que o verde de confirmacao mudar nao pode mexer
+    # na leitura de lucro do catalogo.
+    "cardapio_margem": "#22C55E",
+    "cardapio_margem_trilho": "rgba(255, 255, 255, 0.08)",
+    "cardapio_arvore_aberta_bg": "#1A1A18",
+    "cardapio_arvore_filhos_bg": "#161615",
+    "cardapio_arvore_guia": "rgba(255, 255, 255, 0.10)",
+    "cardapio_contador_bg": "#1C1C1A",
+    "cardapio_contador_borda": "rgba(255, 255, 255, 0.08)",
+    "cardapio_contador_texto": "#A1A1AA",
+    # Vermelho Ferrari do "Excluir" — o mesmo `#DC2626` da mesa ocupada e do
+    # "Fechar caixa", o vermelho que este app reserva para o que nao volta.
+    "cardapio_excluir_bg": "#DC2626",
+    "cardapio_excluir_hover": "#EF4444",
+    "cardapio_excluir_texto": "#FFFFFF",
     "campo_erro_texto": "#f43f5e",
     "campo_erro_bg": "#fdecea",
     # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`,
@@ -452,6 +494,41 @@ TEMA_CLARO: dict[str, str] = {
     "subcategoria_grupo_texto": "#5B6455",
     "subcategoria_grupo_contagem": "#8A8F84",
     "subcategoria_glifo": "#4F7A3C",
+    # ---- Cardapio em cartoes (§9.11) ----
+    # Ver o comentario gemeo em TEMA_ESCURO. No claro a escada de fundos vira
+    # ao contrario (o bloco e o branco puro, o painel e o bege um degrau
+    # abaixo), e a insignia usa o arranjo pastel com glifo escuro — o mesmo
+    # dos badges de gaveta do §9.6. O ambar continua ambar: e a cor do
+    # catalogo, e nao o `acento` (que no claro e azul).
+    "cardapio_card_bg": "#FFFFFF",
+    "cardapio_card_borda": "#E2E1D9",
+    "cardapio_painel_bg": "#FAF9F5",
+    "cardapio_painel_borda": "#E2E1D9",
+    "cardapio_rodape_bg": "#F5F4EE",
+    "cardapio_icone_tinta": "#FEF3C7",
+    "cardapio_icone_borda": "#FDE68A",
+    "cardapio_icone_glifo": "#B45309",
+    "cardapio_bloco_bg": "#FFFFFF",
+    "cardapio_bloco_topo_bg": "#F5F4EE",
+    "cardapio_bloco_borda": "#E2E1D9",
+    "cardapio_bloco_divisor": "#EFEEE8",
+    "cardapio_linha_hover_bg": "#F5F4EE",
+    "cardapio_linha_selecionada_bg": "#EEF3FF",
+    # Um degrau mais escuro que o do tema escuro: `#22C55E` sobre branco some.
+    "cardapio_margem": "#16A34A",
+    # O trilho era `rgba(255, 255, 255, 0.08)` literal no QSS, nos DOIS temas:
+    # branco a 8% sobre linha branca, invisivel no claro. Virou token.
+    "cardapio_margem_trilho": "rgba(0, 0, 0, 0.08)",
+    "cardapio_arvore_aberta_bg": "#F5F4EE",
+    "cardapio_arvore_filhos_bg": "#FFFFFF",
+    "cardapio_arvore_guia": "rgba(0, 0, 0, 0.12)",
+    "cardapio_contador_bg": "#F0EFE9",
+    "cardapio_contador_borda": "#E2E1D9",
+    "cardapio_contador_texto": "#64748B",
+    # O `#DC2626` nao muda entre os temas, pela mesma razao da mesa ocupada.
+    "cardapio_excluir_bg": "#DC2626",
+    "cardapio_excluir_hover": "#B91C1C",
+    "cardapio_excluir_texto": "#FFFFFF",
     "campo_erro_texto": "#DC2626",
     "campo_erro_bg": "#FEE2E2",
     # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`,

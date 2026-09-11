@@ -97,6 +97,12 @@ máquina sem fonte instalada.
   **nenhuma delas na exclusão**: o `run_seed()` repovoando a cada boot e o
   `Usuario` de login que nunca era excluído junto do `Funcionario`. Suíte:
   **1418**.
+- ✅ **O Cardápio em cartões — 2026-09-11** (§9.11). A árvore e a lista de
+  produtos passaram a ser **pintadas por delegado**, sem widget por linha: o
+  crescimento de RSS em 60 trocas de categoria caiu de +37,7 MB para +0,7 MB,
+  a troca de 34 para 8 ms e a recarga de 39 para 10 consultas. Margem e
+  números do topo foram para o service, e o roteamento de impressão não foi
+  tocado (cupons idênticos). Suíte: **1495**.
 
 ---
 
@@ -2828,6 +2834,244 @@ Boot de ponta a ponta nos dois cenários que existem no mundo: banco novo (60
 mesas, 15 categorias, 113 produtos, WAL ligado, olho funcionando com as senhas de
 fábrica) e banco que já rodava (marcado pela migração, sem repovoar, com a
 exclusão sobrevivendo a duas reaberturas).
+
+---
+
+### 9.11 O Cardápio em cartões: árvore e blocos pintados ✅ CONCLUÍDO — 2026-09-11
+
+Pedido do Vitor, com dois prints: trocar a listagem tabular do Cardápio (a tela
+do §9.9) pela navegação do mockup — árvore/acordeão à esquerda, cartões
+agrupados por subcategoria à direita, KPIs elevados no topo — de forma "100%
+cirúrgica", com quatro travas escritas: **zero widget fantasma**, **preservação
+de estado**, **teto de hardware** e **isolamento de negócio**, e a suíte inteira
+verde.
+
+#### A decisão: pintar, e não montar
+
+As duas colunas deixaram de ser feitas de widgets. A árvore montava um
+`QWidget` com quatro rótulos por categoria; a tabela, cinco células com widget
+próprio por produto. Agora cada linha é um item de modelo carregando um
+**instantâneo imutável** (`LinhaDeCategoria`, `LinhaDeSubdivisao`,
+`ItemDaLista`), e um `QStyledItemDelegate` pinta só as linhas visíveis
+(`widgets/cardapio_cartoes.py`). É a decisão do modal "Adicionar item" (§9.4),
+pelo mesmo motivo: widget por linha só se paga quando a linha precisa de um
+controle de verdade dentro dela.
+
+O instantâneo não é enfeite. **Todo `commit` expira as instâncias do
+SQLAlchemy** (a lição do §9.4), e o Cardápio faz commit a cada produto salvo:
+um delegado que lesse `produto.nome` ao pintar iria ao banco a cada repintura —
+rolar a lista viraria consulta. A pintura lê o instantâneo, montado na recarga,
+e `test_pintar_as_listas_nao_toca_no_banco` conta **zero** comandos SQL numa
+repintura feita logo depois de um commit (com o teste de premissa ao lado
+provando que ler o `Produto` ali iria ao banco).
+
+Medido com a bancada `medir_cardapio` (cardápio real do seed + as subcategorias
+e custos do mockup; o mesmo dado nos dois códigos; `offscreen`, Python 3.14.6 /
+PySide6 6.11.2):
+
+| | antes (`4e4be90`) | depois |
+|---|---|---|
+| RSS: tela montada | +15,4 MB | +14,0 MB |
+| RSS: +60 trocas de categoria e 20 recargas | **+37,7 MB** | **+0,7 MB** |
+| RSS em 12 voltas pelas 15 categorias | 137,8 → 141,5 MB (subindo) | 117,1 → 117,1 MB (plano) |
+| Widgets na tela | 206 → 195 | 72 → 72 |
+| Widgets dentro da lista de produtos | 58 | **0** |
+| Troca de categoria | 34 ms (máx 85) | **8 ms** (máx 15) |
+| `atualizar()` | 41 ms | **12–15 ms** |
+| Consultas por troca de categoria | 8 | **3** |
+| Consultas por `atualizar()` | 39 | **10** |
+
+Os +37 MB do "antes" **não eram vazamento** — a contagem de widgets ficava
+estável. Eram o custo de criar e polir ~58 widgets contra um QSS de 94 KB a cada
+troca, e o heap que isso deixa para trás. Sem widget por linha, o custo some.
+
+#### As quatro travas do pedido, uma a uma
+
+**1. Widgets fantasmas.** Não há widget por linha para sobrar, sobrepor ou
+esquecer de desconectar — a garantia é de construção, e
+`test_nenhuma_linha_das_duas_listas_e_widget` a tranca (viewport das duas listas
+sem filho nenhum). O roteiro pedia reaproveitar o `limpar_layout` da Fase 4 no
+painel dinâmico: **não há mais painel dinâmico** para limpar. Os widgets que
+existem (topo, KPIs, painéis, buscas, rodapé) são montados uma vez e vivem com a
+tela; o conteúdo das listas é modelo, e `clear()` destrói os itens de verdade —
+objetos C++ sem widget pendurado, com o instantâneo solto junto. Nenhuma conexão
+por `lambda` (§3.14), nenhum atalho novo (os três `QShortcut` já existiam),
+nenhuma tela escondida criada no boot.
+
+**2. Preservação de estado.** Salvar um produto não solta a seleção, não fecha o
+acordeão e não rola nenhuma das duas listas para o topo — cobrado pelo caminho
+real do "Editar" em `test_salvar_um_produto_nao_fecha_o_acordeao_nem_rola_para_o_topo`.
+A seleção passou a voltar pelo **id do produto**, e não pelo número da linha:
+com cabeçalhos de bloco no meio, um produto novo cadastrado antes do escolhido
+deslocaria o índice e o próximo "Editar" abriria o vizinho. Criar uma categoria
+já a abre selecionada, e o produto recém-cadastrado já sai destacado.
+
+**3. Hardware.** Os números acima. As miniaturas saem do `thumbnail_cache` que
+já existia (LRU de 200 entradas), pedidas a 36px e recortadas uma vez só — a
+pintura não reescala imagem nenhuma. Sem sombra (`QGraphicsEffect` é pago a cada
+repintura; a elevação é uma escada de fundos: página `#0F0F0E` < painel
+`#121211` < bloco `#161615` < topo do bloco `#1A1A18`), sem fonte nova (a da
+marca), ícones desenhados em `QPainterPath` e guardados por nome.
+
+> **O teto de "~90 MB" do pedido não é alcançável por esta tela sozinha, e
+> seria desonesto dizer que foi.** O processo já mede ~100 MB antes de o
+> Cardápio existir (Python + PySide6 + SQLAlchemy + Alembic) e ~156 MB com o
+> shell inteiro (§7.2). O que a tela controla é o próprio custo (+14 MB
+> montada) e o não crescimento (+0,7 MB contra +37,7 MB) — e isso é o que foi
+> entregue.
+
+**4. Isolamento de negócio.** A conta de margem e os números do topo saíram da
+view para o service: `margem_percentual(preco, custo)` e
+`CardapioService.resumo_do_cardapio()` → `ResumoCardapio`, em **três consultas
+fixas** (eram 17). A árvore lê as subcategorias numa consulta só
+(`listar_todas_as_subcategorias`, eram 15 por recarga — o N+1 do §3.6), e
+`test_recarregar_a_tela_nao_cresce_com_o_numero_de_categorias` prova o mesmo
+número de consultas com 3 e com 15 categorias. **O roteamento de impressão não
+foi tocado**: nenhuma linha do `impressao_service` mudou, e
+`tools/comparar_cupons.py` deu os **2 cupons idênticos linha a linha** contra o
+commit anterior.
+
+#### O que mudou na tela
+
+- **KPIs**: cartões elevados com insígnia âmbar desenhada, rótulo, número e
+  legenda. **"Preço médio" voltou**, com a margem média de legenda — é o quarto
+  card do mockup, e o §9.9 o tinha tirado. A legenda de Categorias só diz
+  "grupos ativos" quando é verdade; com uma desativada, diz "14 ativos · 1
+  desativado".
+- **Árvore**: a categoria aberta vira um cartão (seta âmbar, nome, "2
+  SUBCATEGORIAS", contador redondo com os produtos), uma guia vertical liga as
+  filhas, e a escolhida é uma pílula no `acento` (âmbar no escuro, azul no
+  claro). O selo **VAZIO** virou o contador com **0**. Categoria desativada diz
+  "DESATIVADA · …" no subtítulo. Numa categoria sem subdivisão, a primeira
+  entrada chama-se "Todos os produtos".
+- **Direita**: um bloco por subcategoria (insígnia, nome, "3 PRODUTOS",
+  "Editar subcategoria") e as linhas de produto (miniatura, nome, preço, custo,
+  barra de margem esmeralda, percentual). O topo passou a ser a **categoria**
+  (`Acompanhamentos`, `COZINHA · 5 ITENS · 2 SUBCATEGORIAS`) — e por isso, numa
+  subdivisão escolhida, o **cabeçalho do bloco agora aparece**: é ele que diz
+  qual subdivisão está na tela. Categoria sem subdivisão: um bloco só, sem
+  cabeçalho.
+- **Saíram**: as **pílulas de filtro** (repetiam a árvore, e filtravam sem mover
+  a seleção dela) e a **coluna Status** (o "ATIVO" em toda linha era ruído; a
+  exceção virou o selo **DESATIVADO** ao lado do nome, junto do COMBO).
+- **Gestos**: duplo clique no produto abre a edição; o link "Editar
+  subcategoria" edita a subdivisão **daquele bloco** (em "Todas" há vários);
+  a seta do teclado pula cabeçalhos; o tooltip da linha diz preço, custo e
+  margem por extenso.
+- **Rodapé**: Editar, Desativar e **Excluir em Vermelho Ferrari `#DC2626`** —
+  o mesmo da mesa ocupada e do "Fechar caixa". Desligados, os três saem do tom
+  aceso (antes o "Editar" parecia clicável e o "Excluir" ficava vermelho sem
+  produto escolhido).
+- Margem **negativa** (custo acima do preço) sai no vermelho de alerta, com a
+  barra vazia.
+
+#### O que a tela antiga mostrava errado, e morreu pelo caminho
+
+A renderização de base (`4e4be90`, antes de qualquer mudança) já mostrava três
+defeitos, e os três deixaram de ter onde acontecer:
+
+1. os rótulos dos KPIs pintavam um **retângulo escuro atrás do texto** — a regra
+   global `QWidget { background }` vale para `QLabel`, e os rótulos antigos não
+   declaravam fundo transparente;
+2. o recuo da árvore acendia uma **faixa azul do sistema** ao lado de "Todas" —
+   o estilo pinta a área de `::branch` com o azul de seleção; agora o recuo é
+   zero e a guia é do delegado;
+3. a seta da categoria aberta (`⌄`) saía como um **quadradinho** — o glifo não
+   existe na fonte da marca; agora é desenhado.
+
+#### Achados no caminho — cada um com teste
+
+1. **Renomear a subcategoria escolhida levava o gerente para a primeira
+   categoria** (anterior ao §9.11). A recarga procurava a subdivisão pelo nome
+   antigo, não achava e caía no primeiro item da árvore — renomear fechava o
+   acordeão em que ele trabalhava. A chave da seleção agora é trocada junto.
+2. **O `QColor` não entende `rgba()` do CSS** — metade da paleta "Concreto".
+   `QColor("rgba(255, 255, 255, 0.08)")` devolve uma cor inválida que pinta
+   como **preto opaco**, sem erro. O placeholder das miniaturas pintava a borda
+   de preto no tema escuro desde que a paleta trocou os hex por transparências.
+   `ui/theme/cores.py::cor_do_token` entende as duas grafias, e um teste varre
+   as duas paletas inteiras. É a única diferença fora do Cardápio na bancada
+   (660 px na Comanda e 376 px no Dashboard, só no escuro) — ampliada e
+   conferida: o contorno preto virou o contorno claro sutil que o token sempre
+   descreveu.
+3. **A busca da árvore casava pelas entradas fixas** (anterior): "Todas" e "Sem
+   subcategoria" existem em quase toda categoria, e buscar "sub" trazia o
+   cardápio inteiro.
+4. **Duplo clique numa categoria a fechava de novo**: o clique simples já abre,
+   e o `expandsOnDoubleClick` do Qt alternava o ramo em seguida.
+5. **Linha estreita**: tirar o custo não bastava para o nome continuar legível
+   — entrou o segundo degrau (a barra sai também, o percentual fica). Achado
+   pelo próprio teste novo, com a fonte do `offscreen`, que mede mais largo.
+6. **O `test_caos.py` pegou dois overrides sem `@nao_deixa_escapar`** no
+   rótulo com reticências — a trava do §4 do `Mitigação de Falhas.md`
+   funcionando como deveria.
+7. **O `QTest.mouseDClick` do Qt 6 manda só o evento de duplo clique**, sem o
+   clique que o sistema operacional sempre manda antes — e a lista do Qt só
+   anuncia duplo clique no item que recebeu o clique anterior. O teste reprovava
+   um código certo; o auxiliar `_duplo_clique` reproduz a sequência real.
+
+#### O `PainelPontilhado` desenha só a região suja
+
+Os dois painéis ganharam a textura de pontos do mockup (a mesma da sidebar e do
+login), e as listas têm fundo transparente para ela aparecer entre os blocos —
+então passar o mouse por uma linha repinta também o pedaço de painel atrás
+dela. O painel percorria os ~600 pontos a cada repintura; agora percorre só os
+da região que o Qt mandou repintar. Pixel a pixel igual: login e sidebar saíram
+**idênticos byte a byte** na bancada, e `test_painel_pontilhado.py` compara a
+repintura de cada pedaço com a do painel inteiro (inclusive com raio fracionário,
+que é onde a folga do raio na conta inversa deixa de ser inerte).
+
+#### Como foi conferido
+
+- **Suíte: 1495 (de 1426), 0 falhas**, nenhum teste apagado sem substituto. Os testes que liam a
+  tabela por dentro (`tabela`, `cellWidget`, `itemWidget`, pílulas) foram
+  portados para ler o mesmo dado pelo instantâneo — a asserção de comportamento
+  de cada um é a mesma, e as três que mudaram de propósito (cabeçalho na
+  subdivisão escolhida, pílulas, VAZIO → 0) estão ditas no docstring do arquivo.
+- **Mutações: 24, e 23 reprovam.** A sobrevivente é declarada: o
+  `doItemsLayout()` antes de devolver a rolagem da lista. Medido — nesta lista o
+  alcance da barra sobrevive ao `clear()` (1359 antes e depois); numa lista solta
+  do mesmo Qt ele caiu e cortou a rolagem (452 de 1052px). A linha ficou como
+  defensiva, porque é o mesmo cálculo que o Qt faria antes de pintar, e o
+  comentário dela diz isso em vez de fingir que um teste a prova. Três mutações
+  sobreviveram na primeira rodada por defeito do TESTE, e os três foram
+  corrigidos: números de margem que coincidiam nas duas contas (80% e 80%),
+  regiões de pontilhado que não caíam onde a folga importa, e um duplo clique
+  em categoria abaixo da aberta (onde as linhas mudam de lugar entre os dois
+  cliques e o defeito não aparece).
+- **Bancadas**: **20 das 24 telas idênticas byte a byte** nos dois tamanhos
+  (1280x800 e 1366x738), diferindo as duas do Cardápio (a tela refeita) e as
+  duas do achado 2 acima; **2 cupons idênticos linha a linha**.
+- Renderização com o cardápio real + subcategorias, nos dois temas e nos dois
+  tamanhos, conferida contra o mockup.
+
+#### Decisões
+
+| Data | Decisão | Por quê |
+|---|---|---|
+| 2026-09-11 | As duas listas são **pintadas por delegado**, sem widget por linha | Precedente do §9.4; −37 MB de crescimento, troca de categoria de 34 para 8 ms, e widget fantasma deixa de ser possível |
+| 2026-09-11 | A pintura lê um **instantâneo**, nunca o `Produto` | O commit expira as instâncias; pintar o ORM seria consulta a cada repintura |
+| 2026-09-11 | A seleção volta pelo **id**, não pela linha | Com cabeçalhos no meio, um produto novo antes do escolhido deslocaria o índice |
+| 2026-09-11 | Margem e resumo do topo foram para o **service** | Regra de negócio fora da view, e a barra e a média saem da mesma conta |
+| 2026-09-11 | "Preço médio" **voltou** ao topo, com a margem de legenda | É o card do mockup do Vitor; a margem, que decide, continua na tela |
+| 2026-09-11 | O cabeçalho do bloco **aparece** também na subdivisão escolhida | O topo virou a categoria; sem o cabeçalho, nada diria qual subdivisão está na tela. Reverte o "sem cabeçalho" do §9.9 |
+| 2026-09-11 | As pílulas de filtro **saíram** | Repetiam a árvore, e filtravam sem mover a seleção dela |
+| 2026-09-11 | **Ativar/Desativar ficou** no rodapé, embora o mockup mostre só Editar e Excluir | É o gesto de todo dia do food truck ("acabou o pão"); tirá-lo deixaria desativar produto sem caminho na tela |
+| 2026-09-11 | Excluir em `#DC2626`, com família de token própria (`cardapio_excluir_*`) | O pedido nomeou a cor; família própria pela lição do §9.5 |
+| 2026-09-11 | A insígnia continua **âmbar** no tema claro (pastel com glifo escuro) | É a cor do catálogo, não o `acento` (que no claro é azul); arranjo do claro do §9.6 |
+| 2026-09-11 | Números na fonte da marca, e não na monoespaçada do mockup | O alinhamento vem do alinhamento à direita; uma segunda família tipográfica seria decisão de identidade, não de tela |
+| 2026-09-11 | `cor_do_token` para todo token pintado com `QPainter` | O `QColor` não entende `rgba()`, e metade da paleta está nessa grafia |
+| 2026-09-11 | Uma categoria aberta por vez; o clique **não** fecha a aberta | Mantém a regra do §9.9 — a seleção mora na categoria aberta, e fechá-la deixaria a direita mostrando uma categoria escondida |
+
+#### Ficou de fora, e por quê
+
+- **A barra lateral do mockup** (Visão Geral, Delivery, Estoque, Fechamento) e o
+  "GERENTE · VITOR RAPHAEL" do topo: são do shell, não do Cardápio — mesma
+  decisão do §9.9.
+- **A lupa do modal "Adicionar item" não foi unificada** com o sistema de glifos
+  novo: mudaria pixels de um modal já validado, e o pedido era o Cardápio.
+- **Mover subcategoria de categoria**, subcategoria no cupom e relatório por
+  subcategoria continuam fora, pelos motivos do §9.9.
 
 ---
 

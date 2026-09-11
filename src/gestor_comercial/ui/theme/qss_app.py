@@ -164,14 +164,6 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QPushButton[variante="ciano"]:hover {{ background: {t['ciano_acao_hover']}; }}
     QPushButton[variante="ciano"]:disabled {{ background: {t['borda']}; color: {t['texto_fraquissimo']}; }}
 
-    /* Tracejado: "+ Nova categoria" no rodapé da coluna de categorias. */
-    QPushButton[variante="tracejado"] {{
-      background: transparent;
-      color: {t['texto_fraco']};
-      border: 1px dashed {t['borda']};
-    }}
-    QPushButton[variante="tracejado"]:hover {{ color: {t['texto']}; border-color: {t['texto_fraco']}; }}
-
     /* Variante compacta de "perigo" para botões dentro de linha de tabela
        (Remover/Cancelar em `ComandaView`): o padding padrão de QPushButton
        (10px 16px + fonte 13px) exige ~38px de altura, mais que a linha da
@@ -568,12 +560,6 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background-color: {t['campo_erro_bg']};
     }}
 
-    /* Barra de margem do cardápio. O trilho é a mesma transparência nos dois
-       temas — literal, e não token, porque não existe cor de paleta para ele e
-       inventar uma seria decisão de design, não faxina. */
-    QFrame#margemTrilho {{ background: rgba(255, 255, 255, 0.08); border-radius: 3px; }}
-    QFrame#margemPreenchida {{ background: {t['sucesso']}; border-radius: 3px; }}
-
     /* Comprovante digital de fechamento. Era o último widget lendo as
        "constantes planas" de `tokens.py` — o bloco inteiro morreu com isto. */
     QDialog#comprovanteDialog {{ background: {t['superficie']}; }}
@@ -594,78 +580,121 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-weight: 500;
     }}
 
-    QLabel#badgeCombo {{
-      background-color: {t['badge_combo_bg']};
-      color: {t['badge_combo_texto']};
-      font-weight: 700;
-      font-size: 11px;
-      border-radius: 4px;
-      padding: 3px 10px;
-      margin: 0px;
-    }}
+    /* ---------- Cardapio em cartoes (§9.11) ----------
+       As duas listas da tela (a arvore e os blocos de produto) sao PINTADAS
+       por delegado (`widgets/cardapio_cartoes.py`), e as cores delas saem dos
+       tokens `cardapio_*` na hora de pintar — nao ha seletor de linha, de
+       cabecalho de grupo nem de badge aqui. Este bloco veste so o que continua
+       sendo widget: o topo, os KPIs, os dois paineis, as buscas e os botoes.
 
-    /* ---------- Cardapio: arvore, grupos e subcategoria (§9.9) ----------
-       A tela virou a hierarquia Categoria -> Subcategoria -> Produtos, e este
-       bloco veste os tres niveis dela.
+       Todo rotulo daqui declara `background: transparent` pelo mesmo motivo
+       dos KPIs antigos, que mostravam um retangulo escuro atras do texto: a
+       regra global `QWidget {{ background }}` pinta QLabel tambem. */
 
-       O selo que o §9.8 punha na LINHA de cada produto saiu: ele repetia, uma
-       vez por item, o que o cabecalho de grupo agora diz uma vez -- e disputava
-       largura justamente com o nome do produto. A familia de cor dele ficou, e
-       agora veste o cabecalho de grupo e as pilulas de filtro. */
-
-    /* Os eyebrows do Cardapio (CATEGORIAS, o "ACOMPANHAMENTOS · COZINHA" do
-       painel da direita e a dica do rodape) sao o mesmo tipo de texto -- caixa
-       alta atenuada, o "carimbo" que diz o que vem a seguir. Uma declaracao so
-       para os tres: tres poderiam divergir. */
-    QLabel#cardapioEyebrow {{
-      color: {t['texto_fraco']};
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      background: transparent;
-    }}
-    QLabel#cardapioTituloPainel {{
+    QLabel#cardapioTitulo {{
       color: {t['texto']};
-      font-size: 16px;
+      font-size: 22px;
       font-weight: 700;
       background: transparent;
     }}
+    QLabel#cardapioSubtitulo {{ color: {t['texto_fraco']}; font-size: 12px; background: transparent; }}
+    /* Pilula: o raio e do ID, as cores continuam vindo da `variante`. */
+    QPushButton#cardapioBotaoTopo {{ border-radius: 18px; padding: 10px 20px; }}
 
-    /* ---- A arvore da esquerda ---- */
-    QTreeWidget#arvoreCardapio {{
+    /* ---- KPIs ---- */
+    QFrame#cardapioKpi {{
+      background: {t['cardapio_card_bg']};
+      border: 1px solid {t['cardapio_card_borda']};
+      border-radius: 12px;
+    }}
+    QLabel#cardapioKpiRotulo {{
+      color: {t['texto_fraco']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      background: transparent;
+    }}
+    QLabel#cardapioKpiValor {{
+      color: {t['texto']};
+      font-size: 24px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#cardapioKpiLegenda {{ color: {t['texto_fraco']}; font-size: 11px; background: transparent; }}
+    QWidget#cardapioInsignia, QWidget#cardapioGlifo {{ background: transparent; }}
+
+    /* ---- Os dois paineis ---- */
+    QFrame#cardapioPainel {{
+      background: {t['cardapio_painel_bg']};
+      border: 1px solid {t['cardapio_painel_borda']};
+      border-radius: 16px;
+    }}
+    QWidget#cardapioPainelTopo {{ background: transparent; }}
+    QFrame#cardapioDivisor {{ background: {t['cardapio_painel_borda']}; border: none; }}
+    QLabel#cardapioPainelTitulo {{
+      color: {t['texto']};
+      font-size: 14px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel#cardapioPainelSub {{ color: {t['texto_fraquissimo']}; font-size: 11px; background: transparent; }}
+    QLabel#cardapioContador {{
+      background: {t['cardapio_contador_bg']};
+      border: 1px solid {t['cardapio_contador_borda']};
+      border-radius: 15px;
+      color: {t['cardapio_contador_texto']};
+      font-size: 10px;
+      font-weight: 700;
+    }}
+    QLabel#cardapioPainelTituloGrande {{
+      color: {t['texto']};
+      font-size: 18px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    /* Os carimbos em caixa alta (o "COZINHA · 5 ITENS" do topo e a dica do
+       rodape) sao o mesmo tipo de texto — uma declaracao so para os dois. */
+    QLabel#cardapioPainelMeta, QLabel#cardapioDica {{
+      color: {t['texto_fraquissimo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1.6px;
+      background: transparent;
+    }}
+
+    /* ---- Buscas em capsula (a lupa desenhada e filha do campo) ---- */
+    QLineEdit#cardapioBusca {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      border-radius: 20px;
+      padding: 0 10px 0 38px;
+      color: {t['texto']};
+      font-size: 12px;
+    }}
+    QLineEdit#cardapioBusca:focus {{ border: 1px solid {t['acento']}; }}
+
+    /* ---- As duas listas pintadas ----
+       Fundo transparente para a textura de pontos do painel aparecer entre os
+       blocos, e NADA pintado pelo estilo nos itens: selecao, hover e ramo sao
+       do delegado. `selection-background-color` transparente e o cinto para o
+       estilo do sistema, que pintava o recuo da arvore com o azul de selecao
+       (a faixa azul ao lado de "Todas", na tela do §9.9). */
+    QTreeWidget#arvoreCardapio, QListWidget#cardapioProdutos {{
       background: transparent;
       border: none;
       outline: none;
+      selection-background-color: transparent;
     }}
-    /* Sem `border-radius` de proposito: a linha da subcategoria tem DUAS
-       colunas (nome e contagem), cada uma com o seu retangulo de item, e o
-       arredondamento produzia duas pilulas separadas por uma fresta no meio da
-       faixa selecionada. Faixa continua e chapada e o que o olho le como UMA
-       linha. */
-    QTreeWidget#arvoreCardapio::item {{
-      border-radius: 0;
-      color: {t['texto_fraco']};
-      font-size: 12px;
-      font-weight: 600;
+    QTreeWidget#arvoreCardapio::item,
+    QTreeWidget#arvoreCardapio::item:hover,
+    QTreeWidget#arvoreCardapio::item:selected,
+    QListWidget#cardapioProdutos::item,
+    QListWidget#cardapioProdutos::item:hover,
+    QListWidget#cardapioProdutos::item:selected {{
+      background: transparent;
+      border: none;
+      padding: 0;
     }}
-    /* O item de CATEGORIA hospeda um widget proprio (nome + subtitulo +
-       badge), entao o que o estado de selecao pinta nele e so o fundo; as
-       cores do texto vem do widget. O de SUBCATEGORIA e texto puro do proprio
-       item, e por isso acende no acento quando selecionado -- e o unico sinal
-       de qual subdivisao a tabela da direita esta mostrando. */
-    QTreeWidget#arvoreCardapio::item:hover {{ background: {t['superficie_2']}; }}
-    QTreeWidget#arvoreCardapio::item:selected {{
-      background: {t['superficie_2']};
-      color: {t['texto']};
-    }}
-    QTreeWidget#arvoreCardapio::item:selected:!has-children {{
-      background: {t['acento']};
-      color: {t['acento_texto']};
-    }}
-    /* A area de `::branch` e o recuo do filho, e o Qt a pinta com o azul de
-       selecao da paleta do sistema quando a linha esta selecionada -- um
-       quadrado de outra cor colado na faixa ambar. Transparente nos dois
-       estados: o recuo fica sendo recuo, e nao um segundo destaque. */
     QTreeWidget#arvoreCardapio::branch,
     QTreeWidget#arvoreCardapio::branch:selected,
     QTreeWidget#arvoreCardapio::branch:hover {{ background: transparent; }}
@@ -674,123 +703,73 @@ def construir_qss_app(t: dict[str, str]) -> str:
       width: 6px;
       margin: 2px 0 2px 0;
     }}
-    QTreeWidget#arvoreCardapio QScrollBar::handle:vertical {{
+    /* Na lista de produtos a barra ganha 4px de respiro a esquerda: os blocos
+       vao ate a borda do viewport, e sem a folga o trilho encostava no
+       contorno do cartao e os dois viravam uma linha grossa so. */
+    QListWidget#cardapioProdutos QScrollBar:vertical {{
+      background: transparent;
+      width: 10px;
+      margin: 2px 0 2px 4px;
+    }}
+    QTreeWidget#arvoreCardapio QScrollBar::handle:vertical,
+    QListWidget#cardapioProdutos QScrollBar::handle:vertical {{
       background: {t['botao_circular_hover']};
       border-radius: 3px;
       min-height: 20px;
     }}
     QTreeWidget#arvoreCardapio QScrollBar::add-line:vertical,
-    QTreeWidget#arvoreCardapio QScrollBar::sub-line:vertical {{ height: 0; }}
+    QTreeWidget#arvoreCardapio QScrollBar::sub-line:vertical,
+    QListWidget#cardapioProdutos QScrollBar::add-line:vertical,
+    QListWidget#cardapioProdutos QScrollBar::sub-line:vertical {{ height: 0; }}
     QTreeWidget#arvoreCardapio QScrollBar::add-page:vertical,
-    QTreeWidget#arvoreCardapio QScrollBar::sub-page:vertical {{ background: transparent; }}
+    QTreeWidget#arvoreCardapio QScrollBar::sub-page:vertical,
+    QListWidget#cardapioProdutos QScrollBar::add-page:vertical,
+    QListWidget#cardapioProdutos QScrollBar::sub-page:vertical {{ background: transparent; }}
 
-    /* `celulaTransparente` veste os embrulhos de celula de tabela. Existia como
-       `setStyleSheet("background: transparent")` no proprio widget, e isso
-       DESCE PARA OS FILHOS vencendo o QSS global -- foi o que apagou o fundo
-       dos badges assim que eles passaram a se vestir por objectName. Aqui a
-       regra e do seletor, e nao do widget, entao ela para no pai. */
-    QWidget#celulaTransparente {{ background: transparent; }}
-    QLabel#margemPercentual {{
-      background: transparent;
-      font-size: 12px;
-      font-weight: 600;
-      color: {t['texto']};
-    }}
-
-    QWidget#linhaCategoria {{ background: transparent; }}
-    QLabel#categoriaSeta {{
-      color: {t['texto_fraquissimo']};
-      font-size: 13px;
-      font-weight: 700;
-      background: transparent;
-    }}
-    QLabel#categoriaNome {{
-      color: {t['texto']};
-      font-size: 12px;
-      font-weight: 700;
-      background: transparent;
-    }}
-    QLabel#categoriaSubtitulo {{
-      color: {t['texto_fraquissimo']};
-      font-size: 9px;
-      font-weight: 700;
-      letter-spacing: 0.6px;
-      background: transparent;
-    }}
-
-    /* ---- O cabecalho de grupo, dentro da tabela ---- */
-    QWidget#grupoSubcategoria {{
-      background: {t['subcategoria_grupo_bg']};
-      border-top: 1px solid {t['subcategoria_grupo_borda']};
-      border-bottom: 1px solid {t['subcategoria_grupo_borda']};
-    }}
-    QWidget#grupoGlifo {{ background: transparent; }}
-    QLabel#grupoNome {{
-      color: {t['subcategoria_grupo_texto']};
-      font-size: 10px;
-      font-weight: 800;
-      letter-spacing: 1.2px;
-      background: transparent;
-    }}
-    QLabel#grupoContagem {{
-      color: {t['subcategoria_grupo_contagem']};
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.8px;
-      background: transparent;
-    }}
-    QLabel#produtoNome {{ background: transparent; color: {t['texto']}; }}
-
-    /* ---- As pilulas de filtro, entre a busca e a tabela ---- */
-    QPushButton#pillSubcategoria {{
-      padding: 5px 12px;
+    /* ---- "+ Nova categoria" / "+ Nova subcategoria" ----
+       O tracejado continua dizendo "cria estrutura", e agora sobre o degrau
+       `superficie_2` do mockup, com o texto claro. */
+    QPushButton#cardapioBotaoEstrutura {{
       background: {t['superficie_2']};
-      border: 1px solid {t['borda']};
-      border-radius: 12px;
-      color: {t['texto_fraco']};
-      font-size: 9px;
-      font-weight: 700;
-      letter-spacing: 1px;
+      color: {t['texto']};
+      border: 1px dashed {t['cardapio_contador_borda']};
+      border-radius: 18px;
+      padding: 9px 14px;
+      font-size: 12px;
     }}
-    QPushButton#pillSubcategoria:hover {{ color: {t['texto']}; }}
-    QPushButton#pillSubcategoria[ativa="true"] {{
-      background: {t['acento']};
-      border-color: {t['acento']};
-      color: {t['acento_texto']};
+    QPushButton#cardapioBotaoEstrutura:hover {{ border-color: {t['texto_fraco']}; }}
+    QPushButton#cardapioBotaoEstrutura:disabled {{ color: {t['texto_fraquissimo']}; }}
+
+    /* ---- Rodape do painel de produtos ---- */
+    QWidget#cardapioRodape {{
+      background: {t['cardapio_rodape_bg']};
+      border-top: 1px solid {t['cardapio_painel_borda']};
+      border-bottom-left-radius: 15px;
+      border-bottom-right-radius: 15px;
+    }}
+    QPushButton#cardapioBotaoRodape {{ border-radius: 18px; padding: 9px 20px; }}
+    /* A `variante="neutro"` nao tem estado desligado: o "Editar" sem produto
+       escolhido parecia clicavel. */
+    QPushButton#cardapioBotaoRodape:disabled {{ color: {t['texto_fraquissimo']}; }}
+    QPushButton#cardapioBotaoExcluir {{
+      background: {t['cardapio_excluir_bg']};
+      color: {t['cardapio_excluir_texto']};
+      border: none;
+      border-radius: 18px;
+      padding: 9px 20px;
+    }}
+    QPushButton#cardapioBotaoExcluir:hover {{ background: {t['cardapio_excluir_hover']}; }}
+    /* Desligado sai do vermelho: um "Excluir" vermelho sem produto escolhido
+       e o unico alerta da tela gritando por nada. */
+    QPushButton#cardapioBotaoExcluir:disabled {{
+      background: {t['superficie_2']};
+      color: {t['texto_fraquissimo']};
+      border: 1px solid {t['borda']};
     }}
 
-    /* ---- Os badges de status, agora por objectName ----
-       Sairam do `setStyleSheet` de `cardapio_view` para ca (§3.15): la a cor
-       era resolvida na construcao da linha, e a tabela so acompanhava o
-       alternador Claro/Escuro porque e repovoada a cada refresh. A arvore, que
-       nao e, mostraria a cor do boot para sempre. */
-    QLabel#badgeAtivo, QLabel#badgeDesativado, QLabel#badgeVazio {{
-      font-weight: 700;
-      font-size: 11px;
-      border-radius: 4px;
-      padding: 3px 10px;
-      margin: 0px;
-    }}
-    /* Dentro da arvore o mesmo selo e um degrau menor: la ele divide a coluna
-       com o nome da categoria, e nome de categoria cortado e o defeito que esta
-       tela veio consertar. Os seletores sao os TRES ids, e nao
-       `#linhaCategoria QLabel`: a regra ampla pegava tambem o nome e o
-       subtitulo da linha, e encolhia os dois para 9px. */
-    QWidget#linhaCategoria QLabel#badgeAtivo,
-    QWidget#linhaCategoria QLabel#badgeDesativado,
-    QWidget#linhaCategoria QLabel#badgeVazio {{ font-size: 9px; padding: 2px 7px; }}
-    QLabel#badgeAtivo {{
-      background-color: {t['badge_ativo_bg']};
-      color: {t['badge_ativo_texto']};
-    }}
-    QLabel#badgeDesativado {{
-      background-color: {t['badge_desativado_bg']};
-      color: {t['badge_desativado_texto']};
-    }}
-    QLabel#badgeVazio {{
-      background-color: {t['badge_vazio_bg']};
-      color: {t['badge_vazio_texto']};
-    }}
+    /* O vao entre os dois paineis e o puxador do `QSplitter`: continua
+       arrastavel, sem a grade de pontos do estilo do sistema desenhada nele. */
+    QSplitter#cardapioDivisaoPaineis::handle {{ background: transparent; }}
 
     QComboBox#seletorSubcategoria {{ min-width: 180px; }}
 

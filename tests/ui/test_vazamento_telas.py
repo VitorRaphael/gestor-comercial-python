@@ -61,15 +61,19 @@ def test_cardapio_nao_cresce_a_cada_atualizar(qapp, assentar, cardapio, categori
     view = CardapioView(cardapio)
     view.atualizar()
     assentar()
-    depois_da_primeira = len(view._painel_produtos.tabela.findChildren(QWidget))
+    # Era a `tabela`; desde o §9.11 é a lista pintada. Ela nem tem widget por
+    # linha para sobrar — e é exatamente por isso que a conta tem que continuar
+    # sendo feita: o dia em que alguém pendurar um widget numa linha, é aqui
+    # que aparece.
+    depois_da_primeira = len(view._painel_produtos.lista.findChildren(QWidget))
 
     for _ in range(RECARGAS):
         view.atualizar()
     assentar()
-    depois_de_muitas = len(view._painel_produtos.tabela.findChildren(QWidget))
+    depois_de_muitas = len(view._painel_produtos.lista.findChildren(QWidget))
 
     assert depois_de_muitas == depois_da_primeira, (
-        f"A tabela do Cardápio foi de {depois_da_primeira} para {depois_de_muitas} "
+        f"A lista do Cardápio foi de {depois_da_primeira} para {depois_de_muitas} "
         f"widgets em {RECARGAS} recargas — cada refresh deixa a leva anterior viva."
     )
 

@@ -19,10 +19,11 @@ from __future__ import annotations
 from collections import OrderedDict
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QFont, QPainter, QPainterPath, QPen, QPixmap
 
 from gestor_comercial.services.imagem_service import resolver_caminho_thumbnail
 from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.theme.cores import cor_do_token
 
 LIMITE_ENTRADAS = 200
 
@@ -181,8 +182,11 @@ def _gerar_placeholder(tamanho: int, sigla: str, formato: str = FORMATO_CARTAO) 
     margem = 1.0
     retangulo = QRectF(margem, margem, tamanho - 2 * margem, tamanho - 2 * margem)
 
-    painter.setBrush(QColor(tokens.get("superficie_2", "#1C1C1A")))
-    painter.setPen(QPen(QColor(tokens.get("borda_card", "#242220")), 1))
+    # `cor_do_token`, e não `QColor` direto: no tema escuro `borda_card` é
+    # `rgba(255, 255, 255, 0.08)`, grafia que o `QColor` não entende — a borda
+    # saía preta opaca em vez do contorno claro sutil que o token descreve.
+    painter.setBrush(cor_do_token(tokens.get("superficie_2", "#1C1C1A")))
+    painter.setPen(QPen(cor_do_token(tokens.get("borda_card", "#242220")), 1))
     if formato == FORMATO_CIRCULO:
         painter.drawEllipse(retangulo)
     else:
@@ -196,7 +200,7 @@ def _gerar_placeholder(tamanho: int, sigla: str, formato: str = FORMATO_CARTAO) 
     fonte.setPixelSize(max(9, int(tamanho * proporcao)))
     fonte.setBold(True)
     painter.setFont(fonte)
-    painter.setPen(QColor(tokens.get("texto_fraquissimo", "#71717A")))
+    painter.setPen(cor_do_token(tokens.get("texto_fraquissimo", "#71717A")))
     painter.drawText(retangulo, Qt.AlignmentFlag.AlignCenter, sigla)
 
     painter.end()

@@ -7,31 +7,48 @@ coisas que a fariam atrapalhar em vez de ajudar:
 
 1. **a árvore mostra a hierarquia** — abrir uma categoria revela as subdivisões
    dela com a contagem de cada uma, e uma categoria aberta por vez;
-2. **a tabela agrupa** — os itens vêm sob um cabeçalho por subdivisão, e clicar
-   numa subdivisão (na árvore ou na pílula) mostra só ela;
+2. **a lista agrupa** — os itens vêm em blocos por subdivisão, e escolher uma
+   subdivisão na árvore mostra só ela;
 3. **nada fica cortado** — foi o pedido explícito. O nome da categoria tem que
    caber na coluna, e a linha da árvore tem que ter a altura do que mora dentro
-   dela. O defeito anterior era exatamente esse: `setItemWidget` numa lista
-   **não** dimensiona o item, e as linhas de duas alturas eram desenhadas dentro
-   da altura de uma;
+   dela;
 4. **nada sobra na memória** — o RNF do Celeron, numa tela que fica aberta o
    turno inteiro.
+
+## O que mudou no §9.11, e por que estes testes mudaram junto
+
+A direita deixou de ser uma tabela e virou blocos pintados por delegado, e a
+árvore deixou de hospedar um widget por categoria. Os testes que liam a tabela
+por dentro (`tabela`, `cellWidget`, `itemWidget`) passaram a ler o mesmo dado
+pelo instantâneo que cada linha carrega — a asserção de comportamento de cada
+um é a mesma. Três coisas mudaram de propósito, e os testes delas dizem o novo:
+
+* numa subdivisão escolhida o **cabeçalho do bloco aparece** — o topo do
+  painel passou a ser a categoria, e é o bloco que diz qual subdivisão está na
+  tela (antes era um título "Podrão" no topo, e o cabeçalho sobrava);
+* as **pílulas de filtro saíram** — repetiam a árvore, filtrando sem mover a
+  seleção dela; os testes delas viraram os equivalentes na árvore;
+* o selo **VAZIO** virou o contador redondo com **0**, que é o do mockup.
 """
 
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QLabel, QPushButton, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFontDatabase, QFontMetrics
+from PySide6.QtWidgets import QWidget
 
+import gestor_comercial
 from gestor_comercial.ui.views.cardapio_view import (
     _SUB_NENHUMA,
     _SUB_TODAS,
     CardapioView,
     SelecaoCardapio,
-    _criar_celula_produto,
 )
+from gestor_comercial.ui.widgets.cardapio_cartoes import PAPEL_LINHA, TipoDeItem, _fonte
 
 
 @pytest.fixture
@@ -62,13 +79,36 @@ def tela(qapp, cardapio, cardapio_montado):
     view.deleteLater()
 
 
+@pytest.fixture
+def com_metrica_de_texto(qapp):
+    """A fonte da marca registrada, para as medidas de largura valerem.
+
+    A plataforma `offscreen` sobe com o banco de fontes vazio, e sem fonte todo
+    texto mede quase nada — um teste de "o nome cabe" passaria verde sem ter
+    medido o nome que o balcão vê. Mesmo motivo e mesma fonte da fixture gêmea
+    de `test_mesas_ocupadas_em_vermelho.py`.
+    """
+    caminho = (
+        Path(gestor_comercial.__file__).resolve().parents[2]
+        / "resources"
+        / "fonts"
+        / "ArchivoBlack-Regular.ttf"
+    )
+    if not caminho.exists():  # pragma: no cover - só num checkout incompleto
+        pytest.skip(f"fonte da marca ausente em {caminho}")
+    identificador = QFontDatabase.addApplicationFont(str(caminho))
+    assert identificador != -1, "o Qt recusou a fonte da marca"
+    try:
+        yield
+    finally:
+        QFontDatabase.removeApplicationFont(identificador)
+
+
 def _item_categoria(tela: CardapioView, nome: str):
-    arvore = tela._painel_categorias.arvore
-    for indice in range(arvore.topLevelItemCount()):
-        item = arvore.topLevelItem(indice)
-        widget = arvore.itemWidget(item, 0)
-        rotulos = [r.text() for r in widget.findChildren(QLabel)] if widget else []
-        if nome in rotulos:
+    painel = tela._painel_categorias
+    for indice in range(painel.arvore.topLevelItemCount()):
+        item = painel.arvore.topLevelItem(indice)
+        if painel._nome_da_categoria(item) == nome:
             return item
     raise AssertionError(f"categoria '{nome}' não está na árvore")
 
@@ -84,29 +124,36 @@ def _abrir(tela: CardapioView, nome: str):
 
 
 def _filhos(item) -> list[tuple[str, str]]:
-    return [(item.child(i).text(0), item.child(i).text(1)) for i in range(item.childCount())]
+    linhas = [item.child(i).data(0, PAPEL_LINHA) for i in range(item.childCount())]
+    return [(linha.rotulo, str(linha.total)) for linha in linhas]
 
 
 def _linhas_visiveis(tela: CardapioView) -> list[str]:
-    """O que a tabela mostra, com os cabeçalhos de grupo marcados por `#`."""
-    painel = tela._painel_produtos
+    """O que a lista mostra, com os cabeçalhos de bloco marcados por `#`.
+
+    A busca não esconde linha: ela refaz a lista a partir do instantâneo, então
+    "visível" é simplesmente "está na lista".
+    """
+    lista = tela._painel_produtos.lista
     saida = []
-    for linha, produto in enumerate(painel._linhas):
-        if painel.tabela.isRowHidden(linha):
-            continue
-        if produto is None:
-            celula = painel.tabela.cellWidget(linha, 0)
-            nome = next(
-                r.text() for r in celula.findChildren(QLabel) if r.objectName() == "grupoNome"
-            )
-            saida.append(f"# {nome}")
-        else:
-            saida.append(produto.nome)
+    for linha in range(lista.count()):
+        dado = lista.item_da_linha(linha)
+        if dado.tipo is TipoDeItem.CABECALHO:
+            saida.append(f"# {dado.grupo.rotulo.upper()}")
+        elif dado.tipo is TipoDeItem.PRODUTO:
+            saida.append(dado.produto.nome)
+        elif dado.tipo is TipoDeItem.VAZIO:
+            saida.append("(vazio)")
     return saida
 
 
-def _pills(tela: CardapioView) -> list[str]:
-    return [pill.text() for pill in tela._painel_produtos._pills.values()]
+def _foto(tela: CardapioView, nome: str):
+    lista = tela._painel_produtos.lista
+    for linha in range(lista.count()):
+        dado = lista.item_da_linha(linha)
+        if dado.produto is not None and dado.produto.nome == nome:
+            return dado.produto
+    raise AssertionError(f"'{nome}' não está na lista")
 
 
 # ---------------------------------------------------------------------------
@@ -115,31 +162,41 @@ def _pills(tela: CardapioView) -> list[str]:
 
 
 def test_a_categoria_mostra_quantas_subs_e_quantos_itens_tem(tela):
-    item = _item_categoria(tela, "Lanches")
-    widget = tela._painel_categorias.arvore.itemWidget(item, 0)
+    linha = _item_categoria(tela, "Lanches").data(0, PAPEL_LINHA)
 
-    subtitulo = next(
-        r.text() for r in widget.findChildren(QLabel) if r.objectName() == "categoriaSubtitulo"
-    )
-
-    assert subtitulo == "2 SUBS · 4 ITENS"
+    assert linha.subtitulo == "2 SUBCATEGORIAS"
+    assert linha.produtos == 4, "o contador redondo da categoria é o total de produtos"
 
 
-def test_a_categoria_vazia_ganha_o_badge_vazio(tela, cardapio):
+def test_a_categoria_vazia_mostra_zero_no_contador(tela, cardapio):
+    """O selo VAZIO do §9.9 virou o contador com 0 do mockup — a mesma
+    informação, no lugar em que as outras categorias dizem quantos têm."""
     cardapio.criar_categoria("Doces")
     tela.atualizar()
 
-    widget = tela._painel_categorias.arvore.itemWidget(_item_categoria(tela, "Doces"), 0)
-    badges = [r.objectName() for r in widget.findChildren(QLabel) if r.text() in ("VAZIO", "ATIVO")]
+    linha = _item_categoria(tela, "Doces").data(0, PAPEL_LINHA)
 
-    assert badges == ["badgeVazio"]
+    assert linha.produtos == 0
+    assert linha.subtitulo == "0 SUBCATEGORIAS"
+
+
+def test_categoria_desativada_diz_isso_no_subtitulo(tela, cardapio, cardapio_montado):
+    """Desativar a categoria tira os produtos dela do balcão: é a única coisa
+    da linha que muda o que se vende, e ela tem que estar escrita."""
+    cardapio.desativar_categoria(cardapio_montado["bebidas"].id)
+    tela.atualizar()
+
+    linha = _item_categoria(tela, "Bebidas").data(0, PAPEL_LINHA)
+
+    assert linha.ativa is False
+    assert linha.subtitulo == "DESATIVADA · 0 SUBCATEGORIAS"
 
 
 def test_abrir_a_categoria_revela_as_subdivisoes_com_a_contagem(tela):
     item = _abrir(tela, "Lanches")
 
     assert _filhos(item) == [
-        ("Todas", "4"),
+        ("Todas as subcategorias", "4"),
         ("Artesanal", "1"),
         ("Podrão", "2"),
         ("Sem subcategoria", "1"),
@@ -160,14 +217,16 @@ def test_sem_subcategoria_so_aparece_quando_ha_item_solto(tela, cardapio, cardap
     tela.atualizar()
 
     assert [nome for nome, _ in _filhos(_abrir(tela, "Lanches"))] == [
-        "Todas",
+        "Todas as subcategorias",
         "Artesanal",
         "Podrão",
     ]
 
 
-def test_categoria_sem_subdivisao_so_tem_todas(tela):
-    assert [nome for nome, _ in _filhos(_abrir(tela, "Bebidas"))] == ["Todas"]
+def test_categoria_sem_subdivisao_so_tem_todos_os_produtos(tela):
+    """"Todas as subcategorias" numa categoria que não tem nenhuma seria a
+    tela falando de uma coisa que não existe ali."""
+    assert [nome for nome, _ in _filhos(_abrir(tela, "Bebidas"))] == ["Todos os produtos"]
 
 
 def test_uma_categoria_aberta_por_vez(tela):
@@ -181,44 +240,59 @@ def test_uma_categoria_aberta_por_vez(tela):
     assert _item_categoria(tela, "Bebidas").isExpanded() is True
 
 
-def test_a_linha_da_categoria_tem_a_altura_do_que_mora_dentro_dela(tela):
-    """O defeito que o Vitor viu: `setItemWidget` numa lista NÃO dimensiona o
-    item, e o widget de duas linhas era desenhado na altura de uma — nome e
-    subtítulo saíam cortados ao meio."""
-    arvore = tela._painel_categorias.arvore
-    item = _item_categoria(tela, "Lanches")
-    widget = arvore.itemWidget(item, 0)
-
-    assert item.sizeHint(0).height() >= widget.sizeHint().height(), (
-        "a linha da árvore é mais baixa que o conteúdo dela — o texto sai cortado"
-    )
-
-
-def test_o_nome_da_categoria_cabe_na_coluna(qapp, tela):
-    """O outro corte: a coluna da contagem nasce com `stretchLastSection` ligado
-    e tomava metade da largura, deixando "Acompanhamentos" em "Acompa"."""
+def test_a_linha_da_categoria_tem_a_altura_do_que_mora_dentro_dela(
+    qapp, com_metrica_de_texto, cardapio, cardapio_montado
+):
+    """O defeito que o Vitor viu no §9.9: a linha de duas alturas (nome +
+    subtítulo) era desenhada dentro da altura de uma e saía cortada ao meio.
+    Agora a altura sai da fonte — e é isso que este teste cobra, com a fonte
+    da marca registrada, senão ele mediria outra coisa."""
+    tela = CardapioView(cardapio)
     tela.resize(1366, 738)
     tela.show()
     qapp.processEvents()
-    arvore = tela._painel_categorias.arvore
-    item = _item_categoria(tela, "Lanches")
+    try:
+        arvore = tela._painel_categorias.arvore
+        item = _item_categoria(tela, "Lanches")
 
-    widget = arvore.itemWidget(item, 0)
+        altura = arvore.visualItemRect(item).height()
+        conteudo = arvore.itemDelegate().altura_do_conteudo(arvore.font())
 
-    assert widget.width() >= widget.sizeHint().width(), (
-        f"o widget da categoria tem {widget.width()}px para {widget.sizeHint().width()}px "
-        "de conteúdo — o nome sai cortado"
-    )
-    assert item.isFirstColumnSpanned(), "a linha da categoria não ocupa a largura inteira"
-    # A coluna da contagem é do NOME DA SUBDIVISÃO que ela rouba, e a linha da
-    # categoria não sente isso porque ocupa as duas colunas. Sem esta segunda
-    # asserção, religar o `stretchLastSection` (que nasce ligado no Qt e já
-    # tinha dado 146 dos 293px à contagem) passaria despercebido.
-    largura_da_contagem = arvore.columnWidth(1)
-    assert largura_da_contagem <= tela._painel_categorias.LARGURA_CONTAGEM_PX, (
-        f"a coluna da contagem tomou {largura_da_contagem}px — o nome da "
-        "subcategoria sai cortado"
-    )
+        assert altura >= conteudo, (
+            f"a linha tem {altura}px para {conteudo}px de conteúdo — o texto sai cortado"
+        )
+    finally:
+        tela.close()
+        tela.deleteLater()
+
+
+def test_o_nome_da_categoria_cabe_na_coluna(qapp, com_metrica_de_texto, cardapio, gerente):
+    """O outro corte do §9.9: "Acompanhamentos" saía "Acompa". A linha agora é
+    uma coluna só, da largura inteira — nenhuma coluna de contagem rouba
+    espaço do nome —, e o nome mais comprido do cardápio real cabe inteiro."""
+    cardapio.criar_categoria("Acompanhamentos")
+    tela = CardapioView(cardapio)
+    tela.resize(1366, 738)
+    tela.show()
+    qapp.processEvents()
+    try:
+        arvore = tela._painel_categorias.arvore
+        item = _item_categoria(tela, "Acompanhamentos")
+
+        retangulo = arvore.visualItemRect(item)
+        area = arvore.itemDelegate().area_do_nome(retangulo)
+        largura = QFontMetrics(_fonte(arvore.font(), 13)).horizontalAdvance("Acompanhamentos")
+
+        assert arvore.columnCount() == 1
+        assert retangulo.width() >= arvore.viewport().width() - 1, (
+            "a linha da categoria não ocupa a largura inteira"
+        )
+        assert largura <= area.width(), (
+            f"'Acompanhamentos' mede {largura}px e o espaço do nome tem {area.width():.0f}px"
+        )
+    finally:
+        tela.close()
+        tela.deleteLater()
 
 
 def test_a_busca_acha_a_categoria_pela_subdivisao(tela):
@@ -230,8 +304,19 @@ def test_a_busca_acha_a_categoria_pela_subdivisao(tela):
     assert _item_categoria(tela, "Bebidas").isHidden() is True
 
 
+@pytest.mark.parametrize("termo", ["todas", "sem sub", "todos os produtos"])
+def test_a_busca_da_arvore_nao_casa_pelas_entradas_fixas(tela, termo):
+    """"Todas as subcategorias" e "Sem subcategoria" existem em quase toda
+    categoria: casar por elas trazia o cardápio inteiro para qualquer busca
+    com "sub" ou "todas"."""
+    tela._painel_categorias._campo_busca.setText(termo)
+
+    assert _item_categoria(tela, "Lanches").isHidden() is True
+    assert _item_categoria(tela, "Bebidas").isHidden() is True
+
+
 # ---------------------------------------------------------------------------
-# A tabela agrupada
+# A lista em blocos
 # ---------------------------------------------------------------------------
 
 
@@ -249,37 +334,34 @@ def test_todas_agrupa_os_produtos_por_subdivisao(tela):
     ]
 
 
-def test_o_cabecalho_do_grupo_diz_quantos_itens_tem(tela):
+def test_o_cabecalho_do_bloco_diz_quantos_produtos_tem(tela):
     _abrir(tela, "Lanches")
-    painel = tela._painel_produtos
 
-    celula = painel.tabela.cellWidget(painel._linhas.index(None), 0)
-    contagem = next(
-        r.text() for r in celula.findChildren(QLabel) if r.objectName() == "grupoContagem"
-    )
+    cabecalho = tela._painel_produtos.lista.item_da_linha(0)
 
-    assert contagem == "· 1 ITEM"
+    assert cabecalho.tipo is TipoDeItem.CABECALHO
+    assert cabecalho.grupo.contagem_texto == "1 PRODUTO"
 
 
-def test_escolher_uma_subdivisao_mostra_so_ela_e_sem_cabecalho(tela):
-    """Numa subdivisão específica o cabeçalho de grupo seria um só, dizendo o
-    que o título da tela já diz."""
+def test_escolher_uma_subdivisao_mostra_so_ela_com_o_cabecalho_dela(tela):
+    """O topo do painel passou a ser a CATEGORIA (§9.11); quem diz qual
+    subdivisão está na tela é o cabeçalho do bloco — e ele traz o link de
+    editá-la."""
     item = _abrir(tela, "Lanches")
     tela._painel_categorias.arvore.setCurrentItem(item.child(2))  # Podrão
 
-    assert _linhas_visiveis(tela) == ["X Burguer", "X Tudo"]
-    assert tela._painel_produtos._titulo.text() == "Podrão"
+    assert _linhas_visiveis(tela) == ["# PODRÃO", "X Burguer", "X Tudo"]
+    assert tela._painel_produtos._titulo.texto_completo() == "Lanches"
 
 
 def test_sem_subcategoria_mostra_a_fila_de_trabalho(tela):
     item = _abrir(tela, "Lanches")
     tela._painel_categorias.arvore.setCurrentItem(item.child(3))
 
-    assert _linhas_visiveis(tela) == ["X Egg"]
-    assert tela._painel_produtos._titulo.text() == "Sem subcategoria"
+    assert _linhas_visiveis(tela) == ["# SEM SUBCATEGORIA", "X Egg"]
 
 
-def test_a_subdivisao_vazia_aparece_com_a_tabela_vazia(tela, cardapio, cardapio_montado):
+def test_a_subdivisao_vazia_aparece_com_o_aviso(tela, cardapio, cardapio_montado):
     """"Está aqui, sem itens ainda" — enquanto uma tela em branco diria "não
     existe". É o estado normal de quem acabou de criar a subdivisão."""
     cardapio.criar_subcategoria(cardapio_montado["lanches"].id, "Prensado")
@@ -287,11 +369,10 @@ def test_a_subdivisao_vazia_aparece_com_a_tabela_vazia(tela, cardapio, cardapio_
     item = _abrir(tela, "Lanches")
     tela._painel_categorias.arvore.setCurrentItem(item.child(3))  # Prensado
 
-    assert tela._painel_produtos._titulo.text() == "Prensado"
-    assert _linhas_visiveis(tela) == []
+    assert _linhas_visiveis(tela) == ["# PRENSADO", "(vazio)"]
 
 
-def test_o_cabecalho_diz_a_categoria_e_a_impressora(tela, cardapio, cardapio_montado):
+def test_o_topo_diz_a_categoria_e_a_impressora(tela, cardapio, cardapio_montado):
     """A impressora está ali porque é para onde os itens daquela categoria vão
     sair — e é a informação que a subcategoria NÃO muda (§9.8)."""
     impressora = cardapio.criar_impressora("Cozinha")
@@ -300,63 +381,47 @@ def test_o_cabecalho_diz_a_categoria_e_a_impressora(tela, cardapio, cardapio_mon
 
     _abrir(tela, "Lanches")
 
-    assert tela._painel_produtos._eyebrow.text() == "LANCHES · COZINHA"
-    assert tela._painel_produtos._titulo.text() == "Todas as subcategorias"
+    painel = tela._painel_produtos
+    assert painel._titulo.texto_completo() == "Lanches"
+    assert painel._meta.texto_completo() == "COZINHA · 4 ITENS · 2 SUBCATEGORIAS"
 
 
 def test_categoria_sem_impressora_diz_isso_em_vez_de_ficar_em_branco(tela):
     _abrir(tela, "Lanches")
 
-    assert tela._painel_produtos._eyebrow.text() == "LANCHES · SEM IMPRESSORA"
+    assert tela._painel_produtos._meta.texto_completo().startswith("SEM IMPRESSORA · ")
 
 
-# ---------------------------------------------------------------------------
-# As pílulas de filtro
-# ---------------------------------------------------------------------------
-
-
-def test_as_pilulas_listam_as_subdivisoes_com_a_contagem(tela):
-    _abrir(tela, "Lanches")
-
-    assert _pills(tela) == ["TODAS", "ARTESANAL · 1", "PODRÃO · 2", "SEM SUBCATEGORIA · 1"]
-
-
-def test_a_faixa_de_pilulas_some_na_categoria_sem_subdivisao(tela):
+def test_categoria_sem_subdivisao_nao_tem_cabecalho_de_bloco(tela):
+    """Um "SEM SUBCATEGORIA" em cima de todos os itens de uma categoria que não
+    tem subdivisão nenhuma diria o óbvio — o bloco sai sem cabeçalho."""
     _abrir(tela, "Bebidas")
 
-    assert tela._painel_produtos._pills == {}
-    assert tela._painel_produtos._faixa.isVisibleTo(tela._painel_produtos) is False
+    assert _linhas_visiveis(tela) == ["Coca Lata"]
 
 
-def test_clicar_na_pilula_filtra_sem_mexer_na_arvore(tela):
+def test_a_contagem_do_bloco_nao_encolhe_com_a_busca(tela):
+    """Era a garantia das pílulas do §9.9, e continua valendo no cabeçalho do
+    bloco: buscar não pode fazer a subdivisão parecer ter encolhido."""
     _abrir(tela, "Lanches")
 
-    tela._painel_produtos._pills["Podrão"].click()
+    tela._painel_produtos._campo_busca.setText("burguer")
 
-    assert _linhas_visiveis(tela) == ["X Burguer", "X Tudo"]
-    assert tela._painel_produtos._pills["Podrão"].property("ativa") is True
-    assert tela._painel_produtos._pills[_SUB_TODAS].property("ativa") is False
-
-
-def test_a_contagem_da_pilula_nao_muda_com_o_filtro(tela):
-    """Seria a tela dizendo que a subdivisão encolheu quando o gerente clicou
-    em outra."""
-    _abrir(tela, "Lanches")
-
-    tela._painel_produtos._pills[_SUB_NENHUMA].click()
-
-    assert _pills(tela) == ["TODAS", "ARTESANAL · 1", "PODRÃO · 2", "SEM SUBCATEGORIA · 1"]
+    cabecalho = tela._painel_produtos.lista.item_da_linha(0)
+    assert _linhas_visiveis(tela) == ["# PODRÃO", "X Burguer"]
+    assert cabecalho.grupo.contagem_texto == "2 PRODUTOS"
 
 
-def test_trocar_de_categoria_solta_o_filtro(tela):
-    """Filtrar Lanches por "Podrão" e clicar em Bebidas deixaria a tabela vazia,
-    com a faixa escondida e nada na tela explicando por quê."""
-    _abrir(tela, "Lanches")
-    tela._painel_produtos._pills["Podrão"].click()
+def test_trocar_de_categoria_solta_a_subdivisao(tela):
+    """Estar em "Lanches → Podrão" e clicar em Bebidas não pode levar o filtro
+    junto: a lista ficaria vazia sem nada na tela explicando por quê."""
+    item = _abrir(tela, "Lanches")
+    tela._painel_categorias.arvore.setCurrentItem(item.child(2))  # Podrão
 
     _abrir(tela, "Bebidas")
 
     assert _linhas_visiveis(tela) == ["Coca Lata"]
+    assert tela._painel_categorias.selecao_atual().chave == _SUB_TODAS
 
 
 # ---------------------------------------------------------------------------
@@ -364,36 +429,44 @@ def test_trocar_de_categoria_solta_o_filtro(tela):
 # ---------------------------------------------------------------------------
 
 
-def test_o_produto_nao_carrega_mais_o_selo_da_subcategoria(tela, cardapio, cardapio_montado):
-    """O selo saiu: ele repetia, uma vez por linha, o que o cabeçalho do grupo
-    diz uma vez — e disputava largura justamente com o nome do produto."""
-    produto = next(p for p in cardapio.listar_produtos() if p.nome == "X Burguer")
+def test_o_produto_nao_carrega_mais_o_selo_da_subcategoria(tela):
+    """O selo saiu no §9.9: ele repetia, uma vez por linha, o que o cabeçalho
+    do bloco diz uma vez — e disputava largura justamente com o nome."""
+    _abrir(tela, "Lanches")
 
-    celula = _criar_celula_produto(produto)
-    try:
-        nomes = [r.text() for r in celula.findChildren(QLabel) if r.text()]
-        assert "PODRÃO" not in nomes
-        assert "X Burguer" in nomes
-    finally:
-        celula.deleteLater()
+    foto = _foto(tela, "X Burguer")
+
+    assert foto.nome == "X Burguer"
+    assert "PODRÃO" not in foto.selos
+    assert foto.selos == ()
 
 
-def test_o_combo_virou_selo_ao_lado_do_nome(tela, cardapio, cardapio_montado):
-    """A coluna "Tipo" existia para uma marca que aparece em 4 dos 113 produtos
-    do cardápio real, e os 90px dela faziam falta ao nome."""
-    from gestor_comercial.ui.views.cardapio_view import _COLUNAS_PRODUTOS
-
-    combo = cardapio.criar_produto(
+def test_o_combo_e_selo_ao_lado_do_nome(tela, cardapio, cardapio_montado):
+    """COMBO aparece em 4 dos 113 produtos do cardápio real: é selo ao lado do
+    nome, e não uma coluna inteira reservada para ele."""
+    cardapio.criar_produto(
         "Combo Casal", Decimal("40.00"), cardapio_montado["lanches"].id, is_combo=True
     )
+    tela.atualizar()
+    _abrir(tela, "Lanches")
 
-    celula = _criar_celula_produto(combo)
-    try:
-        badges = [r.objectName() for r in celula.findChildren(QLabel) if r.text() == "COMBO"]
-        assert badges == ["badgeCombo"]
-        assert "Tipo" not in _COLUNAS_PRODUTOS
-    finally:
-        celula.deleteLater()
+    assert _foto(tela, "Combo Casal").selos == ("COMBO",)
+
+
+def test_produto_desativado_ganha_o_selo_no_lugar_da_coluna_de_status(
+    tela, cardapio, cardapio_montado
+):
+    """A coluna "Status" saiu com a tabela. O ATIVO repetido em toda linha era
+    ruído; o que precisa aparecer é a exceção."""
+    x_tudo = next(p for p in cardapio.listar_produtos() if p.nome == "X Tudo")
+    cardapio.desativar_produto(x_tudo.id)
+    tela.atualizar()
+    _abrir(tela, "Lanches")
+
+    foto = _foto(tela, "X Tudo")
+    assert foto.ativo is False
+    assert foto.selos == ("DESATIVADO",)
+    assert _foto(tela, "X Burguer").selos == ()
 
 
 def test_a_busca_do_cardapio_acha_pela_subcategoria(tela):
@@ -419,27 +492,27 @@ def test_o_cabecalho_de_grupo_nao_pode_ser_selecionado(tela):
     nenhum."""
     _abrir(tela, "Lanches")
     painel = tela._painel_produtos
+    cabecalho = painel.lista.item(0)
 
-    linha_do_grupo = painel._linhas.index(None)
-    painel.tabela.selectRow(linha_do_grupo)
+    assert not cabecalho.flags() & Qt.ItemFlag.ItemIsSelectable
+    painel.lista.setCurrentItem(cabecalho)
 
     # `produto_atual()` sozinho responderia `None` de qualquer jeito (a linha
     # não tem produto), então ele não distingue nada. O que distingue é a linha
-    # NÃO ficar marcada: com ela selecionada, a tabela mostraria uma faixa azul
-    # sobre um cabeçalho e o rodapé diria "SELECIONE UM PRODUTO" ao lado de uma
-    # linha aparentemente escolhida.
-    assert painel.tabela.selectedItems() == [], "o cabeçalho de grupo ficou selecionado"
+    # NÃO ficar marcada: com ela selecionada, a lista mostraria um cabeçalho
+    # destacado e o rodapé diria "SELECIONE UM PRODUTO" ao lado dele.
+    assert painel.lista.selectedItems() == [], "o cabeçalho de bloco ficou selecionado"
     assert painel.produto_atual() is None
     assert painel._botao_editar.isEnabled() is False
 
 
-def test_selecionar_um_produto_com_a_tabela_agrupada_devolve_o_produto_certo(tela):
-    """Com cabeçalho de grupo no meio, o índice da linha deixou de ser o índice
+def test_selecionar_um_produto_com_a_lista_agrupada_devolve_o_produto_certo(tela):
+    """Com cabeçalho de bloco no meio, o índice da linha deixou de ser o índice
     do produto — e `produto_atual()` continua tendo que acertar."""
     _abrir(tela, "Lanches")
     painel = tela._painel_produtos
 
-    painel.tabela.selectRow(painel._linhas.index(None) + 1)
+    painel.lista.setCurrentRow(1)
 
     assert painel.produto_atual().nome == "X Missão Impossível"
 
@@ -449,20 +522,23 @@ def test_selecionar_um_produto_com_a_tabela_agrupada_devolve_o_produto_certo(tel
 # ---------------------------------------------------------------------------
 
 
-def test_trocar_de_categoria_nao_acumula_pilulas(tela, assentar):
-    """O RNF do Celeron, numa tela que fica aberta o turno inteiro."""
+def test_trocar_de_categoria_nao_acumula_widgets(tela, assentar):
+    """O RNF do Celeron, numa tela que fica aberta o turno inteiro. Era o teste
+    das pílulas do §9.9; sem pílula e sem widget por linha, o que se conta é a
+    lista inteira — e ela não pode crescer."""
+    _abrir(tela, "Lanches")
+    assentar()
+    lista = tela._painel_produtos.lista
+    antes = len(lista.findChildren(QWidget))
+
     for _ in range(10):
         _abrir(tela, "Lanches")
         _abrir(tela, "Bebidas")
     _abrir(tela, "Lanches")
     assentar()
 
-    penduradas = [
-        botao
-        for botao in tela._painel_produtos._faixa.findChildren(QPushButton)
-        if botao.objectName() == "pillSubcategoria"
-    ]
-    assert len(penduradas) == 4, f"{len(penduradas)} pílulas presas depois de 10 trocas"
+    depois = len(lista.findChildren(QWidget))
+    assert depois == antes, f"a lista foi de {antes} para {depois} widgets em 10 trocas"
 
 
 def test_muitos_refreshs_nao_incham_a_arvore(tela, assentar):
@@ -490,7 +566,7 @@ def test_a_selecao_sobrevive_ao_refresh(tela):
     selecao = tela._painel_categorias.selecao_atual()
     assert selecao.categoria.nome == "Lanches"
     assert selecao.chave == "Podrão"
-    assert _linhas_visiveis(tela) == ["X Burguer", "X Tudo"]
+    assert _linhas_visiveis(tela) == ["# PODRÃO", "X Burguer", "X Tudo"]
 
 
 def test_selecao_cardapio_e_um_tipo_e_nao_dois_parametros_soltos():
@@ -500,3 +576,4 @@ def test_selecao_cardapio_e_um_tipo_e_nao_dois_parametros_soltos():
 
     assert selecao.chave == _SUB_TODAS
     assert selecao.e_todas is True
+    assert SelecaoCardapio(categoria=None, chave=_SUB_NENHUMA).e_todas is False

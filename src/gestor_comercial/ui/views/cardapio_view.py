@@ -1,62 +1,50 @@
 """Cardápio: árvore Categoria → Subcategoria (esquerda) e os produtos da
-seleção (direita), tudo em ordem alfabética.
+seleção em blocos por subcategoria (direita), tudo em ordem alfabética.
 
-## A hierarquia é o desenho da tela (§9.9)
+## Cartões pintados, e não tabela (§9.11)
 
-A primeira versão da subcategoria (§9.8) a tratou como uma **etiqueta pendurada
-no produto**: um selo ao lado do nome, na linha do item. Estava de cabeça para
-baixo, e o Vitor apontou — a subcategoria **contém** produtos, não o contrário.
-Abrir "Lanches" tem que mostrar as subdivisões dele, e é entrando numa
-subdivisão que se chega aos itens.
+O §9.9 acertou a hierarquia — a subcategoria **contém** os produtos — mas a
+direita continuava sendo uma tabela linear, com linhas de cabeçalho no meio.
+O mockup do Vitor desenha o que a hierarquia sugere: cada subcategoria é um
+**bloco** (cabeçalho com o nome, a contagem e "Editar subcategoria") e os
+produtos são linhas dentro dele — miniatura, nome, preço, custo e a barra de
+margem.
 
-Então a tela virou a hierarquia:
+As duas colunas deixaram de ser feitas de widgets e passaram a ser **pintadas**
+por delegado (`widgets/cardapio_cartoes.py`, onde está a medição do porquê).
+Esta view ficou com o que é dela: ler o service, montar os instantâneos,
+reagir a clique — e **manter o gerente onde ele estava**. A categoria aberta, a
+subdivisão escolhida, o produto selecionado e a rolagem das duas listas
+sobrevivem a qualquer recarga: salvar um produto não pode fechar o acordeão nem
+jogar a lista para o topo.
 
-* a **árvore** da esquerda expande a categoria e mostra `Todas`, cada
-  subcategoria e (quando há item solto) `Sem subcategoria`, com a contagem de
-  cada uma. Uma categoria por vez fica aberta — com quinze categorias, deixar
-  todas expandidas transformaria a coluna num rolo;
-* a **tabela** da direita agrupa por subcategoria, com uma linha de cabeçalho
-  por grupo (`GUARNIÇÕES · 3 ITENS`). O selo que existia na linha do produto
-  **saiu**: ele dizia a mesma coisa que o cabeçalho do grupo, uma vez por
-  linha.
+Por consequência, a subdivisão escolhida na árvore é dita pelo **cabeçalho do
+bloco**, e não mais por um título "Podrão" no topo do painel: o topo passou a
+ser a categoria (`Acompanhamentos`, `COZINHA · 5 ITENS · 2 SUBCATEGORIAS`). As
+pílulas de filtro que o §9.9 punha entre a busca e a tabela saíram — repetiam a
+árvore, com uma divergência sutil (filtravam sem mover a seleção dela).
+
+## O que não mudou
 
 Combo não é aba separada — é um Produto com `is_combo=True`, ligado pelo
 service assim que ganha o primeiro componente (ver
-`CardapioService.associar_componente`). A badge "COMBO" perdeu a coluna própria
-e virou um selo ao lado do nome: a coluna existia para uma marca que aparece em
-4 dos 113 produtos do cardápio real, e a largura dela fazia falta ao nome.
-
-Cabeçalho traz 4 KPIs (categorias, subcategorias, produtos, margem média) e as
-duas ações de topo (Gerenciar combo / Novo item). Editar/Ativar-Desativar/
-Excluir de produto moram no rodapé do painel de produtos; os mesmos três em
-categoria saem por menu de contexto (botão direito na árvore) — a categoria não
-tem barra própria no design, só o "+ Nova categoria".
-Os atalhos de teclado (Ctrl+N/F2/Delete) continuam despachando pelo
-`_contexto` (qual lado está com foco), sem precisar de botões visíveis.
-Associação de impressora não mora aqui — isso é responsabilidade exclusiva
-da tela "Impressoras". O que esta tela faz é **mostrar** a impressora da
-categoria no cabeçalho da direita (`ACOMPANHAMENTOS · COZINHA`), porque é a
-informação que diz para onde os itens daquela categoria vão sair.
+`CardapioService.associar_componente`); na linha ele é um selo ao lado do nome.
+Editar/Ativar-Desativar/Excluir de produto moram no rodapé do painel; os mesmos
+três em categoria saem por menu de contexto (botão direito na árvore). Os
+atalhos de teclado (Ctrl+N/F2/Delete) despacham pelo `_contexto` (qual lado
+está com foco). Associação de impressora mora na tela "Impressoras": aqui ela
+só é **mostrada**, no topo do painel, porque é para onde os itens daquela
+categoria vão sair — e é a informação que a subcategoria NÃO muda (§9.8).
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-
 from decimal import Decimal
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
-from PySide6.QtCore import QPointF, QRectF
-from PySide6.QtGui import (
-    QColor,
-    QKeySequence,
-    QPainter,
-    QPaintEvent,
-    QPen,
-    QResizeEvent,
-    QShortcut,
-)
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -69,7 +57,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QListWidget,
     QListWidgetItem,
     QMenu,
     QMessageBox,
@@ -88,7 +75,12 @@ from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.domain.categoria import Categoria
 from gestor_comercial.domain.combo_item import ComboItem
 from gestor_comercial.domain.produto import Produto
-from gestor_comercial.services.cardapio_service import CardapioService
+from gestor_comercial.services.cardapio_service import (
+    CardapioService,
+    ResumoCardapio,
+    margem_percentual,
+)
+from gestor_comercial.services.dinheiro import ZERO
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
     NaoAutorizadoError,
@@ -97,32 +89,45 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.imagem_service import processar_imagem_produto, remover_thumbnail
 from gestor_comercial.services.texto import chave_de_agrupamento
-from gestor_comercial.services.dinheiro import ZERO
 from gestor_comercial.ui.formatacao import (
     formatar_para_campo,
     formatar_reais,
     safe_decimal,
 )
-from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
+from gestor_comercial.ui.widgets.cardapio_cartoes import (
+    GLIFO_CAIXA,
+    GLIFO_CAMADAS,
+    GLIFO_CIFRAO,
+    GLIFO_ETIQUETA,
+    GLIFO_PASTA,
+    PAPEL_LINHA,
+    DelegadoArvore,
+    FotoGrupo,
+    FotoProduto,
+    InsigniaCardapio,
+    ItemDaLista,
+    LinhaDeCategoria,
+    LinhaDeSubdivisao,
+    ListaDeProdutos,
+    RotuloComReticencias,
+    campo_de_busca,
+    divisor,
+    montar_itens,
+)
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
-from gestor_comercial.ui.widgets.flow_layout import FlowLayout
 from gestor_comercial.ui.widgets.modais import descartar_modal, executar_modal
+from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
 from gestor_comercial.ui.widgets.subcategoria_dialog import SubcategoriaDialog
-from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
+from gestor_comercial.ui.widgets.tabelas import limpar_tabela
 from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
 
-# A coluna "Tipo" saiu: ela existia para a badge COMBO, que aparece em 4 dos
-# 113 produtos do cardápio real e agora é um selo ao lado do nome. Os 90px que
-# ela ocupava voltaram para a coluna "Produto", que é a que estava apertada.
-_COLUNAS_PRODUTOS = ["Produto", "Preço", "Custo", "Margem", "Status"]
 _COLUNAS_COMPONENTES = ["Componente", "Quantidade"]
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
-# O que cada item da árvore carrega. São papéis de dado do Qt e não colunas: o
-# item mostra um widget próprio (a categoria) ou o texto dele mesmo (a
-# subcategoria), e a identidade tem que viajar junto em qualquer um dos dois.
+# O que cada item da árvore carrega além do instantâneo que o delegado pinta
+# (`PAPEL_LINHA`): a identidade, que viaja junto em qualquer item.
 _PAPEL_CATEGORIA = Qt.ItemDataRole.UserRole
 _PAPEL_CHAVE = Qt.ItemDataRole.UserRole + 1
 _PAPEL_ROTULO = Qt.ItemDataRole.UserRole + 2
@@ -134,8 +139,13 @@ _PAPEL_ROTULO = Qt.ItemDataRole.UserRole + 2
 _SUB_TODAS = "\x00todas"
 _SUB_NENHUMA = "\x00nenhuma"
 
-_ROTULO_TODAS = "Todas"
+# "Todas as subcategorias" só faz sentido onde há subcategoria; numa categoria
+# sem subdivisão nenhuma a mesma entrada se chama pelo que ela mostra.
+_ROTULO_TODAS = "Todas as subcategorias"
+_ROTULO_TODOS_OS_PRODUTOS = "Todos os produtos"
 _ROTULO_SEM_SUBCATEGORIA = "Sem subcategoria"
+
+_DICA_SEM_SELECAO = "SELECIONE UM PRODUTO PARA EDITAR"
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,54 +194,15 @@ class SelecaoCardapio:
     def e_todas(self) -> bool:
         return self.chave == _SUB_TODAS
 
+    def mesmo_lugar_que(self, outra: SelecaoCardapio) -> bool:
+        """Mesma categoria (pelo id) e mesma subdivisão.
 
-@dataclass(frozen=True, slots=True)
-class _Grupo:
-    """Uma subcategoria e os produtos dentro dela, prontos para a tabela.
-
-    `nome=None` é o grupo dos itens sem subcategoria — o último da lista, e o
-    único cujo rótulo não é dado pelo gerente.
-    """
-
-    nome: str | None
-    produtos: list[Produto]
-
-    @property
-    def rotulo(self) -> str:
-        return self.nome if self.nome is not None else _ROTULO_SEM_SUBCATEGORIA
-
-    @property
-    def chave(self) -> str:
-        return self.nome if self.nome is not None else _SUB_NENHUMA
-
-
-def _agrupar_por_subcategoria(produtos: list[Produto]) -> list[_Grupo]:
-    """Os produtos repartidos entre as subcategorias, em ordem alfabética.
-
-    O grupo dos **sem subcategoria** vai por último de propósito: numa categoria
-    em organização, ele é a fila de trabalho de quem está classificando, e
-    fila de trabalho fica no fim, não na frente do que já está pronto.
-
-    Grupo vazio não sai daqui: esta função reparte PRODUTOS, e produto nenhum
-    significa grupo nenhum. Quem precisa desenhar uma subdivisão recém-criada,
-    ainda sem itens, monta o `_Grupo` vazio por conta própria — é o painel de
-    produtos, que tem a lista de subdivisões cadastradas em mãos.
-    """
-    por_nome: dict[str, list[Produto]] = {}
-    soltos: list[Produto] = []
-    for produto in produtos:
-        if produto.subcategoria is not None:
-            por_nome.setdefault(produto.subcategoria.nome, []).append(produto)
-        else:
-            soltos.append(produto)
-
-    grupos = [
-        _Grupo(nome, _por_nome(por_nome[nome]))
-        for nome in sorted(por_nome, key=str.lower)
-    ]
-    if soltos:
-        grupos.append(_Grupo(None, _por_nome(soltos)))
-    return grupos
+        Pelo id, e não por `==`: a `Categoria` é uma instância do SQLAlchemy, e
+        a mesma categoria relida depois de um commit pode ser outro objeto.
+        """
+        meu_id = self.categoria.id if self.categoria is not None else None
+        outro_id = outra.categoria.id if outra.categoria is not None else None
+        return meu_id == outro_id and self.chave == outra.chave
 
 
 def _por_nome(itens: list) -> list:
@@ -239,14 +210,52 @@ def _por_nome(itens: list) -> list:
     return sorted(itens, key=lambda item: item.nome.lower())
 
 
-def _margem_percentual(produto: Produto) -> float:
-    if produto.preco is None or produto.preco <= 0:
-        return 0.0
-    return float((produto.preco - produto.custo) / produto.preco * 100)
+def _plural(total: int, singular: str, plural: str) -> str:
+    return f"{total} {singular if total == 1 else plural}"
+
+
+def _fotografar(produto: Produto, nome_da_subcategoria: str | None) -> FotoProduto:
+    """O instantâneo que a linha da lista pinta — lido do `Produto` UMA vez.
+
+    É aqui, na recarga, que a tela toca o SQLAlchemy; a pintura só lê o que
+    ficou guardado (ver `widgets/cardapio_cartoes.py`).
+    """
+    selos = []
+    if produto.is_combo:
+        selos.append("COMBO")
+    if not produto.ativo:
+        selos.append("DESATIVADO")
+    return FotoProduto(
+        produto_id=produto.id,
+        nome=produto.nome,
+        preco_texto=formatar_reais(produto.preco),
+        custo_texto=formatar_reais(produto.custo),
+        margem=margem_percentual(produto.preco, produto.custo),
+        ativo=produto.ativo,
+        selos=tuple(selos),
+        imagem_path=produto.imagem_path,
+        # Nome + subcategoria, a mesma regra do modal de lançamento: telas que
+        # buscam diferente sobre o mesmo cardápio é como o gerente conclui que o
+        # produto sumiu.
+        busca=chave_de_agrupamento(f"{produto.nome} {nome_da_subcategoria or ''}"),
+    )
+
+
+def _legenda_das_categorias(resumo: ResumoCardapio) -> str:
+    """"grupos ativos" só quando é verdade — senão diz quantos estão fora."""
+    if resumo.categorias == 0:
+        return "nenhum grupo ainda"
+    desativadas = resumo.categorias - resumo.categorias_ativas
+    if not desativadas:
+        return "grupos ativos"
+    return (
+        f"{_plural(resumo.categorias_ativas, 'ativo', 'ativos')} · "
+        f"{_plural(desativadas, 'desativado', 'desativados')}"
+    )
 
 
 class CardapioView(QWidget):
-    """Cardápio unificado: KPIs no topo, categorias à esquerda, produtos à direita."""
+    """Cardápio: KPIs no topo, a árvore à esquerda, os blocos de produto à direita."""
 
     def __init__(self, cardapio_service: CardapioService, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -257,17 +266,23 @@ class CardapioView(QWidget):
         self._painel_produtos = _ProdutosPainel(self._service, self._mostrar_erro)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(16)
+        layout.setSpacing(14)
 
         layout.addLayout(self._criar_cabecalho())
         layout.addLayout(self._criar_grade_kpis())
 
+        # Escondida quando vazia: numa tela de 768px de altura, uma linha de
+        # erro em branco custava ~30px que as duas listas não tinham.
         self._label_erro = QLabel("")
         self._label_erro.setObjectName("labelErro")
+        self._label_erro.setWordWrap(True)
+        self._label_erro.setVisible(False)
         layout.addWidget(self._label_erro)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setObjectName("cardapioDivisaoPaineis")
         splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(16)
         splitter.addWidget(self._painel_categorias)
         splitter.addWidget(self._painel_produtos)
         splitter.setStretchFactor(0, 30)
@@ -279,14 +294,19 @@ class CardapioView(QWidget):
         layout.addWidget(splitter, stretch=1)
 
         self._painel_categorias.selecao_mudou.connect(self._painel_produtos.exibir)
-        self._painel_categorias.selecao_mudou.connect(self._ao_mudar_selecao_categoria)
         self._painel_categorias.alterado.connect(self._ao_alterar_categoria)
         self._painel_produtos.alterado.connect(self._ao_alterar_produto)
         self._painel_produtos.produto_selecionado.connect(self._ao_mudar_selecao_produto)
+        # O link "Editar subcategoria" mora no bloco da direita, mas quem sabe
+        # editar subcategoria — e manter a seleção depois de renomeá-la — é a
+        # árvore da esquerda.
+        self._painel_produtos.editar_subcategoria_pedida.connect(
+            self._painel_categorias.editar_subcategoria_por_nome
+        )
 
         # Detecta em qual lado está o foco pra saber quem recebe F2/Delete/Ctrl+N.
         self._painel_categorias.arvore.installEventFilter(self)
-        self._painel_produtos.tabela.installEventFilter(self)
+        self._painel_produtos.lista.installEventFilter(self)
 
         QShortcut(QKeySequence("Ctrl+N"), self, self._novo_padrao)
         QShortcut(QKeySequence(Qt.Key.Key_F2), self, self._editar)
@@ -296,26 +316,28 @@ class CardapioView(QWidget):
 
     def _criar_cabecalho(self) -> QHBoxLayout:
         cabecalho = QHBoxLayout()
-        cabecalho.setSpacing(12)
+        cabecalho.setSpacing(10)
 
         coluna_titulo = QVBoxLayout()
         coluna_titulo.setSpacing(2)
         titulo = QLabel("Cardápio")
-        titulo.setStyleSheet("font-size: 22px; font-weight: 700;")
+        titulo.setObjectName("cardapioTitulo")
         coluna_titulo.addWidget(titulo)
         subtitulo = QLabel("Categorias, subcategorias, produtos e margens da operação")
-        subtitulo.setProperty("variante", "fraco")
+        subtitulo.setObjectName("cardapioSubtitulo")
         coluna_titulo.addWidget(subtitulo)
         cabecalho.addLayout(coluna_titulo)
         cabecalho.addStretch()
 
         self._botao_combo = QPushButton("Gerenciar combo")
+        self._botao_combo.setObjectName("cardapioBotaoTopo")
         self._botao_combo.setProperty("variante", "neutro")
         self._botao_combo.setEnabled(False)
         self._botao_combo.clicked.connect(self._painel_produtos.gerenciar_combo)
         cabecalho.addWidget(self._botao_combo)
 
         botao_novo_item = QPushButton("Novo item")
+        botao_novo_item.setObjectName("cardapioBotaoTopo")
         botao_novo_item.setProperty("variante", "primario")
         botao_novo_item.clicked.connect(self._painel_produtos.criar)
         cabecalho.addWidget(botao_novo_item)
@@ -326,19 +348,19 @@ class CardapioView(QWidget):
         grade = QHBoxLayout()
         grade.setSpacing(12)
 
-        # "Preço médio" saiu para a SUBCATEGORIAS entrar. Média de preço sobre
-        # um cardápio que vai de R$ 0,50 (chiclete) a R$ 48,00 (dois espetos de
-        # picanha) não é um número que decida nada; quantas subdivisões existem,
-        # sim — é o que diz se a organização do catálogo avançou.
-        self._kpi_categorias = _CardKpi("🗂️", "Categorias")
-        self._kpi_subcategorias = _CardKpi("🌿", "Subcategorias")
-        self._kpi_produtos = _CardKpi("📦", "Produtos")
-        self._kpi_margem_media = _CardKpi("%", "Margem média")
+        # "Preço médio" VOLTOU (§9.11), agora com a margem média de legenda: é o
+        # quarto card do mockup do Vitor. O §9.9 o tinha tirado — média de preço
+        # num cardápio de R$ 0,50 a R$ 48,00 decide pouco sozinha —, e a margem,
+        # que era o número que decide, continua na tela, logo embaixo dele.
+        self._kpi_categorias = _CardKpi(GLIFO_CAMADAS, "Categorias")
+        self._kpi_subcategorias = _CardKpi(GLIFO_ETIQUETA, "Subcategorias")
+        self._kpi_produtos = _CardKpi(GLIFO_CAIXA, "Produtos")
+        self._kpi_preco_medio = _CardKpi(GLIFO_CIFRAO, "Preço médio")
         for card in (
             self._kpi_categorias,
             self._kpi_subcategorias,
             self._kpi_produtos,
-            self._kpi_margem_media,
+            self._kpi_preco_medio,
         ):
             grade.addWidget(card)
         return grade
@@ -348,12 +370,9 @@ class CardapioView(QWidget):
         if event.type() == QEvent.Type.FocusIn:
             if obj is self._painel_categorias.arvore:
                 self._contexto = "categoria"
-            elif obj is self._painel_produtos.tabela:
+            elif obj is self._painel_produtos.lista:
                 self._contexto = "produto"
         return super().eventFilter(obj, event)
-
-    def _ao_mudar_selecao_categoria(self, _selecao: SelecaoCardapio) -> None:
-        pass
 
     def _ao_mudar_selecao_produto(self, produto: Produto | None) -> None:
         self._botao_combo.setEnabled(produto is not None)
@@ -388,132 +407,80 @@ class CardapioView(QWidget):
     def atualizar(self) -> None:
         """Recarrega a tela SEM tirar o gerente de onde ele estava.
 
-        `atualizar()` é chamado no boot e depois de cada alteração (editar um
-        produto, criar uma subdivisão). No boot não há seleção e a árvore abre
-        na primeira categoria; depois, voltar para a primeira seria a tela
-        largando o trabalho a cada item salvo — é o mesmo contrato que a tabela
-        de produtos já cumpre com `preservar_selecao=True`, e que
-        `test_selecao_sobrevive_ao_refresh.py` cobra do lado dela.
+        `atualizar()` é chamado no boot e a cada navegação até a tela. No boot
+        não há seleção e a árvore abre na primeira categoria; depois, voltar
+        para a primeira seria a tela largando o trabalho — a categoria aberta, a
+        subdivisão, o produto e as duas rolagens voltam ao lugar
+        (`test_selecao_sobrevive_ao_refresh.py`, `test_cardapio_cartoes.py`).
         """
-        self._label_erro.setText("")
+        self._mostrar_erro("")
         self._painel_categorias.atualizar_mantendo_selecao()
         self._atualizar_kpis()
 
     def _atualizar_kpis(self) -> None:
-        categorias = self._service.listar_categorias()
-        produtos = self._service.listar_produtos()
-
-        self._kpi_categorias.definir_valor(str(len(categorias)))
-        self._kpi_produtos.definir_valor(str(len(produtos)))
-        self._kpi_subcategorias.definir_valor(
-            str(sum(len(self._service.listar_subcategorias(c.id)) for c in categorias))
+        # Três consultas fixas, feitas pelo service: a tela não conta nem tira
+        # média de nada (antes eram 17 consultas e a conta de margem morava aqui).
+        resumo = self._service.resumo_do_cardapio()
+        self._kpi_categorias.definir(str(resumo.categorias), _legenda_das_categorias(resumo))
+        self._kpi_subcategorias.definir(str(resumo.subcategorias), "divisões organizadas")
+        self._kpi_produtos.definir(str(resumo.produtos), "itens cadastrados")
+        self._kpi_preco_medio.definir(
+            formatar_reais(resumo.preco_medio), f"{resumo.margem_media:.0f}% de margem média"
         )
-
-        produtos_precificados = [p for p in produtos if p.preco and p.preco > 0]
-        margem_media = (
-            sum(_margem_percentual(p) for p in produtos_precificados) / len(produtos_precificados)
-            if produtos_precificados
-            else 0.0
-        )
-        self._kpi_margem_media.definir_valor(f"{margem_media:.0f}%")
 
     def _mostrar_erro(self, mensagem: str) -> None:
         self._label_erro.setText(mensagem)
+        self._label_erro.setVisible(bool(mensagem))
 
 
 class _CardKpi(QFrame):
-    """Card de métrica: ícone em selo quadrado, rótulo em caixa alta e valor grande."""
+    """Card de métrica do mockup: insígnia à esquerda; rótulo, valor e legenda."""
 
-    def __init__(self, icone: str, titulo: str, parent: QWidget | None = None) -> None:
+    def __init__(self, glifo: str, titulo: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setProperty("variante", "cartao")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        self.setObjectName("cardapioKpi")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(14)
+        layout.addWidget(InsigniaCardapio(glifo, 40), 0, Qt.AlignmentFlag.AlignVCenter)
 
-        selo_icone = QLabel(icone)
-        selo_icone.setFixedSize(36, 36)
-        selo_icone.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        selo_icone.setStyleSheet(
-            "background-color: rgba(229, 169, 60, 0.14);"
-            "border-radius: 8px;"
-            "font-size: 16px;"
-        )
-        layout.addWidget(selo_icone)
-
+        textos = QVBoxLayout()
+        textos.setSpacing(2)
         rotulo = QLabel(titulo.upper())
-        rotulo.setProperty("variante", "fraco")
-        rotulo.setStyleSheet("font-size: 11px; font-weight: 600; letter-spacing: 1px;")
-        layout.addWidget(rotulo)
-
+        rotulo.setObjectName("cardapioKpiRotulo")
+        textos.addWidget(rotulo)
         self._label_valor = QLabel("—")
-        self._label_valor.setStyleSheet("font-weight: 700; font-size: 24px;")
-        layout.addWidget(self._label_valor)
+        self._label_valor.setObjectName("cardapioKpiValor")
+        textos.addWidget(self._label_valor)
+        self._label_legenda = RotuloComReticencias("")
+        self._label_legenda.setObjectName("cardapioKpiLegenda")
+        textos.addWidget(self._label_legenda)
+        layout.addLayout(textos, 1)
 
-    def definir_valor(self, texto: str) -> None:
-        self._label_valor.setText(texto)
-
-
-class _BarraMargem(QWidget):
-    """Barra fina de margem: trilho + preenchimento verde proporcional ao percentual."""
-
-    _ALTURA = 6
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setFixedHeight(self._ALTURA)
-        self._trilho = QFrame(self)
-        self._trilho.setObjectName("margemTrilho")
-        self._preenchida = QFrame(self)
-        self._preenchida.setObjectName("margemPreenchida")
-        self._percentual = 0.0
-
-    def definir_percentual(self, percentual: float) -> None:
-        self._percentual = max(0.0, min(100.0, percentual))
-        self._reposicionar()
-
-    @nao_deixa_escapar()
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (override Qt)
-        super().resizeEvent(event)
-        self._reposicionar()
-
-    def _reposicionar(self) -> None:
-        self._trilho.setGeometry(0, 0, self.width(), self._ALTURA)
-        largura = round(self.width() * self._percentual / 100)
-        self._preenchida.setGeometry(0, 0, largura, self._ALTURA)
+    def definir(self, valor: str, legenda: str) -> None:
+        self._label_valor.setText(valor)
+        self._label_legenda.setText(legenda)
 
 
-class _CategoriasPainel(QFrame):
-    """Bloco da esquerda: a árvore Categoria → Subcategoria (§9.9).
-
-    Era uma lista rasa de categorias. Virou árvore porque a subcategoria
-    **contém** produtos: abrir "Lanches" tem que mostrar as subdivisões dele,
-    e é entrando numa que se chega aos itens.
+class _CategoriasPainel(PainelPontilhado):
+    """Bloco da esquerda: a árvore Categoria → Subcategoria (§9.9, §9.11).
 
     Uma categoria expandida por vez, de propósito. O cardápio real tem quinze
     categorias; deixar todas abertas produziria uma coluna de sessenta linhas
     onde a rolagem vira o trabalho principal — e o gerente organiza uma
     categoria de cada vez, não quinze.
 
-    O `QTreeWidget` substituiu o `QListWidget` também por um motivo de
-    desenho: `setItemWidget` numa lista **não** dimensiona o item, e as linhas
-    de duas alturas (nome + "2 SUBS · 5 ITENS") vinham sendo desenhadas dentro
-    da altura de uma — o nome e o subtítulo saíam cortados ao meio. Aqui cada
-    item recebe o `sizeHint` explícito de quem mora dentro dele.
+    Nenhuma linha tem widget: o `DelegadoArvore` pinta a categoria (seta,
+    nome, "2 SUBCATEGORIAS", contador) e as filhas, e a altura de cada linha
+    sai da própria fonte — o defeito do §9.9 (linha de duas alturas desenhada
+    na altura de uma) não tem mais onde acontecer.
     """
 
     selecao_mudou = Signal(object)  # SelecaoCardapio
     alterado = Signal()
 
-    ALTURA_CATEGORIA_PX = 50
-    ALTURA_SUBCATEGORIA_PX = 30
-    RECUO_PX = 14
-    # A coluna da contagem, à direita de cada subdivisão. Fixa e estreita: o
-    # número é o dado secundário da linha, e uma coluna elástica roubaria do
-    # nome, que é o que se procura.
-    LARGURA_CONTAGEM_PX = 34
     # Piso da coluna inteira. Sem ele o `QSplitter` a espremia até "Acompanha…",
-    # e nome de categoria cortado é o defeito que esta tela veio consertar.
+    # e nome de categoria cortado é o defeito que o §9.9 veio consertar.
     LARGURA_MINIMA_PX = 300
 
     def __init__(
@@ -523,7 +490,7 @@ class _CategoriasPainel(QFrame):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setObjectName("cardapioPainel")
         self._service = service
         self._mostrar_erro = mostrar_erro
         self._categorias: list[Categoria] = []
@@ -531,58 +498,87 @@ class _CategoriasPainel(QFrame):
         self._selecao = SelecaoCardapio(categoria=None)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._criar_topo())
+        layout.addWidget(divisor())
 
-        cabecalho = QHBoxLayout()
-        rotulo = QLabel("CATEGORIAS")
-        rotulo.setObjectName("cardapioEyebrow")
-        cabecalho.addWidget(rotulo)
-        cabecalho.addStretch()
-        self._label_contador = QLabel("0")
-        self._label_contador.setProperty("variante", "fraco")
-        cabecalho.addWidget(self._label_contador)
-        layout.addLayout(cabecalho)
-
-        self._campo_busca = QLineEdit()
-        self._campo_busca.setPlaceholderText("🔎  Buscar categoria")
-        self._campo_busca.textChanged.connect(self._filtrar)
-        layout.addWidget(self._campo_busca)
-
-        self.arvore = QTreeWidget(columnCount=2)
+        self.arvore = QTreeWidget(columnCount=1)
         self.arvore.setObjectName("arvoreCardapio")
         self.arvore.setHeaderHidden(True)
-        self.arvore.setIndentation(self.RECUO_PX)
-        # Sem a seta de expandir do Qt: ela é pintada na área de `::branch`, que
-        # não aceita o mesmo arredondamento do item e sobrava como um quadrado
-        # de outra cor ao lado da linha selecionada. O chevron passou a ser
-        # desenhado dentro do widget da categoria, onde o estilo é nosso.
+        # Recuo zero e sem a seta de expandir do Qt: a área de `::branch` é
+        # pintada pelo estilo com o azul de seleção do sistema (a faixa azul que
+        # a tela antiga mostrava ao lado de "Todas"). O recuo, a guia e a seta
+        # são todos do delegado.
+        self.arvore.setIndentation(0)
         self.arvore.setRootIsDecorated(False)
         self.arvore.setUniformRowHeights(False)
-        cabecalho_arvore = self.arvore.header()
-        # `stretchLastSection` é o padrão do Qt e nasce LIGADO: com ele a coluna
-        # da contagem tomava metade da largura (medido: 146 de 293px) e o nome
-        # da categoria era cortado em "Acompa". Desligar é o que faz o
-        # `setSectionResizeMode` abaixo valer alguma coisa.
-        cabecalho_arvore.setStretchLastSection(False)
-        cabecalho_arvore.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        cabecalho_arvore.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        cabecalho_arvore.resizeSection(1, self.LARGURA_CONTAGEM_PX)
+        # O duplo clique do Qt alterna o ramo — e o clique simples já o abriu:
+        # abrir uma categoria com duplo clique a fechava de novo.
+        self.arvore.setExpandsOnDoubleClick(False)
         self.arvore.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.arvore.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.arvore.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.arvore.setMouseTracking(True)
+        self.arvore.viewport().setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        # Filho da árvore: `setItemDelegate` não toma posse (ver a lista da
+        # direita), e o delegado lê o estado aberto/fechado pela árvore-mãe.
+        self._delegado = DelegadoArvore(self.arvore)
+        self.arvore.setItemDelegate(self._delegado)
         self.arvore.currentItemChanged.connect(self._ao_trocar_item)
         self.arvore.itemClicked.connect(self._ao_clicar)
         self.arvore.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.arvore.customContextMenuRequested.connect(self._menu_contexto)
-        layout.addWidget(self.arvore, stretch=1)
+        corpo = QVBoxLayout()
+        corpo.setContentsMargins(10, 10, 10, 6)
+        corpo.addWidget(self.arvore)
+        layout.addLayout(corpo, 1)
 
-        # Empilhados e não lado a lado: com a coluna em 300px, dois botões
-        # numa linha cortavam o próprio rótulo ("ova categ", "Subcategor") —
-        # exatamente o defeito de aperto que `test_telas_cabem_na_tela.py`
-        # existe para pegar.
+        layout.addWidget(divisor())
+        layout.addLayout(self._criar_acoes())
+
+        self.setMinimumWidth(self.LARGURA_MINIMA_PX)
+
+    def _criar_topo(self) -> QWidget:
+        topo = QWidget()
+        topo.setObjectName("cardapioPainelTopo")
+        coluna = QVBoxLayout(topo)
+        coluna.setContentsMargins(18, 16, 18, 14)
+        coluna.setSpacing(12)
+
+        linha = QHBoxLayout()
+        linha.setSpacing(10)
+        textos = QVBoxLayout()
+        textos.setSpacing(2)
+        titulo = QLabel("Organização do cardápio")
+        titulo.setObjectName("cardapioPainelTitulo")
+        textos.addWidget(titulo)
+        subtitulo = QLabel("Categoria → subcategoria")
+        subtitulo.setObjectName("cardapioPainelSub")
+        textos.addWidget(subtitulo)
+        linha.addLayout(textos, 1)
+
+        self._label_contador = QLabel("0")
+        self._label_contador.setObjectName("cardapioContador")
+        self._label_contador.setFixedSize(30, 30)
+        self._label_contador.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        linha.addWidget(self._label_contador, 0, Qt.AlignmentFlag.AlignVCenter)
+        coluna.addLayout(linha)
+
+        self._campo_busca = campo_de_busca("Buscar categoria")
+        self._campo_busca.textChanged.connect(self._filtrar)
+        coluna.addWidget(self._campo_busca)
+        return topo
+
+    def _criar_acoes(self) -> QVBoxLayout:
+        # Empilhados e não lado a lado: com a coluna em 300px, dois botões numa
+        # linha cortavam o próprio rótulo ("ova categ", "Subcategor") — exatamente
+        # o defeito de aperto que `test_telas_cabem_na_tela.py` existe para pegar.
         acoes = QVBoxLayout()
-        acoes.setSpacing(6)
-        botao_nova = QPushButton("+ Nova categoria")
-        botao_nova.setProperty("variante", "tracejado")
+        acoes.setContentsMargins(12, 12, 12, 12)
+        acoes.setSpacing(8)
+        botao_nova = QPushButton("+  Nova categoria")
+        botao_nova.setObjectName("cardapioBotaoEstrutura")
         botao_nova.clicked.connect(self.criar)
         acoes.addWidget(botao_nova)
 
@@ -590,14 +586,12 @@ class _CategoriasPainel(QFrame):
         # são a mesma tarefa — montar a estrutura do cardápio —, e escondê-la só
         # no menu de contexto deixaria a funcionalidade invisível para quem não
         # clica com o botão direito.
-        self._botao_nova_sub = QPushButton("+ Subcategoria")
-        self._botao_nova_sub.setProperty("variante", "tracejado")
+        self._botao_nova_sub = QPushButton("+  Nova subcategoria")
+        self._botao_nova_sub.setObjectName("cardapioBotaoEstrutura")
         self._botao_nova_sub.setEnabled(False)
         self._botao_nova_sub.clicked.connect(self.criar_subcategoria)
         acoes.addWidget(self._botao_nova_sub)
-        layout.addLayout(acoes)
-
-        self.setMinimumWidth(self.LARGURA_MINIMA_PX)
+        return acoes
 
     # ------------------------------------------------------------------
     # Montagem da árvore
@@ -610,93 +604,127 @@ class _CategoriasPainel(QFrame):
         self._montar(manter_selecao=True)
 
     def _montar(self, *, manter_selecao: bool) -> None:
+        """Refaz a árvore e anuncia a seleção UMA vez, no fim.
+
+        Os sinais da árvore ficam bloqueados pelo trecho inteiro: o `clear()`, a
+        volta da seleção e o ajuste de rolagem produziriam uma rajada de
+        `currentItemChanged` com estados que nunca existiram para o gerente — e
+        cada um recarregaria a lista da direita. A seleção é anunciada à mão,
+        uma vez, depois que tudo voltou ao lugar.
+        """
         alvo = self._selecao if manter_selecao else None
+        rolagem = self.arvore.verticalScrollBar().value() if manter_selecao else 0
 
         self._categorias = _por_nome(self._service.listar_categorias())
         self._label_contador.setText(str(len(self._categorias)))
         produtos_por_categoria = self._contar_produtos()
         contagem_sub = self._service.contagem_de_produtos_por_subcategoria()
+        # Uma consulta para as subdivisões das quinze categorias — eram quinze
+        # (uma por categoria), a cada recarga (§3.6, §9.11).
+        subcategorias_por_categoria: dict[int, list] = {}
+        for subcategoria in self._service.listar_todas_as_subcategorias():
+            subcategorias_por_categoria.setdefault(subcategoria.categoria_id, []).append(subcategoria)
 
-        if alvo is not None and alvo.categoria is not None:
+        ids = {categoria.id for categoria in self._categorias}
+        if alvo is not None and alvo.categoria is not None and alvo.categoria.id in ids:
             self._expandida_id = alvo.categoria.id
-        elif self._expandida_id is None and self._categorias:
-            self._expandida_id = self._categorias[0].id
+        elif self._expandida_id not in ids:
+            self._expandida_id = self._categorias[0].id if self._categorias else None
 
-        self.arvore.blockSignals(True)
-        self.arvore.clear()
-        item_a_selecionar: QTreeWidgetItem | None = None
-        for categoria in self._categorias:
-            subcategorias = self._service.listar_subcategorias(categoria.id)
-            produtos = produtos_por_categoria.get(categoria.id, 0)
-            item = self._criar_item_categoria(categoria, len(subcategorias), produtos)
-            self.arvore.addTopLevelItem(item)
-            # Depois do `addTopLevelItem`, e não antes: o span mora no MODELO da
-            # árvore, e um item ainda solto não tem modelo onde gravá-lo. A
-            # linha da categoria hospeda um widget próprio e precisa da largura
-            # inteira — sem isto ele para na borda da coluna da contagem.
-            item.setFirstColumnSpanned(True)
-            self.arvore.setItemWidget(
-                item,
-                0,
-                _criar_linha_categoria(
-                    categoria,
-                    len(subcategorias),
-                    produtos,
-                    expandida=categoria.id == self._expandida_id,
-                ),
-            )
+        bloqueado = self.arvore.blockSignals(True)
+        try:
+            self.arvore.clear()
+            item_a_selecionar: QTreeWidgetItem | None = None
+            reserva: QTreeWidgetItem | None = None
+            for categoria in self._categorias:
+                subcategorias = _por_nome(subcategorias_por_categoria.get(categoria.id, []))
+                produtos = produtos_por_categoria.get(categoria.id, 0)
+                item = self._criar_item_categoria(categoria, len(subcategorias), produtos)
+                self.arvore.addTopLevelItem(item)
 
-            classificados = sum(contagem_sub.get(sub.id, 0) for sub in subcategorias)
-            filhos = [(_SUB_TODAS, _ROTULO_TODAS, produtos)]
-            filhos += [
-                (sub.nome, sub.nome, contagem_sub.get(sub.id, 0)) for sub in subcategorias
-            ]
-            soltos = produtos - classificados
-            if subcategorias and soltos > 0:
-                filhos.append((_SUB_NENHUMA, _ROTULO_SEM_SUBCATEGORIA, soltos))
+                classificados = sum(contagem_sub.get(sub.id, 0) for sub in subcategorias)
+                rotulo_todas = _ROTULO_TODAS if subcategorias else _ROTULO_TODOS_OS_PRODUTOS
+                filhos = [(_SUB_TODAS, rotulo_todas, produtos)]
+                filhos += [
+                    (sub.nome, sub.nome, contagem_sub.get(sub.id, 0)) for sub in subcategorias
+                ]
+                soltos = produtos - classificados
+                if subcategorias and soltos > 0:
+                    filhos.append((_SUB_NENHUMA, _ROTULO_SEM_SUBCATEGORIA, soltos))
 
-            for chave, rotulo, total in filhos:
-                filho = self._criar_item_filho(categoria, chave, rotulo, total)
-                item.addChild(filho)
-                if alvo is not None and alvo.categoria is not None:
-                    if categoria.id == alvo.categoria.id and chave == alvo.chave:
-                        item_a_selecionar = filho
+                for posicao, (chave, rotulo, total) in enumerate(filhos):
+                    ultima = posicao == len(filhos) - 1
+                    filho = self._criar_item_filho(categoria, chave, rotulo, total, ultima=ultima)
+                    item.addChild(filho)
+                    if alvo is not None and alvo.categoria is not None:
+                        if categoria.id == alvo.categoria.id:
+                            if chave == alvo.chave:
+                                item_a_selecionar = filho
+                            elif chave == _SUB_TODAS:
+                                # Se a subdivisão escolhida sumiu (excluída, ou o
+                                # último item solto foi classificado), o gerente
+                                # fica NA MESMA categoria, em "Todas" — e não é
+                                # levado de volta para a primeira da lista.
+                                reserva = filho
 
-            item.setExpanded(categoria.id == self._expandida_id)
-        self.arvore.blockSignals(False)
+                item.setExpanded(categoria.id == self._expandida_id)
 
-        self._filtrar(self._campo_busca.text())
+            self._filtrar(self._campo_busca.text())
 
-        if item_a_selecionar is None:
-            item_a_selecionar = self._primeiro_filho_visivel()
+            if item_a_selecionar is None:
+                item_a_selecionar = reserva
+            if item_a_selecionar is None:
+                item_a_selecionar = self._primeiro_filho_visivel()
+            if item_a_selecionar is not None:
+                # O `setCurrentItem` rola a árvore até o item escolhido; a linha
+                # de rolagem abaixo devolve a árvore aonde o GERENTE a deixou,
+                # que pode não ser onde está a categoria aberta.
+                self.arvore.setCurrentItem(item_a_selecionar)
+            # Mesma linha defensiva da lista de produtos (ver o comentário em
+            # `ListaDeProdutos.definir_itens`): o alcance da barra depois do
+            # `clear()` é detalhe interno do Qt, e forçar o layout aqui é o
+            # mesmo cálculo que ele faria antes de pintar.
+            self.arvore.doItemsLayout()
+            self.arvore.verticalScrollBar().setValue(rolagem)
+        finally:
+            self.arvore.blockSignals(bloqueado)
+
         if item_a_selecionar is not None:
-            self.arvore.setCurrentItem(item_a_selecionar)
+            self._selecao = self._selecao_do_item(item_a_selecionar)
         else:
             self._selecao = SelecaoCardapio(categoria=None)
-            self.selecao_mudou.emit(self._selecao)
+        self._botao_nova_sub.setEnabled(self._selecao.categoria is not None)
+        self.selecao_mudou.emit(self._selecao)
 
     def _criar_item_categoria(
         self, categoria: Categoria, subcategorias: int, produtos: int
     ) -> QTreeWidgetItem:
         item = QTreeWidgetItem()
+        item.setText(0, categoria.nome)
         item.setData(0, _PAPEL_CATEGORIA, categoria.id)
         item.setData(0, _PAPEL_CHAVE, _SUB_TODAS)
-        # O `sizeHint` explícito é o que faltava na lista antiga: sem ele, o
-        # widget de duas linhas era desenhado na altura de uma e saía cortado.
-        item.setSizeHint(0, QSize(0, self.ALTURA_CATEGORIA_PX))
+        item.setData(0, _PAPEL_ROTULO, categoria.nome)
+        item.setData(
+            0,
+            PAPEL_LINHA,
+            LinhaDeCategoria(
+                nome=categoria.nome,
+                subcategorias=subcategorias,
+                produtos=produtos,
+                ativa=categoria.ativo,
+            ),
+        )
         return item
 
     def _criar_item_filho(
-        self, categoria: Categoria, chave: str, rotulo: str, total: int
+        self, categoria: Categoria, chave: str, rotulo: str, total: int, *, ultima: bool
     ) -> QTreeWidgetItem:
         filho = QTreeWidgetItem()
+        filho.setText(0, rotulo)
         filho.setData(0, _PAPEL_CATEGORIA, categoria.id)
         filho.setData(0, _PAPEL_CHAVE, chave)
         filho.setData(0, _PAPEL_ROTULO, rotulo)
-        filho.setSizeHint(0, QSize(0, self.ALTURA_SUBCATEGORIA_PX))
-        filho.setText(0, rotulo)
-        filho.setText(1, str(total))
-        filho.setTextAlignment(1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        filho.setData(0, PAPEL_LINHA, LinhaDeSubdivisao(rotulo=rotulo, total=total, ultima=ultima))
         return filho
 
     def _contar_produtos(self) -> dict[int, int]:
@@ -710,44 +738,46 @@ class _CategoriasPainel(QFrame):
     # ------------------------------------------------------------------
 
     def _ao_clicar(self, item: QTreeWidgetItem, _coluna: int) -> None:
-        """Clicar numa categoria abre ela e fecha a anterior.
+        """Clicar numa categoria abre ela, fecha a anterior e escolhe "Todas".
 
         A troca acontece no CLIQUE e não na seleção porque a seleção também
         muda ao andar de seta pelo teclado, e ali fechar o ramo debaixo do
         cursor tiraria o próprio item selecionado da tela.
+
+        O "Todas" vira a seleção de propósito: é ele que acende na pílula âmbar
+        do mockup. A lista da direita não recarrega duas vezes por isso — a
+        seleção da categoria e a do "Todas" dela são o mesmo lugar, e
+        `_ao_trocar_item` não anuncia o mesmo lugar duas vezes.
         """
         if item.parent() is not None:
             return
         categoria_id = item.data(0, _PAPEL_CATEGORIA)
-        if self._expandida_id == categoria_id and item.isExpanded():
-            return
-        self._expandida_id = categoria_id
-        for indice in range(self.arvore.topLevelItemCount()):
-            topo = self.arvore.topLevelItem(indice)
-            aberta = topo.data(0, _PAPEL_CATEGORIA) == categoria_id
-            topo.setExpanded(aberta)
-            # O chevron mora no widget da linha, então virá-lo é redesenhar a
-            # linha — barato (um `QLabel` por categoria) e sem um segundo
-            # caminho de estado para divergir do `isExpanded()`.
-            widget = self.arvore.itemWidget(topo, 0)
-            if isinstance(widget, QWidget):
-                seta = widget.findChild(QLabel, "categoriaSeta")
-                if seta is not None:
-                    seta.setText("⌄" if aberta else "›")
+        if not (self._expandida_id == categoria_id and item.isExpanded()):
+            self._expandida_id = categoria_id
+            for indice in range(self.arvore.topLevelItemCount()):
+                topo = self.arvore.topLevelItem(indice)
+                topo.setExpanded(topo.data(0, _PAPEL_CATEGORIA) == categoria_id)
+        if item.childCount() > 0:
+            self.arvore.setCurrentItem(item.child(0))
 
     def _ao_trocar_item(
         self, atual: QTreeWidgetItem | None, _anterior: QTreeWidgetItem | None
     ) -> None:
         if atual is None:
             return
-        categoria = self._categoria_por_id(atual.data(0, _PAPEL_CATEGORIA))
-        chave = atual.data(0, _PAPEL_CHAVE) or _SUB_TODAS
         # Clicar na linha da CATEGORIA equivale a escolher "Todas" dentro dela:
         # é o que o gerente espera de clicar no nome do grupo, e evita um
         # estado em que a direita não sabe o que mostrar.
-        self._selecao = SelecaoCardapio(categoria=categoria, chave=chave)
-        self._botao_nova_sub.setEnabled(categoria is not None)
-        self.selecao_mudou.emit(self._selecao)
+        selecao = self._selecao_do_item(atual)
+        self._botao_nova_sub.setEnabled(selecao.categoria is not None)
+        mesmo_lugar = selecao.mesmo_lugar_que(self._selecao)
+        self._selecao = selecao
+        if not mesmo_lugar:
+            self.selecao_mudou.emit(selecao)
+
+    def _selecao_do_item(self, item: QTreeWidgetItem) -> SelecaoCardapio:
+        categoria = self._categoria_por_id(item.data(0, _PAPEL_CATEGORIA))
+        return SelecaoCardapio(categoria=categoria, chave=item.data(0, _PAPEL_CHAVE) or _SUB_TODAS)
 
     def _categoria_por_id(self, categoria_id: int | None) -> Categoria | None:
         for categoria in self._categorias:
@@ -801,6 +831,10 @@ class _CategoriasPainel(QFrame):
         categoria, seria a busca mentindo sobre o que existe no cardápio. A
         categoria que casa por uma filha abre sozinha, senão o resultado ficaria
         escondido dentro de um ramo fechado.
+
+        As entradas fixas ("Todas as subcategorias", "Sem subcategoria") ficam
+        FORA da comparação: existem em quase toda categoria, e buscar "sub" ou
+        "todas" casava com o cardápio inteiro.
         """
         alvo = chave_de_agrupamento(texto) if texto.strip() else ""
         for indice in range(self.arvore.topLevelItemCount()):
@@ -812,6 +846,7 @@ class _CategoriasPainel(QFrame):
             nomes = [self._nome_da_categoria(item)] + [
                 item.child(pos).data(0, _PAPEL_ROTULO) or ""
                 for pos in range(item.childCount())
+                if item.child(pos).data(0, _PAPEL_CHAVE) not in (_SUB_TODAS, _SUB_NENHUMA)
             ]
             casou = any(alvo in chave_de_agrupamento(nome) for nome in nomes)
             item.setHidden(not casou)
@@ -853,11 +888,15 @@ class _CategoriasPainel(QFrame):
             return
         self._mostrar_erro("")
         try:
-            self._service.criar_categoria(modal.nome())
+            categoria = self._service.criar_categoria(modal.nome())
         except _ERROS_SERVICE as erro:
             self._mostrar_erro(str(erro))
             return
-        self.atualizar()
+        # A categoria nova já abre selecionada: quem acabou de criá-la vai
+        # cadastrar as subdivisões dela em seguida, e a árvore antiga levava o
+        # gerente de volta para a primeira categoria da lista.
+        self._selecao = SelecaoCardapio(categoria=categoria, chave=_SUB_TODAS)
+        self.atualizar_mantendo_selecao()
         self.alterado.emit()
 
     def criar_subcategoria(self) -> None:
@@ -888,29 +927,50 @@ class _CategoriasPainel(QFrame):
             descartar_modal(modal)
 
     def editar_subcategoria(self) -> None:
+        """Renomeia a subcategoria destacada na árvore (menu de contexto)."""
+        nome = self.subcategoria_selecionada()
+        if nome is not None:
+            self.editar_subcategoria_por_nome(nome)
+
+    def editar_subcategoria_por_nome(self, nome: str) -> None:
+        """Renomeia a subcategoria `nome` da categoria aberta.
+
+        Existe separado de `editar_subcategoria` porque o link "Editar
+        subcategoria" do bloco da direita edita a subdivisão DAQUELE bloco, que
+        não é necessariamente a destacada na árvore (em "Todas" há vários).
+
+        Renomear a subdivisão selecionada troca a chave da seleção junto. Sem
+        isso a recarga procurava a subdivisão pelo nome ANTIGO, não achava, e
+        levava o gerente para a primeira categoria — editar o nome fechava o
+        acordeão em que ele estava trabalhando.
+        """
         categoria = self.categoria_atual()
-        nome_atual = self.subcategoria_selecionada()
-        if categoria is None or nome_atual is None:
+        if categoria is None or not nome:
             return
-        subcategoria = self._subcategoria_por_nome(categoria.id, nome_atual)
+        subcategoria = self._subcategoria_por_nome(categoria.id, nome)
         if subcategoria is None:
             return
+        nome_antigo = subcategoria.nome
         existentes = [s.nome for s in self._service.listar_subcategorias(categoria.id)]
         modal = SubcategoriaDialog(
             categoria.nome,
             categoria.impressora.nome if categoria.impressora is not None else None,
             existentes,
             self,
-            nome_inicial=subcategoria.nome,
+            nome_inicial=nome_antigo,
         )
         self._mostrar_erro("")
         try:
             while modal.exec() == QDialog.DialogCode.Accepted:
                 try:
-                    self._service.editar_subcategoria(subcategoria.id, modal.resultado().nome)
+                    renomeada = self._service.editar_subcategoria(
+                        subcategoria.id, modal.resultado().nome
+                    )
                 except _ERROS_SERVICE as erro:
                     modal.mostrar_erro_servico(str(erro))
                     continue
+                if self._selecao.chave == nome_antigo:
+                    self._selecao = SelecaoCardapio(categoria=categoria, chave=renomeada.nome)
                 self.atualizar_mantendo_selecao()
                 self.alterado.emit()
                 return
@@ -1023,21 +1083,24 @@ class _CategoriasPainel(QFrame):
         self.alterado.emit()
 
 
-class _ProdutosPainel(QFrame):
-    """Bloco da direita: os produtos da seleção, agrupados por subcategoria.
+class _ProdutosPainel(PainelPontilhado):
+    """Bloco da direita: os produtos da seleção, em blocos por subcategoria.
 
-    O cabeçalho diz onde se está em duas linhas: `ACOMPANHAMENTOS · COZINHA`
-    (a categoria e a impressora dela, que é para onde os itens vão sair) e o
-    título — `Todas as subcategorias` ou o nome da subdivisão escolhida.
+    O topo diz onde se está: a categoria (`Acompanhamentos`) e, embaixo, a
+    impressora dela, quantos itens e quantas subdivisões
+    (`COZINHA · 5 ITENS · 2 SUBCATEGORIAS`) — a impressora porque é para onde os
+    itens vão sair, e é o que a subcategoria não muda.
 
-    A tabela agrupa quando a categoria tem subdivisões E a seleção é "Todas":
-    cada grupo ganha uma linha de cabeçalho (`GUARNIÇÕES · 3 ITENS`) e os
-    produtos vêm embaixo. Numa subdivisão específica o agrupamento é
-    suprimido — haveria um cabeçalho só, dizendo o que o título da tela já diz.
+    A lista é um bloco por subcategoria quando a categoria tem subdivisões; numa
+    categoria sem nenhuma, um bloco só, sem cabeçalho — um "SEM SUBCATEGORIA"
+    em cima de todos os itens diria o óbvio.
     """
 
     alterado = Signal()
     produto_selecionado = Signal(object)  # Produto | None
+    editar_subcategoria_pedida = Signal(str)
+
+    LARGURA_BUSCA_PX = 240
 
     def __init__(
         self,
@@ -1046,90 +1109,94 @@ class _ProdutosPainel(QFrame):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setObjectName("cardapioPainel")
         self._service = service
         self._mostrar_erro = mostrar_erro
         self._selecao = SelecaoCardapio(categoria=None)
-        self._grupos: list[_Grupo] = []
-        # Um item por LINHA da tabela: `None` nas linhas de cabeçalho de grupo.
-        # É o que permite `produto_atual()` responder certo com a tabela
-        # agrupada — o índice da linha deixou de ser o índice do produto.
-        self._linhas: list[Produto | None] = []
-        self._pills: dict[str, QPushButton] = {}
+        self._grupos: list[FotoGrupo] = []
+        self._com_cabecalho = False
+        # O `Produto` de cada linha, para as ações do rodapé. A PINTURA não o
+        # usa (lê o instantâneo); editar/excluir sim, e aí tocar o banco é certo.
+        self._produtos_por_id: dict[int, Produto] = {}
+        # Onde a lista estava no último desenho (categoria, subdivisão).
+        # Recarregar no MESMO lugar devolve seleção e rolagem; trocar de lugar
+        # começa do topo, sem produto escolhido.
+        self._lugar_desenhado: tuple[int | None, str] | None = None
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._criar_topo())
+        layout.addWidget(divisor())
 
-        cabecalho = QHBoxLayout()
-        coluna_titulo = QVBoxLayout()
-        coluna_titulo.setSpacing(2)
-        self._eyebrow = QLabel("CARDÁPIO")
-        self._eyebrow.setObjectName("cardapioEyebrow")
-        coluna_titulo.addWidget(self._eyebrow)
-        self._titulo = QLabel("Selecione uma categoria")
-        self._titulo.setObjectName("cardapioTituloPainel")
-        coluna_titulo.addWidget(self._titulo)
-        cabecalho.addLayout(coluna_titulo)
-        cabecalho.addStretch()
+        self.lista = ListaDeProdutos()
+        self.lista.itemSelectionChanged.connect(self._emitir_selecao)
+        self.lista.itemDoubleClicked.connect(self._ao_duplo_clique)
+        self.lista.editar_subcategoria_pedida.connect(self.editar_subcategoria_pedida)
+        corpo = QVBoxLayout()
+        corpo.setContentsMargins(20, 18, 20, 14)
+        corpo.addWidget(self.lista)
+        layout.addLayout(corpo, 1)
 
-        self._campo_busca = QLineEdit()
-        self._campo_busca.setPlaceholderText("🔎  Buscar produto")
-        self._campo_busca.setFixedWidth(220)
-        self._campo_busca.textChanged.connect(self._filtrar)
-        cabecalho.addWidget(self._campo_busca)
-        layout.addLayout(cabecalho)
+        layout.addWidget(self._criar_rodape())
 
-        self._faixa = QWidget()
-        self._fluxo = FlowLayout(self._faixa, spacing=6)
-        self._faixa.setVisible(False)
-        layout.addWidget(self._faixa)
+    def _criar_topo(self) -> QWidget:
+        topo = QWidget()
+        topo.setObjectName("cardapioPainelTopo")
+        linha = QHBoxLayout(topo)
+        linha.setContentsMargins(20, 16, 20, 16)
+        linha.setSpacing(14)
+        linha.addWidget(InsigniaCardapio(GLIFO_PASTA, 44), 0, Qt.AlignmentFlag.AlignVCenter)
 
-        self.tabela = QTableWidget(0, len(_COLUNAS_PRODUTOS))
-        self.tabela.setHorizontalHeaderLabels(_COLUNAS_PRODUTOS)
-        self.tabela.verticalHeader().setVisible(False)
-        self.tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.tabela.setShowGrid(False)
-        cabecalho_tabela = self.tabela.horizontalHeader()
-        cabecalho_tabela.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for coluna in range(1, len(_COLUNAS_PRODUTOS)):
-            cabecalho_tabela.setSectionResizeMode(coluna, QHeaderView.ResizeMode.Fixed)
-        self.tabela.setColumnWidth(1, 100)
-        self.tabela.setColumnWidth(2, 100)
-        self.tabela.setColumnWidth(3, 140)
-        self.tabela.setColumnWidth(4, 110)
-        self.tabela.verticalHeader().setDefaultSectionSize(38)
-        self.tabela.currentCellChanged.connect(lambda *_: self._emitir_selecao())
-        layout.addWidget(self.tabela, stretch=1)
+        textos = QVBoxLayout()
+        textos.setSpacing(3)
+        self._titulo = RotuloComReticencias("Selecione uma categoria")
+        self._titulo.setObjectName("cardapioPainelTituloGrande")
+        textos.addWidget(self._titulo)
+        self._meta = RotuloComReticencias("")
+        self._meta.setObjectName("cardapioPainelMeta")
+        textos.addWidget(self._meta)
+        linha.addLayout(textos, 1)
 
-        layout.addLayout(self._criar_rodape())
+        self._campo_busca = campo_de_busca("Buscar produto")
+        self._campo_busca.setFixedWidth(self.LARGURA_BUSCA_PX)
+        self._campo_busca.textChanged.connect(self._ao_buscar)
+        linha.addWidget(self._campo_busca, 0, Qt.AlignmentFlag.AlignVCenter)
+        return topo
 
-    def _criar_rodape(self) -> QHBoxLayout:
-        rodape = QHBoxLayout()
-        self._label_dica = QLabel("SELECIONE UM PRODUTO PARA EDITAR")
-        self._label_dica.setObjectName("cardapioEyebrow")
-        rodape.addWidget(self._label_dica)
-        rodape.addStretch()
+    def _criar_rodape(self) -> QWidget:
+        rodape = QWidget()
+        rodape.setObjectName("cardapioRodape")
+        linha = QHBoxLayout(rodape)
+        linha.setContentsMargins(20, 12, 20, 12)
+        linha.setSpacing(10)
+
+        self._label_dica = RotuloComReticencias(_DICA_SEM_SELECAO)
+        self._label_dica.setObjectName("cardapioDica")
+        linha.addWidget(self._label_dica, 1)
 
         self._botao_editar = QPushButton("Editar")
+        self._botao_editar.setObjectName("cardapioBotaoRodape")
         self._botao_editar.setProperty("variante", "neutro")
         self._botao_editar.setEnabled(False)
         self._botao_editar.clicked.connect(self.editar)
-        rodape.addWidget(self._botao_editar)
+        linha.addWidget(self._botao_editar)
 
+        # Ativar/Desativar ficou, embora o mockup mostre só Editar e Excluir: é
+        # o gesto de todo dia do food truck ("acabou o pão de hambúrguer"), e
+        # tirá-lo daqui deixaria desativar produto sem caminho nenhum na tela.
         self._botao_status = QPushButton("Desativar")
+        self._botao_status.setObjectName("cardapioBotaoRodape")
         self._botao_status.setProperty("variante", "ciano")
         self._botao_status.setEnabled(False)
         self._botao_status.clicked.connect(self.alternar_status)
-        rodape.addWidget(self._botao_status)
+        linha.addWidget(self._botao_status)
 
         self._botao_excluir = QPushButton("Excluir")
-        self._botao_excluir.setProperty("variante", "perigo")
+        self._botao_excluir.setObjectName("cardapioBotaoExcluir")
         self._botao_excluir.setEnabled(False)
         self._botao_excluir.clicked.connect(self.excluir)
-        rodape.addWidget(self._botao_excluir)
-
+        linha.addWidget(self._botao_excluir)
         return rodape
 
     # ------------------------------------------------------------------
@@ -1140,241 +1207,166 @@ class _ProdutosPainel(QFrame):
         self._selecao = selecao
         self.atualizar()
 
-    def exibir_categoria(self, categoria: Categoria | None) -> None:
-        """Atalho para quem só tem a categoria em mãos (a categoria inteira)."""
-        self.exibir(SelecaoCardapio(categoria=categoria))
+    def atualizar(self, *, selecionar: int | None = None) -> None:
+        """Relê a categoria e redesenha a lista no mesmo lugar.
 
-    def atualizar(self) -> None:
-        categoria = self._selecao.categoria
-        if categoria is not None:
-            # Categoria pode ter sido renomeada/desativada por fora; pega a
-            # versão atual antes de desenhar o cabeçalho com ela.
-            todas = {c.id: c for c in self._service.listar_categorias()}
-            categoria = todas.get(categoria.id)
-            self._selecao = SelecaoCardapio(categoria=categoria, chave=self._selecao.chave)
-
-        produtos = (
-            []
-            if categoria is None
-            else _por_nome(
+        `selecionar` põe um produto em destaque (o recém-cadastrado); sem ele, o
+        produto que já estava escolhido continua escolhido, pelo id.
+        """
+        categoria = self._categoria_atualizada()
+        self._selecao = SelecaoCardapio(categoria=categoria, chave=self._selecao.chave)
+        if categoria is None:
+            produtos: list[Produto] = []
+            subcategorias: list = []
+        else:
+            subcategorias = _por_nome(self._service.listar_subcategorias(categoria.id))
+            produtos = _por_nome(
                 [p for p in self._service.listar_produtos() if p.categoria_id == categoria.id]
             )
-        )
-        subcategorias = (
-            [] if categoria is None else self._service.listar_subcategorias(categoria.id)
-        )
+        self._produtos_por_id = {produto.id: produto for produto in produtos}
+        self._com_cabecalho = bool(subcategorias)
         self._grupos = self._montar_grupos(produtos, subcategorias)
+        self._atualizar_cabecalho(categoria, len(produtos), len(subcategorias))
 
-        self._atualizar_cabecalho(categoria)
-        self._montar_pills(subcategorias)
-        self._preencher_tabela()
-        self._filtrar(self._campo_busca.text())
+        lugar = (categoria.id if categoria is not None else None, self._selecao.chave)
+        mesmo_lugar = lugar == self._lugar_desenhado
+        self._lugar_desenhado = lugar
+        if selecionar is None and mesmo_lugar:
+            selecionar = self._id_selecionado()
+        rolagem = self.lista.verticalScrollBar().value() if mesmo_lugar else 0
+        self._redesenhar(selecionar=selecionar, rolagem=rolagem)
         self._emitir_selecao()
 
-    def _montar_grupos(self, produtos: list, subcategorias: list) -> list[_Grupo]:
-        """Os grupos que a tabela vai desenhar, já filtrados pela seleção.
-
-        Uma subdivisão VAZIA aparece assim mesmo quando a seleção é ela: é o
-        estado normal de quem acabou de criá-la, e uma tabela vazia com o nome
-        dela no título diz "está aqui, sem itens ainda" — enquanto uma tela em
-        branco diria "não existe".
-        """
-        por_nome = _agrupar_por_subcategoria(produtos)
-        if self._selecao.chave == _SUB_NENHUMA:
-            return [g for g in por_nome if g.nome is None]
-        if not self._selecao.e_todas:
-            escolhidos = [g for g in por_nome if g.nome == self._selecao.chave]
-            if escolhidos:
-                return escolhidos
-            if any(sub.nome == self._selecao.chave for sub in subcategorias):
-                return [_Grupo(self._selecao.chave, [])]
-            return []
-        return por_nome
-
-    def _atualizar_cabecalho(self, categoria: Categoria | None) -> None:
-        if categoria is None:
-            self._eyebrow.setText("CARDÁPIO")
-            self._titulo.setText("Selecione uma categoria")
-            return
-        impressora = categoria.impressora.nome if categoria.impressora is not None else None
-        self._eyebrow.setText(
-            f"{categoria.nome.upper()} · {(impressora or 'SEM IMPRESSORA').upper()}"
-        )
-        if self._selecao.e_todas:
-            self._titulo.setText("Todas as subcategorias")
-        elif self._selecao.chave == _SUB_NENHUMA:
-            self._titulo.setText(_ROTULO_SEM_SUBCATEGORIA)
-        else:
-            self._titulo.setText(self._selecao.chave)
-
-    def _montar_pills(self, subcategorias: list) -> None:
-        """A faixa de filtro, refeita a cada categoria.
-
-        Destrói as antigas de verdade, e não só as esconde: numa tela que fica
-        aberta o turno inteiro, um `QPushButton` órfão por troca de categoria é
-        o vazamento que o RNF do Celeron proíbe.
-        """
-        while (item := self._fluxo.takeAt(0)) is not None:
-            widget = item.widget()
-            if widget is not None:
-                widget.setParent(None)
-                widget.deleteLater()
-        self._pills.clear()
-
-        if not subcategorias:
-            self._faixa.setVisible(False)
-            return
-
-        contagem = {sub.nome: 0 for sub in subcategorias}
-        soltos = 0
-        for grupo in self._grupos_completos():
-            if grupo.nome is None:
-                soltos = len(grupo.produtos)
-            else:
-                contagem[grupo.nome] = len(grupo.produtos)
-
-        pares = [(_SUB_TODAS, _ROTULO_TODAS.upper(), sum(contagem.values()) + soltos)]
-        pares += [(sub.nome, sub.nome.upper(), contagem.get(sub.nome, 0)) for sub in subcategorias]
-        if soltos:
-            pares.append((_SUB_NENHUMA, _ROTULO_SEM_SUBCATEGORIA.upper(), soltos))
-
-        for chave, rotulo, total in pares:
-            pill = QPushButton(f"{rotulo} · {total}" if chave != _SUB_TODAS else rotulo)
-            pill.setObjectName("pillSubcategoria")
-            pill.setCursor(Qt.CursorShape.PointingHandCursor)
-            pill.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            pill.setProperty("chave", chave)
-            pill.setProperty("ativa", chave == self._selecao.chave)
-            pill.clicked.connect(self._pill_clicada)
-            self._fluxo.addWidget(pill)
-            self._pills[chave] = pill
-        self._faixa.setVisible(True)
-
-    def _grupos_completos(self) -> list[_Grupo]:
-        """Todos os grupos da categoria, ignorando o filtro — para as contagens.
-
-        As pílulas mostram quantos itens cada subdivisão tem, e esse número não
-        pode mudar conforme o filtro aplicado: seria a tela dizendo que a
-        subcategoria encolheu quando o gerente clicou em outra.
-        """
+    def _categoria_atualizada(self) -> Categoria | None:
+        """A categoria da seleção relida — pode ter sido renomeada ou desativada."""
         categoria = self._selecao.categoria
         if categoria is None:
-            return []
-        produtos = [
-            p for p in self._service.listar_produtos() if p.categoria_id == categoria.id
-        ]
-        return _agrupar_por_subcategoria(_por_nome(produtos))
+            return None
+        return {c.id: c for c in self._service.listar_categorias()}.get(categoria.id)
 
-    def _pill_clicada(self) -> None:
-        botao = self.sender()
-        if not isinstance(botao, QPushButton):
-            return
-        self._selecao = SelecaoCardapio(
-            categoria=self._selecao.categoria,
-            chave=str(botao.property("chave") or _SUB_TODAS),
-        )
-        self.atualizar()
+    def _montar_grupos(self, produtos: list[Produto], subcategorias: list) -> list[FotoGrupo]:
+        """Os blocos que a lista vai desenhar, já filtrados pela seleção.
 
-    def _preencher_tabela(self) -> None:
-        agrupar = self._selecao.e_todas and len(self._grupos) > 1
-        self._linhas = []
-        for grupo in self._grupos:
-            if agrupar:
-                self._linhas.append(None)
-            self._linhas.extend(grupo.produtos)
+        A subcategoria de cada produto sai do `subcategoria_id` casado com a
+        lista de subdivisões já lida — e não de `produto.subcategoria.nome`, que
+        é uma relação e iria ao banco uma vez por subdivisão.
 
-        # `clearSpans` antes de repopular: um span deixado de um refresh
-        # anterior mesclaria uma linha de produto e esconderia preço e status.
-        self.tabela.clearSpans()
-        limpar_tabela(self.tabela, linhas=len(self._linhas), preservar_selecao=True)
-
-        for linha, produto in enumerate(self._linhas):
-            if produto is None:
-                self._desenhar_cabecalho_de_grupo(linha)
-                continue
-            definir_celula(self.tabela, linha, 0, _criar_celula_produto(produto))
-            self.tabela.setItem(linha, 1, QTableWidgetItem(formatar_reais(produto.preco)))
-            self.tabela.setItem(linha, 2, QTableWidgetItem(formatar_reais(produto.custo)))
-            definir_celula(
-                self.tabela, linha, 3, _criar_celula_margem(_margem_percentual(produto))
-            )
-            definir_celula(self.tabela, linha, 4, _criar_badge_status(produto.ativo))
-
-    def _desenhar_cabecalho_de_grupo(self, linha: int) -> None:
-        grupo = self._grupo_da_linha(linha)
-        if grupo is None:
-            return
-        self.tabela.setSpan(linha, 0, 1, len(_COLUNAS_PRODUTOS))
-        definir_celula(
-            self.tabela, linha, 0, _criar_cabecalho_de_grupo(grupo.rotulo, len(grupo.produtos))
-        )
-        self.tabela.setRowHeight(linha, _ALTURA_CABECALHO_GRUPO_PX)
-        # Linha de cabeçalho não é selecionável: clicar nela não pode habilitar
-        # Editar/Excluir apontando para produto nenhum.
-        for coluna in range(len(_COLUNAS_PRODUTOS)):
-            if self.tabela.item(linha, coluna) is None:
-                self.tabela.setItem(linha, coluna, QTableWidgetItem())
-            self.tabela.item(linha, coluna).setFlags(Qt.ItemFlag.ItemIsEnabled)
-
-    def _grupo_da_linha(self, linha: int) -> _Grupo | None:
-        """Qual grupo começa nesta linha de cabeçalho."""
-        vistos = 0
-        for grupo in self._grupos:
-            if vistos == linha:
-                return grupo
-            vistos += 1 + len(grupo.produtos)
-        return None
-
-    # ------------------------------------------------------------------
-    # Filtro e seleção
-    # ------------------------------------------------------------------
-
-    def _filtrar(self, texto: str) -> None:
-        """Esconde as linhas que não casam — e o cabeçalho que ficou sem itens.
-
-        A busca casa contra nome **e** subcategoria, a mesma regra do modal de
-        lançamento: telas que buscam diferente sobre o mesmo cardápio é como o
-        gerente conclui que o produto sumiu.
+        Em "Todas", subdivisão vazia não vira bloco (seria um cabeçalho sem nada
+        embaixo no meio do cardápio). Escolhida na árvore, vira: é o estado
+        normal de quem acabou de criá-la, e "está aqui, sem itens ainda" é
+        diferente de "não existe".
         """
-        alvo = chave_de_agrupamento(texto) if texto.strip() else ""
-        visiveis_por_grupo: dict[int, int] = {}
-        linha_do_grupo: dict[int, int] = {}
-        grupo_atual = -1
+        nomes = {sub.id: sub.nome for sub in subcategorias}
+        por_subcategoria: dict[int, list[FotoProduto]] = {sub.id: [] for sub in subcategorias}
+        soltos: list[FotoProduto] = []
+        for produto in produtos:
+            foto = _fotografar(produto, nomes.get(produto.subcategoria_id))
+            if produto.subcategoria_id in por_subcategoria:
+                por_subcategoria[produto.subcategoria_id].append(foto)
+            else:
+                soltos.append(foto)
 
-        for linha, produto in enumerate(self._linhas):
-            if produto is None:
-                grupo_atual = linha
-                linha_do_grupo[grupo_atual] = linha
-                visiveis_por_grupo[grupo_atual] = 0
-                continue
-            sub = produto.subcategoria.nome if produto.subcategoria is not None else ""
-            casou = not alvo or alvo in chave_de_agrupamento(f"{produto.nome} {sub}")
-            self.tabela.setRowHidden(linha, not casou)
-            if casou and grupo_atual >= 0:
-                visiveis_por_grupo[grupo_atual] += 1
+        grupos = [
+            FotoGrupo(
+                rotulo=sub.nome, chave=sub.nome, editavel=True, produtos=tuple(por_subcategoria[sub.id])
+            )
+            for sub in subcategorias
+        ]
+        # O grupo dos sem subcategoria vai por último: numa categoria em
+        # organização ele é a fila de trabalho de quem classifica, e fila de
+        # trabalho fica no fim, não na frente do que já está pronto.
+        sem_subcategoria = FotoGrupo(
+            rotulo=_ROTULO_SEM_SUBCATEGORIA,
+            chave=_SUB_NENHUMA,
+            editavel=False,
+            produtos=tuple(soltos),
+        )
+        chave = self._selecao.chave
+        if chave == _SUB_TODAS:
+            escolhidos = [grupo for grupo in grupos if grupo.produtos]
+            if soltos or not subcategorias:
+                escolhidos.append(sem_subcategoria)
+            return escolhidos
+        if chave == _SUB_NENHUMA:
+            return [sem_subcategoria]
+        return [grupo for grupo in grupos if grupo.chave == chave]
 
-        for chave, linha in linha_do_grupo.items():
-            self.tabela.setRowHidden(linha, visiveis_por_grupo.get(chave, 0) == 0)
+    def _atualizar_cabecalho(self, categoria: Categoria | None, itens: int, subdivisoes: int) -> None:
+        if categoria is None:
+            self._titulo.setText("Selecione uma categoria")
+            self._meta.setText("")
+            return
+        impressora = categoria.impressora.nome if categoria.impressora is not None else None
+        partes = [
+            (impressora or "Sem impressora").upper(),
+            _plural(itens, "ITEM", "ITENS"),
+            _plural(subdivisoes, "SUBCATEGORIA", "SUBCATEGORIAS"),
+        ]
+        if not categoria.ativo:
+            partes.append("DESATIVADA")
+        self._titulo.setText(categoria.nome)
+        self._meta.setText(" · ".join(partes))
+
+    def _texto_vazio(self) -> str:
+        if self._selecao.categoria is None:
+            return "SELECIONE UMA CATEGORIA NA COLUNA AO LADO"
+        return "NENHUM PRODUTO NESTA CATEGORIA AINDA"
+
+    def _redesenhar(self, *, selecionar: int | None, rolagem: int) -> None:
+        itens = montar_itens(
+            self._grupos,
+            self._campo_busca.text(),
+            com_cabecalho=self._com_cabecalho,
+            normalizar=chave_de_agrupamento,
+            texto_vazio=self._texto_vazio(),
+        )
+        self.lista.definir_itens(itens, selecionar=selecionar, rolagem=rolagem)
+        atual = self.lista.currentItem()
+        if selecionar is not None and atual is not None and atual.isSelected():
+            self.lista.scrollToItem(atual)
+
+    def _ao_buscar(self, _texto: str) -> None:
+        """A busca refaz a lista do instantâneo — sem banco, e sem soltar o
+        produto escolhido se ele continua entre os resultados."""
+        self._redesenhar(selecionar=self._id_selecionado(), rolagem=0)
+        self._emitir_selecao()
+
+    # ------------------------------------------------------------------
+    # Seleção
+    # ------------------------------------------------------------------
+
+    def _id_selecionado(self) -> int | None:
+        foto = self.lista.produto_selecionado()
+        return foto.produto_id if foto is not None else None
 
     def produto_atual(self) -> Produto | None:
-        linha = self.tabela.currentRow()
-        if linha < 0 or linha >= len(self._linhas):
-            return None
-        return self._linhas[linha]
+        produto_id = self._id_selecionado()
+        return self._produtos_por_id.get(produto_id) if produto_id is not None else None
 
     def _emitir_selecao(self) -> None:
-        produto = self.produto_atual()
-        self._atualizar_rodape(produto)
-        self.produto_selecionado.emit(produto)
-
-    def _atualizar_rodape(self, produto: Produto | None) -> None:
-        self._label_dica.setText(
-            "SELECIONE UM PRODUTO PARA EDITAR" if produto is None else produto.nome.upper()
+        foto = self.lista.produto_selecionado()
+        self._atualizar_rodape(foto)
+        self.produto_selecionado.emit(
+            self._produtos_por_id.get(foto.produto_id) if foto is not None else None
         )
-        self._botao_editar.setEnabled(produto is not None)
-        self._botao_status.setEnabled(produto is not None)
-        self._botao_status.setText("Ativar" if produto is not None and not produto.ativo else "Desativar")
-        self._botao_excluir.setEnabled(produto is not None)
+
+    def _atualizar_rodape(self, foto: FotoProduto | None) -> None:
+        self._label_dica.setText(_DICA_SEM_SELECAO if foto is None else foto.nome.upper())
+        self._botao_editar.setEnabled(foto is not None)
+        self._botao_status.setEnabled(foto is not None)
+        self._botao_status.setText("Ativar" if foto is not None and not foto.ativo else "Desativar")
+        self._botao_excluir.setEnabled(foto is not None)
+
+    def _ao_duplo_clique(self, item: QListWidgetItem) -> None:
+        """Duplo clique no produto abre a edição direto (pedido do mockup).
+
+        No cabeçalho, no espaço e no aviso não faz nada: eles não carregam
+        produto, e o duplo clique não pode abrir o formulário do último
+        produto escolhido vindo de um clique que não era nele.
+        """
+        dado = item.data(PAPEL_LINHA)
+        if isinstance(dado, ItemDaLista) and dado.produto is not None:
+            self.editar()
 
     def _categorias_ativas(self) -> list[Categoria]:
         return _por_nome(self._service.listar_categorias_ativas())
@@ -1417,7 +1409,7 @@ class _ProdutosPainel(QFrame):
                 if self._produto_duplicado(dados.nome) and not self._confirmar_duplicidade(dados.nome):
                     continue
                 try:
-                    self._service.criar_produto(
+                    produto = self._service.criar_produto(
                         dados.nome,
                         dados.preco,
                         dados.categoria_id,
@@ -1430,7 +1422,9 @@ class _ProdutosPainel(QFrame):
                     modal.mostrar_erro_servico(str(erro))
                     continue
                 modal.confirmar_remocao_de_imagem_trocada()
-                self.atualizar()
+                # O produto novo já sai selecionado quando cai no bloco que está
+                # na tela: é a confirmação visual de que ele entrou, e onde.
+                self.atualizar(selecionar=produto.id)
                 self.alterado.emit()
                 return
         finally:
@@ -2026,219 +2020,6 @@ class _ComponenteDialog(QDialog):
 
     def resultado(self) -> tuple[int, int]:
         return self._produto_id, self._campo_quantidade.value()
-
-
-def _criar_linha_categoria(
-    categoria: Categoria,
-    quantidade_subcategorias: int,
-    quantidade_produtos: int,
-    *,
-    expandida: bool = False,
-) -> QWidget:
-    """Linha da árvore: nome + subtítulo "N SUBS · M ITENS" + badge de status.
-
-    O subtítulo conta as duas coisas porque as duas são a pergunta de quem abre
-    a tela: quantas subdivisões esta categoria já tem, e quantos itens no total.
-    A impressora saiu daqui — ela aparece no cabeçalho da direita, onde há
-    largura para o nome inteiro dela, em vez de disputar 200px com o nome da
-    categoria e com o badge.
-    """
-    linha = QWidget()
-    linha.setObjectName("linhaCategoria")
-    layout_externo = QHBoxLayout(linha)
-    layout_externo.setContentsMargins(6, 6, 8, 6)
-    layout_externo.setSpacing(8)
-
-    seta = QLabel("⌄" if expandida else "›")
-    seta.setObjectName("categoriaSeta")
-    seta.setFixedWidth(12)
-    seta.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    layout_externo.addWidget(seta, 0, Qt.AlignmentFlag.AlignVCenter)
-
-    coluna_texto = QVBoxLayout()
-    coluna_texto.setSpacing(2)
-    nome = QLabel(categoria.nome)
-    nome.setObjectName("categoriaNome")
-    coluna_texto.addWidget(nome)
-
-    plural_subs = "SUB" if quantidade_subcategorias == 1 else "SUBS"
-    plural_itens = "ITEM" if quantidade_produtos == 1 else "ITENS"
-    subtitulo = QLabel(
-        f"{quantidade_subcategorias} {plural_subs} · {quantidade_produtos} {plural_itens}"
-    )
-    subtitulo.setObjectName("categoriaSubtitulo")
-    coluna_texto.addWidget(subtitulo)
-
-    layout_externo.addLayout(coluna_texto, stretch=1)
-    layout_externo.addWidget(
-        _criar_badge_categoria(categoria, quantidade_produtos), 0, Qt.AlignmentFlag.AlignVCenter
-    )
-    return linha
-
-
-def _criar_badge_categoria(categoria: Categoria, quantidade_produtos: int) -> QWidget:
-    """VAZIO (cinza) quando não há produtos; senão ATIVO/DESATIVADO como de costume."""
-    if quantidade_produtos == 0:
-        label = QLabel("VAZIO")
-        label.setObjectName("badgeVazio")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        return label
-    return _criar_badge_status(categoria.ativo, centralizado=False)
-
-
-_ALTURA_CABECALHO_GRUPO_PX = 30
-
-
-def _criar_cabecalho_de_grupo(rotulo: str, quantidade: int) -> QWidget:
-    """A linha que abre um grupo na tabela: `⌂ GUARNIÇÕES · 3 ITENS`.
-
-    É a peça que substituiu o selo que o §9.8 punha na linha de cada produto.
-    O selo repetia a mesma informação uma vez por item e disputava largura com
-    o nome; o cabeçalho a diz uma vez, e diz também **quantos** — que é a
-    pergunta seguinte de quem está organizando.
-    """
-    faixa = QWidget()
-    faixa.setObjectName("grupoSubcategoria")
-    layout = QHBoxLayout(faixa)
-    layout.setContentsMargins(12, 0, 12, 0)
-    layout.setSpacing(8)
-
-    layout.addWidget(_IconeDeGrupo(), 0, Qt.AlignmentFlag.AlignVCenter)
-
-    nome = QLabel(rotulo.upper())
-    nome.setObjectName("grupoNome")
-    layout.addWidget(nome)
-
-    plural = "ITEM" if quantidade == 1 else "ITENS"
-    total = QLabel(f"· {quantidade} {plural}")
-    total.setObjectName("grupoContagem")
-    layout.addWidget(total)
-    layout.addStretch()
-    return faixa
-
-
-class _IconeDeGrupo(QWidget):
-    """O mesmo glifo de ramo do modal de subcategoria, em 14px.
-
-    Desenhado à mão pelo mesmo motivo de sempre (§9.4): o símbolo equivalente
-    mora no bloco de emoji, sairia colorido e chapado e ignoraria o tema — e a
-    cor daqui é relida a cada repintura, então ele acompanha o alternador
-    Claro/Escuro de graça (§3.15).
-    """
-
-    LADO_PX = 14
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("grupoGlifo")
-        self.setFixedSize(self.LADO_PX, self.LADO_PX)
-
-    @nao_deixa_escapar()
-    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
-        cor = QColor(ThemeController.instancia().tokens_atuais["subcategoria_glifo"])
-        caneta = QPen(cor, 1.3)
-        caneta.setCapStyle(Qt.PenCapStyle.RoundCap)
-
-        pintor = QPainter(self)
-        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pintor.setPen(caneta)
-        pintor.setBrush(Qt.BrushStyle.NoBrush)
-        pintor.drawLine(QPointF(3.0, 2.0), QPointF(3.0, 11.0))
-        pintor.drawLine(QPointF(3.0, 5.0), QPointF(7.5, 5.0))
-        pintor.drawLine(QPointF(3.0, 11.0), QPointF(7.5, 11.0))
-        pintor.setBrush(cor)
-        pintor.drawRoundedRect(QRectF(7.8, 3.4, 4.2, 3.2), 1.0, 1.0)
-        pintor.drawRoundedRect(QRectF(7.8, 9.4, 4.2, 3.2), 1.0, 1.0)
-        pintor.end()
-
-
-def _celula_centralizada(widget: QWidget) -> QWidget:
-    """Envolve um badge para uso em `setCellWidget`.
-
-    `setCellWidget` estica o widget pra ocupar a célula inteira; sem isso o
-    QLabel do badge herdaria o fundo escuro padrão de QWidget (base.qss) e
-    pintaria a célula toda, virando uma barra sólida em vez de um selo
-    compacto centralizado.
-    """
-    celula = QWidget()
-    celula.setObjectName("celulaTransparente")
-    layout = QHBoxLayout(celula)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    layout.addWidget(widget)
-    return celula
-
-
-def _criar_badge_status(ativo: bool, *, centralizado: bool = True) -> QWidget:
-    """Etiqueta de status: verde para ATIVO, cinza para DESATIVADO.
-
-    `centralizado=False` devolve o `QLabel` cru, para quem já o põe num layout
-    próprio (a linha da árvore de categorias). O embrulho existe só para
-    `setCellWidget`, que estica o ocupante até a célula inteira.
-    """
-    label = QLabel("ATIVO" if ativo else "DESATIVADO")
-    label.setObjectName("badgeAtivo" if ativo else "badgeDesativado")
-    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    return _celula_centralizada(label) if centralizado else label
-
-
-_TAMANHO_MINIATURA_PRODUTO = 28
-
-
-def _criar_celula_produto(produto: Produto) -> QWidget:
-    """Miniatura + nome do produto + badge COMBO, coluna "Produto".
-
-    Sem a miniatura, a única foto visível no fluxo inteiro era o preview dentro
-    do dialog de edição — impossível saber de relance quais itens já têm foto e
-    quais ainda dependem do placeholder (ver pedido do Vitor).
-
-    O selo da subcategoria que morava aqui (§9.8) **saiu**: ele repetia, uma vez
-    por linha, o que o cabeçalho do grupo agora diz uma vez só — e disputava
-    largura justamente com o nome do produto, a ponto de cortá-lo. No lugar dele
-    entrou o COMBO, que veio da coluna "Tipo": é uma marca de 4 dos 113 produtos
-    do cardápio real, e uma coluna inteira reservada para ela custava 90px de
-    largura que faziam falta ao nome.
-    """
-    celula = QWidget()
-    celula.setObjectName("celulaTransparente")
-    layout = QHBoxLayout(celula)
-    layout.setContentsMargins(10, 0, 6, 0)
-    layout.setSpacing(8)
-
-    miniatura = QLabel()
-    miniatura.setFixedSize(_TAMANHO_MINIATURA_PRODUTO, _TAMANHO_MINIATURA_PRODUTO)
-    miniatura.setPixmap(obter_pixmap(produto.imagem_path, _TAMANHO_MINIATURA_PRODUTO, produto.nome))
-    layout.addWidget(miniatura)
-
-    rotulo = QLabel(produto.nome)
-    rotulo.setObjectName("produtoNome")
-    layout.addWidget(rotulo, stretch=1)
-
-    if produto.is_combo:
-        badge = QLabel("COMBO")
-        badge.setObjectName("badgeCombo")
-        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignVCenter)
-    return celula
-
-
-def _criar_celula_margem(percentual: float) -> QWidget:
-    """Barra verde proporcional + percentual numérico, lado a lado."""
-    celula = QWidget()
-    celula.setObjectName("celulaTransparente")
-    layout = QHBoxLayout(celula)
-    layout.setContentsMargins(10, 0, 10, 0)
-    layout.setSpacing(8)
-
-    barra = _BarraMargem()
-    barra.setMinimumWidth(48)
-    barra.definir_percentual(percentual)
-    layout.addWidget(barra, stretch=1)
-
-    rotulo = QLabel(f"{percentual:.0f}%")
-    rotulo.setObjectName("margemPercentual")
-    layout.addWidget(rotulo)
-    return celula
 
 
 def _criar_rotulo_erro() -> QLabel:

@@ -21,6 +21,7 @@ aberto na tela o tempo todo para lançar item na comanda.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from decimal import Decimal
 
 from gestor_comercial.domain.categoria import Categoria
@@ -55,6 +56,45 @@ _ID_USB = re.compile(r"(0[xX])?[0-9a-fA-F]{1,4}")
 # Caracteres que o Windows recusa em nome de arquivo. Espaço entra junto porque
 # o caminho do cupom acaba indo parar em linha de comando na hora de depurar.
 _CARACTERES_PROIBIDOS_EM_ARQUIVO = re.compile(r'[<>:"/\\|?*\s]+')
+
+
+def margem_percentual(preco: Decimal | None, custo: Decimal | None) -> float:
+    """Quanto do preço sobra depois do custo, em pontos percentuais.
+
+    `(preço − custo) / preço × 100`. Morava na tela do Cardápio como função
+    solta (§9.11): é a definição de margem do catálogo, e a barra de cada
+    produto e a média do topo têm que sair da MESMA conta — duas cópias
+    divergiriam na primeira vez que alguém mudasse uma.
+
+    Devolve `float` e não `Decimal` de propósito: não é dinheiro, é uma razão
+    que só vira comprimento de barra e um "68%" arredondado na tela, e nunca
+    entra em soma de caixa. Custo acima do preço dá margem negativa, que é a
+    informação certa (vende no prejuízo); preço ausente ou zero dá 0, porque
+    não existe margem de quem não tem preço.
+    """
+    if preco is None or preco <= 0:
+        return 0.0
+    return float((preco - (custo or ZERO)) / preco * 100)
+
+
+@dataclass(frozen=True, slots=True)
+class ResumoCardapio:
+    """Os números do topo da tela do Cardápio, calculados num lugar só (§9.11).
+
+    Existe para a tela não fazer conta de negócio: ela recebia as listas cruas e
+    calculava margem e média sozinha, e buscava as subcategorias uma categoria
+    por vez para contá-las — quinze consultas para produzir um número.
+    """
+
+    categorias: int
+    categorias_ativas: int
+    subcategorias: int
+    produtos: int
+    # Média dos preços do cardápio, em dinheiro (2 casas, meio centavo sobe).
+    preco_medio: Decimal
+    # Média das margens de cada produto — a margem típica de um item, e não a
+    # margem do cardápio somado, que um único produto caro dominaria.
+    margem_media: float
 
 
 @transacional
@@ -195,6 +235,15 @@ class CardapioService:
         """
         return self.uow.subcategorias.listar_da_categoria(categoria_id)
 
+    def listar_todas_as_subcategorias(self) -> list[Subcategoria]:
+        """As subdivisões do cardápio inteiro, por categoria e depois por nome.
+
+        É a leitura da árvore do Cardápio, que mostra as subdivisões das quinze
+        categorias de uma vez: pedir uma categoria por vez eram quinze consultas
+        a cada recarga da tela — o N+1 do §3.6 (§9.11).
+        """
+        return self.uow.subcategorias.listar_todos()
+
     def buscar_subcategoria(self, subcategoria_id: int) -> Subcategoria:
         subcategoria = self.uow.subcategorias.buscar_por_id(subcategoria_id)
         if subcategoria is None:
@@ -249,6 +298,37 @@ class CardapioService:
     def contagem_de_produtos_por_subcategoria(self) -> dict[int, int]:
         """Quantos produtos em cada subdivisão — uma consulta para a árvore toda."""
         return self.uow.subcategorias.contar_produtos()
+
+    def resumo_do_cardapio(self) -> ResumoCardapio:
+        """Os quatro números do topo do Cardápio, em três consultas fixas.
+
+        Produto desativado entra na conta, como já entrava: o topo descreve o
+        catálogo cadastrado, e é a mesma população que a árvore conta ao lado de
+        cada categoria. Só fica fora da média quem não tem preço — nenhum hoje,
+        porque o cadastro recusa preço zero, mas um dado antigo não pode puxar a
+        média para baixo nem dividir por zero.
+        """
+        categorias = self.uow.categorias.listar_todos()
+        produtos = self.uow.produtos.listar_todos()
+        subcategorias = self.uow.subcategorias.listar_todos()
+
+        precificados = [p for p in produtos if p.preco is not None and p.preco > 0]
+        if precificados:
+            preco_medio = dinheiro(sum((p.preco for p in precificados), ZERO) / len(precificados))
+            margem_media = sum(margem_percentual(p.preco, p.custo) for p in precificados) / len(
+                precificados
+            )
+        else:
+            preco_medio, margem_media = ZERO, 0.0
+
+        return ResumoCardapio(
+            categorias=len(categorias),
+            categorias_ativas=sum(1 for c in categorias if c.ativo),
+            subcategorias=len(subcategorias),
+            produtos=len(produtos),
+            preco_medio=preco_medio,
+            margem_media=margem_media,
+        )
 
     # ------------------------------------------------------------------
     # Produtos (porte de ProdutoService.java)
