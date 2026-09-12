@@ -212,6 +212,14 @@ class ComandaService:
         produto = self.uow.produtos.buscar_por_id(produto_id)
         if produto is None:
             raise RecursoNaoEncontradoError(f"Produto não encontrado (código {produto_id}).")
+        # `arquivado` antes de `ativo`: a cascata do §9.13 marca os dois juntos,
+        # e sem esta linha o operador leria "está desativado" sobre um produto
+        # que foi EXCLUÍDO — e ficaria procurando no Cardápio como reativá-lo,
+        # numa tela onde ele não aparece mais.
+        if produto.arquivado:
+            raise RegraDeNegocioError(
+                f"O produto {produto.nome} foi excluído do cardápio e não pode ser vendido."
+            )
         if not produto.ativo:
             raise RegraDeNegocioError(
                 f"O produto {produto.nome} está desativado e não pode ser vendido."

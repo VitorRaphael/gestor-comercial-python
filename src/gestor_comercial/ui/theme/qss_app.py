@@ -661,6 +661,12 @@ def construir_qss_app(t: dict[str, str]) -> str:
       letter-spacing: 1.6px;
       background: transparent;
     }}
+    /* Com alvo (§9.13) o rotulo do rodape deixa de ser dica e passa a ser
+       informacao: "SUBCATEGORIA: COMBO PASTEL" diz sobre o que os tres botoes
+       ao lado vao agir, e por isso e lido no tom pleno do tema. O token `texto`
+       e o branco do mockup no tema Escuro -- cravar #FFFFFF aqui sumiria com a
+       linha no tema Claro. */
+    QLabel#cardapioDica[estado="alvo"] {{ color: {t['texto']}; }}
 
     /* ---- Buscas em capsula (a lupa desenhada e filha do campo) ---- */
     QLineEdit#cardapioBusca {{
@@ -751,6 +757,22 @@ def construir_qss_app(t: dict[str, str]) -> str:
     /* A `variante="neutro"` nao tem estado desligado: o "Editar" sem produto
        escolhido parecia clicavel. */
     QPushButton#cardapioBotaoRodape:disabled {{ color: {t['texto_fraquissimo']}; }}
+    /* O botao do meio quando a acao e RELIGAR (§9.13): fundo sutil e texto
+       verde, contra o ciano de "tirar do balcao". Os dois tokens sao os mesmos
+       da pilula Ativo do modal de funcionario -- no tema escuro sao o
+       #4ADE80 pedido, e no claro um verde que se le sobre fundo claro. Um
+       #FFFFFF ou um #4ADE80 cravados aqui ficariam ilegiveis no tema Claro, que
+       e a armadilha ja paga no §3.15. */
+    QPushButton#cardapioBotaoRodape[variante="religar"] {{
+      background: {t['pilula_ativo_bg']};
+      color: {t['pilula_ativo_texto']};
+      border: 1px solid {t['pilula_ativo_texto']};
+    }}
+    QPushButton#cardapioBotaoRodape[variante="religar"]:disabled {{
+      background: {t['superficie_2']};
+      color: {t['texto_fraquissimo']};
+      border: 1px solid {t['borda']};
+    }}
     QPushButton#cardapioBotaoExcluir {{
       background: {t['cardapio_excluir_bg']};
       color: {t['cardapio_excluir_texto']};

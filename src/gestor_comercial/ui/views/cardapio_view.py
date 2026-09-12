@@ -42,6 +42,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import Enum
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -79,6 +80,7 @@ from gestor_comercial.services.cardapio_service import (
     CardapioService,
     ResumoCardapio,
     margem_percentual,
+    produtos_vinculados,
 )
 from gestor_comercial.services.dinheiro import ZERO
 from gestor_comercial.services.exceptions import (
@@ -146,7 +148,68 @@ _ROTULO_TODAS = "Todas as subcategorias"
 _ROTULO_TODOS_OS_PRODUTOS = "Todos os produtos"
 _ROTULO_SEM_SUBCATEGORIA = "Sem subcategoria"
 
-_DICA_SEM_SELECAO = "SELECIONE UM PRODUTO PARA EDITAR"
+_DICA_SEM_SELECAO = "SELECIONE UMA CATEGORIA, SUBCATEGORIA OU PRODUTO"
+
+
+class TipoDeAlvo(Enum):
+    """Sobre o que os três botões do rodapé agem AGORA (§9.13).
+
+    Antes eram três botões de produto: sem produto escolhido ficavam
+    desligados, e a subdivisão vazia — que é exatamente o estado de quem acabou
+    de criá-la — não tinha como ser editada, desativada nem excluída por ali.
+    Editar categoria e subcategoria existiam só no menu de contexto, invisíveis
+    para quem não clica com o botão direito.
+    """
+
+    NADA = "nada"
+    CATEGORIA = "categoria"
+    SUBCATEGORIA = "subcategoria"
+    PRODUTO = "produto"
+
+
+@dataclass(frozen=True, slots=True)
+class AlvoDaAcao:
+    """O alvo dos botões, já com o que o rodapé precisa desenhar.
+
+    Um instantâneo, e não a entidade: é lido a cada repintura do rodapé, e o
+    commit de qualquer salvamento expira as instâncias do SQLAlchemy (a lição
+    do §9.4 e do §9.11). `ativo` é o que decide entre "Desativar" e "Ativar".
+    """
+
+    tipo: TipoDeAlvo
+    nome: str = ""
+    ativo: bool = True
+
+    @property
+    def existe(self) -> bool:
+        return self.tipo is not TipoDeAlvo.NADA
+
+    @property
+    def rotulo(self) -> str:
+        """`SUBCATEGORIA: COMBO PASTEL` — o que o gerente lê no canto do rodapé.
+
+        Com o prefixo, e não só o nome: os três botões passaram a agir sobre
+        três coisas diferentes, e "COMBO PASTEL" sozinho não diz se o Excluir
+        vai levar um produto ou uma subdivisão inteira.
+        """
+        if not self.existe:
+            return _DICA_SEM_SELECAO
+        return f"{self.tipo.value.upper()}: {self.nome.upper()}"
+
+
+@dataclass(frozen=True, slots=True)
+class FotoSubcategoria:
+    """A subdivisão como a árvore e o rodapé a leem: id, nome e estado.
+
+    Instantâneo pelo mesmo motivo de `FotoProduto` (§9.11): a árvore é montada
+    uma vez por recarga e consultada a cada clique, e guardar a instância do
+    SQLAlchemy faria cada leitura de `.ativo` depois de um commit voltar ao
+    banco.
+    """
+
+    id: int
+    nome: str
+    ativa: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,6 +367,23 @@ class CardapioView(QWidget):
         self._painel_produtos.editar_subcategoria_pedida.connect(
             self._painel_categorias.editar_subcategoria_por_nome
         )
+        # Clicar num cabeçalho de bloco escolhe aquela subdivisão NA ÁRVORE: a
+        # seleção continua morando num lugar só (§9.13).
+        self._painel_produtos.subcategoria_escolhida.connect(
+            self._painel_categorias.escolher_subcategoria
+        )
+        # Os três botões do rodapé quando o alvo é categoria ou subcategoria.
+        # É a mesma rotina do menu de contexto e do atalho de teclado — três
+        # portas de entrada, um caminho só.
+        self._painel_produtos.editar_estrutura_pedida.connect(
+            self._painel_categorias.editar_selecionado
+        )
+        self._painel_produtos.status_estrutura_pedida.connect(
+            self._painel_categorias.alternar_status_selecionado
+        )
+        self._painel_produtos.excluir_estrutura_pedida.connect(
+            self._painel_categorias.excluir_selecionado
+        )
 
         # Detecta em qual lado está o foco pra saber quem recebe F2/Delete/Ctrl+N.
         self._painel_categorias.arvore.installEventFilter(self)
@@ -394,14 +474,20 @@ class CardapioView(QWidget):
             self._painel_categorias.criar()
 
     def _editar(self) -> None:
+        """F2 — o lado com foco decide, e cada lado despacha pelo próprio alvo.
+
+        Antes o atalho editava a CATEGORIA quando o foco estava na árvore,
+        mesmo com uma subdivisão destacada: o teclado fazia uma coisa e o menu
+        de contexto do mesmo item fazia outra (§9.13).
+        """
         if self._contexto == "categoria":
-            self._painel_categorias.editar()
+            self._painel_categorias.editar_selecionado()
         else:
             self._painel_produtos.editar()
 
     def _excluir(self) -> None:
         if self._contexto == "categoria":
-            self._painel_categorias.excluir()
+            self._painel_categorias.excluir_selecionado()
         else:
             self._painel_produtos.excluir()
 
@@ -495,6 +581,10 @@ class _CategoriasPainel(PainelPontilhado):
         self._service = service
         self._mostrar_erro = mostrar_erro
         self._categorias: list[Categoria] = []
+        # As subdivisões de cada categoria, fotografadas na última montagem da
+        # árvore: é daqui que o rodapé sabe se o botão do meio diz "Desativar"
+        # ou "Ativar", sem uma consulta por repintura.
+        self._subcategorias: dict[int, list[FotoSubcategoria]] = {}
         self._expandida_id: int | None = None
         self._selecao = SelecaoCardapio(categoria=None)
 
@@ -621,10 +711,16 @@ class _CategoriasPainel(PainelPontilhado):
         produtos_por_categoria = self._contar_produtos()
         contagem_sub = self._service.contagem_de_produtos_por_subcategoria()
         # Uma consulta para as subdivisões das quinze categorias — eram quinze
-        # (uma por categoria), a cada recarga (§3.6, §9.11).
-        subcategorias_por_categoria: dict[int, list] = {}
+        # (uma por categoria), a cada recarga (§3.6, §9.11). O instantâneo é
+        # tirado aqui, na única leitura, e serve a árvore e o rodapé.
+        subcategorias_por_categoria: dict[int, list[FotoSubcategoria]] = {}
         for subcategoria in self._service.listar_todas_as_subcategorias():
-            subcategorias_por_categoria.setdefault(subcategoria.categoria_id, []).append(subcategoria)
+            subcategorias_por_categoria.setdefault(subcategoria.categoria_id, []).append(
+                FotoSubcategoria(
+                    id=subcategoria.id, nome=subcategoria.nome, ativa=subcategoria.ativo
+                )
+            )
+        self._subcategorias = subcategorias_por_categoria
 
         ids = {categoria.id for categoria in self._categorias}
         if alvo is not None and alvo.categoria is not None and alvo.categoria.id in ids:
@@ -645,17 +741,20 @@ class _CategoriasPainel(PainelPontilhado):
 
                 classificados = sum(contagem_sub.get(sub.id, 0) for sub in subcategorias)
                 rotulo_todas = _ROTULO_TODAS if subcategorias else _ROTULO_TODOS_OS_PRODUTOS
-                filhos = [(_SUB_TODAS, rotulo_todas, produtos)]
+                filhos = [(_SUB_TODAS, rotulo_todas, produtos, True)]
                 filhos += [
-                    (sub.nome, sub.nome, contagem_sub.get(sub.id, 0)) for sub in subcategorias
+                    (sub.nome, sub.nome, contagem_sub.get(sub.id, 0), sub.ativa)
+                    for sub in subcategorias
                 ]
                 soltos = produtos - classificados
                 if subcategorias and soltos > 0:
-                    filhos.append((_SUB_NENHUMA, _ROTULO_SEM_SUBCATEGORIA, soltos))
+                    filhos.append((_SUB_NENHUMA, _ROTULO_SEM_SUBCATEGORIA, soltos, True))
 
-                for posicao, (chave, rotulo, total) in enumerate(filhos):
+                for posicao, (chave, rotulo, total, ativa) in enumerate(filhos):
                     ultima = posicao == len(filhos) - 1
-                    filho = self._criar_item_filho(categoria, chave, rotulo, total, ultima=ultima)
+                    filho = self._criar_item_filho(
+                        categoria, chave, rotulo, total, ultima=ultima, ativa=ativa
+                    )
                     item.addChild(filho)
                     if alvo is not None and alvo.categoria is not None:
                         if categoria.id == alvo.categoria.id:
@@ -718,14 +817,25 @@ class _CategoriasPainel(PainelPontilhado):
         return item
 
     def _criar_item_filho(
-        self, categoria: Categoria, chave: str, rotulo: str, total: int, *, ultima: bool
+        self,
+        categoria: Categoria,
+        chave: str,
+        rotulo: str,
+        total: int,
+        *,
+        ultima: bool,
+        ativa: bool = True,
     ) -> QTreeWidgetItem:
         filho = QTreeWidgetItem()
         filho.setText(0, rotulo)
         filho.setData(0, _PAPEL_CATEGORIA, categoria.id)
         filho.setData(0, _PAPEL_CHAVE, chave)
         filho.setData(0, _PAPEL_ROTULO, rotulo)
-        filho.setData(0, PAPEL_LINHA, LinhaDeSubdivisao(rotulo=rotulo, total=total, ultima=ultima))
+        filho.setData(
+            0,
+            PAPEL_LINHA,
+            LinhaDeSubdivisao(rotulo=rotulo, total=total, ultima=ultima, ativa=ativa),
+        )
         return filho
 
     def _contar_produtos(self) -> dict[int, int]:
@@ -821,6 +931,47 @@ class _CategoriasPainel(PainelPontilhado):
             return None
         return chave
 
+    def subcategoria_atual(self) -> FotoSubcategoria | None:
+        """A subdivisão destacada, com id e estado — ou `None` nos dois fixos.
+
+        Sai do instantâneo da última montagem, e não de uma consulta: é lido a
+        cada repintura do rodapé e a cada clique na árvore.
+        """
+        nome = self.subcategoria_selecionada()
+        categoria = self.categoria_atual()
+        if nome is None or categoria is None:
+            return None
+        for foto in self._subcategorias.get(categoria.id, []):
+            if foto.nome == nome:
+                return foto
+        return None
+
+    def escolher_subcategoria(self, chave: str) -> None:
+        """Move a seleção da árvore para `chave` dentro da categoria aberta.
+
+        É o que o clique no cabeçalho de um bloco da direita dispara (§9.13). A
+        seleção continua morando num lugar só — a árvore —, e é por isso que o
+        clique à direita vem parar aqui em vez de a direita guardar um
+        "contexto" próprio: duas fontes de verdade para "onde estou" divergem na
+        primeira recarga, e aí o rodapé age sobre uma subdivisão diferente da
+        que está acesa na coluna da esquerda.
+        """
+        categoria = self.categoria_atual()
+        if categoria is None or chave == self._selecao.chave:
+            return
+        for indice in range(self.arvore.topLevelItemCount()):
+            topo = self.arvore.topLevelItem(indice)
+            if topo.data(0, _PAPEL_CATEGORIA) != categoria.id:
+                continue
+            for posicao in range(topo.childCount()):
+                filho = topo.child(posicao)
+                if filho.data(0, _PAPEL_CHAVE) == chave:
+                    # `setCurrentItem` dispara `_ao_trocar_item`, que é quem
+                    # anuncia a seleção nova — a lista da direita recarrega por
+                    # esse caminho, e não por um segundo aviso daqui.
+                    self.arvore.setCurrentItem(filho)
+                    return
+
     # ------------------------------------------------------------------
     # Busca
     # ------------------------------------------------------------------
@@ -872,8 +1023,13 @@ class _CategoriasPainel(PainelPontilhado):
             return
 
         menu = QMenu(self)
-        if self.subcategoria_selecionada() is not None:
+        subcategoria = self.subcategoria_atual()
+        if subcategoria is not None:
             menu.addAction("Renomear subcategoria", self.editar_subcategoria)
+            menu.addAction(
+                "Ativar subcategoria" if not subcategoria.ativa else "Desativar subcategoria",
+                self.alternar_status_subcategoria,
+            )
             menu.addAction("Excluir subcategoria", self.excluir_subcategoria)
         else:
             menu.addAction("Nova subcategoria", self.criar_subcategoria)
@@ -882,6 +1038,31 @@ class _CategoriasPainel(PainelPontilhado):
             menu.addAction("Ativar" if not categoria.ativo else "Desativar", self.alternar_status)
             menu.addAction("Excluir categoria", self.excluir)
         menu.exec(self.arvore.viewport().mapToGlobal(posicao))
+
+    # -- despachantes: a mesma ação, vindo do rodapé, do menu ou do teclado ----
+    #
+    # Os três existem para que o botão do rodapé, o item do menu de contexto e o
+    # atalho (F2/Delete) executem a MESMA rotina. Sem eles, "Excluir" no rodapé
+    # e "Excluir subcategoria" no menu seriam dois caminhos que começam iguais e
+    # divergem no dia em que um dos dois ganhar uma barreira a mais.
+
+    def editar_selecionado(self) -> None:
+        if self.subcategoria_selecionada() is not None:
+            self.editar_subcategoria()
+        else:
+            self.editar()
+
+    def alternar_status_selecionado(self) -> None:
+        if self.subcategoria_selecionada() is not None:
+            self.alternar_status_subcategoria()
+        else:
+            self.alternar_status()
+
+    def excluir_selecionado(self) -> None:
+        if self.subcategoria_selecionada() is not None:
+            self.excluir_subcategoria()
+        else:
+            self.excluir()
 
     def criar(self) -> None:
         """Cadastra o grupo principal, pelo mesmo cartão da subdivisão (§9.12).
@@ -997,24 +1178,76 @@ class _CategoriasPainel(PainelPontilhado):
         finally:
             descartar_modal(modal)
 
-    def excluir_subcategoria(self) -> None:
-        categoria = self.categoria_atual()
-        nome_atual = self.subcategoria_selecionada()
-        if categoria is None or nome_atual is None:
+    def alternar_status_subcategoria(self) -> None:
+        """Liga/desliga a subdivisão destacada — e, com ela, o que se vende."""
+        subcategoria = self.subcategoria_atual()
+        if subcategoria is None:
             return
-        subcategoria = self._subcategoria_por_nome(categoria.id, nome_atual)
+        self._mostrar_erro("")
+        try:
+            if subcategoria.ativa:
+                self._service.desativar_subcategoria(subcategoria.id)
+            else:
+                self._service.ativar_subcategoria(subcategoria.id)
+        except _ERROS_SERVICE as erro:
+            self._mostrar_erro(str(erro))
+            return
+        self.atualizar_mantendo_selecao()
+        self.alterado.emit()
+
+    def excluir_subcategoria(self) -> None:
+        """Exclui a subdivisão destacada — vazia num clique, cheia com barreira.
+
+        São dois caminhos porque são dois riscos diferentes (§9.13):
+
+        * **vazia** é a subdivisão recém-criada, ou aquela cujos itens já foram
+          movidos. Não há o que perder, e a confirmação existe só contra o
+          clique errado;
+        * **com produtos**, a exclusão é RECUSADA pelo service, e a tela diz
+          quantos são e o que fazer. O caminho de força bruta existe atrás da
+          Senha Master do dono, e ele é destrutivo de verdade: os produtos que
+          nunca foram vendidos saem do banco, e os que já têm venda registrada
+          são arquivados (somem do cardápio e do lançamento, e o relatório do
+          mês passado continua fechando).
+
+        A Senha Master, e não `exigir_gerente()`: é a mesma decisão do §9.10 —
+        gerente é satisfeito pela SESSÃO, e quem abriu o turno de manhã
+        autorizaria a cascata que alguém clicasse à tarde.
+        """
+        # `subcategoria_atual()` já devolve `None` em "Todas", em "Sem
+        # subcategoria" e sem categoria aberta: ela é lida do instantâneo da
+        # categoria selecionada, então não há estado em que exista subdivisão
+        # sem categoria em volta.
+        subcategoria = self.subcategoria_atual()
         if subcategoria is None:
             return
 
+        vinculados = self._service.contar_produtos_da_subcategoria(subcategoria.id)
+        if vinculados == 0:
+            if not self._confirmar_exclusao_vazia(subcategoria.nome):
+                return
+            self._aplicar_exclusao_de_subcategoria(subcategoria.id, cascata=False)
+            return
+
+        if not self._confirmar_cascata(subcategoria.nome, vinculados):
+            return
+        # `executar_modal` já descarta a instância no `finally` dele: o
+        # `descartar_modal` explícito é só de quem reaproveita o mesmo diálogo
+        # num `while`, que não é o caso aqui.
+        pin = PinPadDialog.para_exclusao(
+            self._service.auth, f"a subcategoria '{subcategoria.nome}' e os produtos dela", self
+        )
+        if executar_modal(pin) != QDialog.DialogCode.Accepted:
+            return
+        self._aplicar_exclusao_de_subcategoria(subcategoria.id, cascata=True)
+
+    def _confirmar_exclusao_vazia(self, nome: str) -> bool:
         caixa = QMessageBox(self)
         caixa.setWindowTitle("Excluir subcategoria")
         caixa.setIcon(QMessageBox.Icon.Warning)
-        # A mensagem diz o que acontece com os PRODUTOS, que é a única dúvida
-        # real de quem clica: eles não somem, voltam para "Sem subcategoria".
         caixa.setText(
-            f"Excluir a subcategoria '{subcategoria.nome}'?\n\n"
-            "Os produtos dela NÃO são excluídos: eles voltam para "
-            "\"Sem subcategoria\" e continuam à venda, na mesma impressora."
+            f"Deseja excluir a subcategoria '{nome}'?\n\n"
+            "Ela não tem nenhum produto dentro — nada mais é afetado."
         )
         botao_cancelar = caixa.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
         botao_confirmar = caixa.addButton("Excluir", QMessageBox.ButtonRole.DestructiveRole)
@@ -1022,16 +1255,68 @@ class _CategoriasPainel(PainelPontilhado):
         caixa.setDefaultButton(botao_cancelar)
         caixa.setEscapeButton(botao_cancelar)
         executar_modal(caixa)
-        if caixa.clickedButton() is not botao_confirmar:
-            return
+        return caixa.clickedButton() is botao_confirmar
 
+    def _confirmar_cascata(self, nome: str, vinculados: int) -> bool:
+        """O aviso de bloqueio — e a saída de emergência, dita por inteiro.
+
+        A frase do bloqueio é a MESMA do service (`produtos_vinculados`): o
+        gerente que insistir e for barrado tem que ler a mesma coisa que leu
+        aqui, senão parecem dois problemas diferentes.
+
+        O botão da cascata não é o padrão, e o Esc cancela: é a operação mais
+        destrutiva da tela, e ela não pode acontecer por tecla apertada sem ler.
+        """
+        caixa = QMessageBox(self)
+        caixa.setWindowTitle("Excluir subcategoria")
+        caixa.setIcon(QMessageBox.Icon.Warning)
+        caixa.setText(
+            f"Não é possível excluir a subcategoria '{nome}': "
+            f"{produtos_vinculados(vinculados)}.\n\n"
+            "Mova ou exclua os produtos primeiro.\n\n"
+            "Com a SENHA MASTER do dono é possível excluir tudo de uma vez: os "
+            "produtos que nunca foram vendidos saem do cadastro, e os que já "
+            "têm venda registrada são arquivados — somem do cardápio e do "
+            "lançamento, e os relatórios e cupons passados continuam intactos."
+        )
+        botao_cancelar = caixa.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
+        botao_cascata = caixa.addButton(
+            "Excluir com Senha Master", QMessageBox.ButtonRole.DestructiveRole
+        )
+        botao_cascata.setProperty("variante", "perigo")
+        caixa.setDefaultButton(botao_cancelar)
+        caixa.setEscapeButton(botao_cancelar)
+        executar_modal(caixa)
+        return caixa.clickedButton() is botao_cascata
+
+    def _aplicar_exclusao_de_subcategoria(
+        self, subcategoria_id: int, *, cascata: bool
+    ) -> None:
+        """Roda a exclusão e recarrega — o gerente fica na MESMA categoria.
+
+        Os dois caminhos chegam aqui porque o que vem DEPOIS deles é igual — a
+        recarga e o aviso de erro. O que muda é uma linha, e ela é um `bool` e
+        não uma função passada de fora: quem lê o `if` vê as duas chamadas de
+        service lado a lado, com a mais destrutiva à vista.
+
+        **Não há um `self._selecao = ... _SUB_TODAS` aqui, e isso é uma
+        constatação e não um esquecimento.** Chegou a existir; a checagem por
+        mutação mostrou que apagá-lo não reprovava teste nenhum, porque ele
+        repetia o que o `reserva` de `_montar` (§9.11) já faz: a subdivisão
+        escolhida sumiu da árvore, então a recarga cai no "Todas" **daquela**
+        categoria em vez de ir para a primeira da lista. Quem prova o
+        comportamento é
+        `test_depois_de_excluir_a_arvore_volta_para_todas_da_mesma_categoria`.
+        """
         self._mostrar_erro("")
         try:
-            self._service.excluir_subcategoria(subcategoria.id)
+            if cascata:
+                self._service.excluir_subcategoria_em_cascata(subcategoria_id)
+            else:
+                self._service.excluir_subcategoria(subcategoria_id)
         except _ERROS_SERVICE as erro:
             self._mostrar_erro(str(erro))
             return
-        self._selecao = SelecaoCardapio(categoria=categoria, chave=_SUB_TODAS)
         self.atualizar_mantendo_selecao()
         self.alterado.emit()
 
@@ -1085,12 +1370,20 @@ class _CategoriasPainel(PainelPontilhado):
         caixa = QMessageBox(self)
         caixa.setWindowTitle("Atenção: Exclusão de Categoria")
         caixa.setIcon(QMessageBox.Icon.Warning)
+        # A mensagem antiga prometia o oposto do que acontece ("todos os
+        # produtos vinculados também serão excluídos permanentemente"):
+        # `excluir_categoria` RECUSA categoria com produto dentro, justamente
+        # para não arrancar item com histórico de venda. O texto passou a dizer
+        # o que o service faz — promover esta ação ao rodapé (§9.13) é o que
+        # tornou a divergência visível.
         caixa.setText(
-            f"Você tem certeza que deseja excluir a categoria '{categoria.nome}'? "
-            "Todos os produtos vinculados a ela também serão excluídos permanentemente."
+            f"Excluir a categoria '{categoria.nome}'?\n\n"
+            "As subcategorias dela são excluídas junto. Os PRODUTOS não: se "
+            "houver algum na categoria, a exclusão é recusada — desative a "
+            "categoria ou mude esses produtos de categoria antes."
         )
         botao_cancelar = caixa.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
-        botao_confirmar = caixa.addButton("Sim, excluir tudo", QMessageBox.ButtonRole.DestructiveRole)
+        botao_confirmar = caixa.addButton("Excluir", QMessageBox.ButtonRole.DestructiveRole)
         botao_confirmar.setProperty("variante", "perigo")
         caixa.setDefaultButton(botao_cancelar)
         caixa.setEscapeButton(botao_cancelar)
@@ -1124,6 +1417,14 @@ class _ProdutosPainel(PainelPontilhado):
     alterado = Signal()
     produto_selecionado = Signal(object)  # Produto | None
     editar_subcategoria_pedida = Signal(str)
+    # Clique num cabeçalho de bloco: a ÁRVORE é quem move a seleção (§9.13).
+    subcategoria_escolhida = Signal(str)
+    # Os três botões do rodapé quando o alvo não é um produto. Sem argumento
+    # porque o alvo já é a seleção da árvore, e quem a conhece é o painel da
+    # esquerda — mandar o nome junto criaria uma segunda fonte de verdade.
+    editar_estrutura_pedida = Signal()
+    status_estrutura_pedida = Signal()
+    excluir_estrutura_pedida = Signal()
 
     LARGURA_BUSCA_PX = 240
 
@@ -1140,6 +1441,10 @@ class _ProdutosPainel(PainelPontilhado):
         self._selecao = SelecaoCardapio(categoria=None)
         self._grupos: list[FotoGrupo] = []
         self._com_cabecalho = False
+        # A subdivisão que a árvore está mostrando, fotografada na recarga. É
+        # ela que faz o rodapé saber o nome e o estado do alvo sem consultar o
+        # banco a cada clique.
+        self._sub_selecionada: FotoSubcategoria | None = None
         # O `Produto` de cada linha, para as ações do rodapé. A PINTURA não o
         # usa (lê o instantâneo); editar/excluir sim, e aí tocar o banco é certo.
         self._produtos_por_id: dict[int, Produto] = {}
@@ -1158,6 +1463,7 @@ class _ProdutosPainel(PainelPontilhado):
         self.lista.itemSelectionChanged.connect(self._emitir_selecao)
         self.lista.itemDoubleClicked.connect(self._ao_duplo_clique)
         self.lista.editar_subcategoria_pedida.connect(self.editar_subcategoria_pedida)
+        self.lista.subcategoria_escolhida.connect(self.subcategoria_escolhida)
         corpo = QVBoxLayout()
         corpo.setContentsMargins(20, 18, 20, 14)
         corpo.addWidget(self.lista)
@@ -1196,6 +1502,9 @@ class _ProdutosPainel(PainelPontilhado):
         linha.setContentsMargins(20, 12, 20, 12)
         linha.setSpacing(10)
 
+        # Um rótulo só, e não "SUBCATEGORIA:" fraco + o nome forte em dois
+        # widgets: o `estado` alterna a cor do conjunto, e dois rótulos
+        # custariam um alinhamento a mais para dizer a mesma coisa.
         self._label_dica = RotuloComReticencias(_DICA_SEM_SELECAO)
         self._label_dica.setObjectName("cardapioDica")
         linha.addWidget(self._label_dica, 1)
@@ -1216,6 +1525,14 @@ class _ProdutosPainel(PainelPontilhado):
         self._botao_status.setEnabled(False)
         self._botao_status.clicked.connect(self.alternar_status)
         linha.addWidget(self._botao_status)
+        # Largura travada no pior caso das duas palavras — o botão nasce com
+        # "Desativar", que é a mais longa. Sem isto ele encolhe ao virar
+        # "Ativar" e os três do rodapé dançam de lugar a cada clique: o
+        # "Excluir" mudaria de posição debaixo do dedo. `ensurePolished` antes
+        # de medir pela armadilha do §9.8 — quem pinta é a fonte do QSS, e o
+        # `sizeHint` de um botão não polido sai com a fonte do sistema.
+        self._botao_status.ensurePolished()
+        self._botao_status.setMinimumWidth(self._botao_status.sizeHint().width())
 
         self._botao_excluir = QPushButton("Excluir")
         self._botao_excluir.setObjectName("cardapioBotaoExcluir")
@@ -1251,6 +1568,14 @@ class _ProdutosPainel(PainelPontilhado):
         self._produtos_por_id = {produto.id: produto for produto in produtos}
         self._com_cabecalho = bool(subcategorias)
         self._grupos = self._montar_grupos(produtos, subcategorias)
+        self._sub_selecionada = next(
+            (
+                FotoSubcategoria(id=sub.id, nome=sub.nome, ativa=sub.ativo)
+                for sub in subcategorias
+                if sub.nome == self._selecao.chave
+            ),
+            None,
+        )
         self._atualizar_cabecalho(categoria, len(produtos), len(subcategorias))
 
         lugar = (categoria.id if categoria is not None else None, self._selecao.chave)
@@ -1293,7 +1618,11 @@ class _ProdutosPainel(PainelPontilhado):
 
         grupos = [
             FotoGrupo(
-                rotulo=sub.nome, chave=sub.nome, editavel=True, produtos=tuple(por_subcategoria[sub.id])
+                rotulo=sub.nome,
+                chave=sub.nome,
+                editavel=True,
+                produtos=tuple(por_subcategoria[sub.id]),
+                ativa=sub.ativo,
             )
             for sub in subcategorias
         ]
@@ -1370,17 +1699,58 @@ class _ProdutosPainel(PainelPontilhado):
 
     def _emitir_selecao(self) -> None:
         foto = self.lista.produto_selecionado()
-        self._atualizar_rodape(foto)
+        self._atualizar_barra_acoes()
         self.produto_selecionado.emit(
             self._produtos_por_id.get(foto.produto_id) if foto is not None else None
         )
 
-    def _atualizar_rodape(self, foto: FotoProduto | None) -> None:
-        self._label_dica.setText(_DICA_SEM_SELECAO if foto is None else foto.nome.upper())
-        self._botao_editar.setEnabled(foto is not None)
-        self._botao_status.setEnabled(foto is not None)
-        self._botao_status.setText("Ativar" if foto is not None and not foto.ativo else "Desativar")
-        self._botao_excluir.setEnabled(foto is not None)
+    def alvo_atual(self) -> AlvoDaAcao:
+        """Sobre o que os três botões do rodapé agem agora (§9.13).
+
+        A ordem de precedência é a do gesto mais específico: um produto
+        escolhido é mais específico que a subdivisão que o contém, que é mais
+        específica que a categoria. Ela não produz ambiguidade na prática porque
+        **mover a árvore solta o produto** — trocar de subdivisão recarrega a
+        lista sem seleção (ver `atualizar`), então "produto escolhido" só existe
+        depois de um clique deliberado numa linha.
+        """
+        foto = self.lista.produto_selecionado()
+        if foto is not None:
+            return AlvoDaAcao(TipoDeAlvo.PRODUTO, foto.nome, foto.ativo)
+        if self._sub_selecionada is not None:
+            return AlvoDaAcao(
+                TipoDeAlvo.SUBCATEGORIA,
+                self._sub_selecionada.nome,
+                self._sub_selecionada.ativa,
+            )
+        categoria = self._selecao.categoria
+        if categoria is not None:
+            return AlvoDaAcao(TipoDeAlvo.CATEGORIA, categoria.nome, categoria.ativo)
+        return AlvoDaAcao(TipoDeAlvo.NADA)
+
+    def _atualizar_barra_acoes(self) -> None:
+        """Redesenha o rodapé para o alvo atual — rótulo, estados e a palavra do
+        botão do meio.
+
+        Um lugar só, chamado de todo caminho que possa mudar o alvo (recarga,
+        clique na lista, clique na árvore, busca). Espalhar `setEnabled` pelos
+        chamadores é como o rodapé fica dizendo "Desativar" sobre algo que já
+        está desativado.
+        """
+        alvo = self.alvo_atual()
+        self._label_dica.setText(alvo.rotulo)
+        # Propriedade dinâmica e não `setStyleSheet`: cor congelada em folha
+        # local não acompanha o alternador Claro/Escuro (§3.15, §9.5).
+        aplicar_propriedade(self._label_dica, "estado", "alvo" if alvo.existe else "vazio")
+        for botao in (self._botao_editar, self._botao_status, self._botao_excluir):
+            botao.setEnabled(alvo.existe)
+        self._botao_status.setText("Desativar" if alvo.ativo else "Ativar")
+        # Verde discreto quando a ação é RELIGAR: o ciano é o tom de "tirar do
+        # balcão", e usá-lo nos dois sentidos faria o mesmo botão parecer a
+        # mesma ação.
+        aplicar_propriedade(
+            self._botao_status, "variante", "ciano" if alvo.ativo else "religar"
+        )
 
     def _ao_duplo_clique(self, item: QListWidgetItem) -> None:
         """Duplo clique no produto abre a edição direto (pedido do mockup).
@@ -1471,6 +1841,15 @@ class _ProdutosPainel(PainelPontilhado):
         return None
 
     def editar(self) -> None:
+        """O botão "Editar" do rodapé: produto aqui, estrutura pela árvore.
+
+        A ramificação mora no botão e não em quem o liga porque é o botão que
+        muda de alvo — o mesmo widget edita três coisas diferentes conforme o
+        que está selecionado (§9.13).
+        """
+        if self.alvo_atual().tipo is not TipoDeAlvo.PRODUTO:
+            self.editar_estrutura_pedida.emit()
+            return
         produto = self.produto_atual()
         if produto is None:
             return
@@ -1565,6 +1944,9 @@ class _ProdutosPainel(PainelPontilhado):
         self.alterado.emit()
 
     def alternar_status(self) -> None:
+        if self.alvo_atual().tipo is not TipoDeAlvo.PRODUTO:
+            self.status_estrutura_pedida.emit()
+            return
         produto = self.produto_atual()
         if produto is None:
             return
@@ -1581,6 +1963,9 @@ class _ProdutosPainel(PainelPontilhado):
         self.alterado.emit()
 
     def excluir(self) -> None:
+        if self.alvo_atual().tipo is not TipoDeAlvo.PRODUTO:
+            self.excluir_estrutura_pedida.emit()
+            return
         produto = self.produto_atual()
         if produto is None:
             return

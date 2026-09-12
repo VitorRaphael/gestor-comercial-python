@@ -3278,6 +3278,207 @@ levam `test_o_modal_reaproveitado_no_while_e_descartado_fora_do_laco` de 4 para
   sendo formulários de fábrica dentro do `cardapio_view.py`. São os três últimos
   do Cardápio, e o `_ProdutoDialog` é bem maior que estes dois cartões.
 
+---
+
+### 9.13 O rodapé do Cardápio passa a agir sobre o que está selecionado ✅ CONCLUÍDO — 2026-09-12
+
+Pedido do Vitor, com a tela aberta em "Combo pastel (0)" e os três botões do
+rodapé apagados: `Editar`, `Desativar` e `Excluir` estavam presos ao produto, e
+uma subcategoria vazia — que é **exatamente o estado de quem acabou de criá-la**
+— não tinha como ser editada, desativada nem excluída por ali. O pedido pediu
+que os três virassem *context-aware*: agir sobre a categoria, a subcategoria ou
+o produto selecionado, com o rótulo à esquerda dizendo sobre qual deles.
+
+Duas decisões vieram do próprio Vitor, em resposta a perguntas feitas antes de
+começar, e as duas **revertem decisões escritas do §9.9**. Ficam registradas
+aqui com o nome de quem decidiu, porque quem ler o §9.9 daqui a seis meses vai
+achar que esta seção o contradiz — e vai estar certo.
+
+#### O que havia antes
+
+* três botões de produto. Sem produto escolhido, os três desligados, e o rótulo
+  dizia "SELECIONE UM PRODUTO PARA EDITAR";
+* editar/ativar/excluir **categoria** só existiam no menu de contexto (botão
+  direito na árvore): invisíveis para quem não clica com o botão direito;
+* editar/excluir **subcategoria**, idem — mais o link "Editar subcategoria" no
+  cabeçalho do bloco, que era o único caminho visível, e só para renomear;
+* `F2` editava a CATEGORIA mesmo com uma subdivisão destacada: o teclado fazia
+  uma coisa e o menu de contexto do mesmo item fazia outra.
+
+#### A máquina de estados
+
+`_ProdutosPainel.alvo_atual()` devolve um `AlvoDaAcao` (tipo, nome, ativo), e
+`_atualizar_barra_acoes()` redesenha o rodapé inteiro a partir dele — rótulo,
+os três `setEnabled`, a palavra do botão do meio e a cor dele. **Um lugar só**,
+chamado de todo caminho que possa mudar o alvo (recarga, clique na lista,
+clique na árvore, busca): espalhar `setEnabled` pelos chamadores é como o
+rodapé fica dizendo "Desativar" sobre algo que já está desativado.
+
+A precedência é a do gesto mais específico — produto > subcategoria > categoria
+> nada — e ela **não produz ambiguidade** porque mover a árvore solta o produto
+(trocar de subdivisão recarrega a lista sem seleção). "Produto escolhido" só
+existe depois de um clique deliberado numa linha.
+
+| alvo | rótulo | o que os botões pegam |
+|---|---|---|
+| produto | `PRODUTO: X TUDO` | o produto (comportamento de antes) |
+| subcategoria | `SUBCATEGORIA: COMBO PASTEL` | a subdivisão, vazia ou não |
+| categoria | `CATEGORIA: LANCHES` | a categoria |
+| nada | `SELECIONE UMA CATEGORIA, SUBCATEGORIA OU PRODUTO` | nada, os três apagados |
+
+O rótulo troca de tom por **propriedade dinâmica** (`estado="alvo"`), não por
+`setStyleSheet`: cor congelada em folha local não acompanha o alternador
+Claro/Escuro (§3.15). O pedido dizia `#FFFFFF`; o que entrou foi o token
+`texto`, que **é** `#FFFFFF` no tema Escuro e um tom legível no Claro — um
+branco cravado sumiria com a linha inteira no tema Claro. Mesma coisa com o
+verde `#4ADE80` do botão "Ativar": entrou como `pilula_ativo_texto`, os mesmos
+dois tokens da pílula Ativo do modal de funcionário.
+
+#### Uma porta de entrada só por ação
+
+`_CategoriasPainel` ganhou três despachantes — `editar_selecionado()`,
+`alternar_status_selecionado()`, `excluir_selecionado()` — que olham a seleção
+da árvore e chamam a rotina do nível certo. O botão do rodapé, o item do menu
+de contexto e o atalho de teclado passam **todos** por eles. Sem isso, "Excluir"
+no rodapé e "Excluir subcategoria" no menu seriam dois caminhos que começam
+iguais e divergem no dia em que um dos dois ganhar uma barreira a mais — que é
+precisamente o que aconteceu neste item.
+
+O rodapé mora no painel da DIREITA e o alvo mora na árvore da ESQUERDA, então a
+direita emite três sinais sem argumento (`editar_estrutura_pedida` e irmãos) e
+a `CardapioView` os liga aos despachantes. Sem argumento de propósito: mandar o
+nome junto criaria uma segunda fonte de verdade sobre "onde estou".
+
+Pela mesma razão, **clicar no cabeçalho de um bloco (ou no aviso de bloco
+vazio) move a seleção da ÁRVORE**, em vez de a direita guardar um contexto
+próprio. É o que faz o pedido da "seção vazia" funcionar: o bloco de uma
+subdivisão sem produto nenhum não tem linha para clicar, e antes era
+inalcançável pela direita. O link "Editar subcategoria" continua tendo
+precedência dentro do cabeçalho — ele é conferido antes, senão viraria um
+clique de seleção — e dispara **a mesma rotina** do botão `Editar` do rodapé
+(trancado em teste).
+
+#### Decisão 1 do Vitor: desativar subcategoria é regra de VENDA
+
+O §9.9 escreveu que subcategoria não teria `ativo` porque "desativar não
+significaria nada que excluir já não signifique". O Vitor escolheu o contrário:
+a subdivisão desativada **tira os produtos dela do balcão**, igual à categoria,
+um nível abaixo. É o gesto de "hoje não tem podrão" sem desativar item por item
+— e sem ter que lembrar quais eram para reativar depois.
+
+Coluna `subcategorias.ativo` (migração `a3e6b91c4d05`) e a regra num lugar só:
+`ProdutoRepository._vendavel()`, a lista de condições que `listar_para_
+lancamento` e `listar_ativos_de_categoria_ativa` compartilham. Duas cópias
+divergiriam, e a divergência apareceria como o produto estando na busca de uma
+tela e não na da outra — que é como o atendente conclui que o cardápio sumiu.
+
+Dois detalhes que a consulta tem que acertar, os dois com teste:
+
+* **`outerjoin`, não `join`** — produto sem subdivisão é a maioria de um
+  cardápio em organização, e um `INNER JOIN` o apagaria do balcão inteiro;
+* **reativar o grupo não religa quem foi desativado sozinho** — religar a
+  subdivisão não pode desfazer, calado, a decisão tomada item a item.
+
+**O que não mudou:** a impressora continua saindo de
+`produto.categoria.impressora` e só (§9.8). Desativar uma subdivisão não
+reconfigura bobina — ela apenas deixa de ter item para mandar. Os 2 cupons da
+bancada saíram idênticos linha a linha.
+
+#### Decisão 2 do Vitor: excluir com itens dentro exige a Senha Master
+
+O §9.9 deixava a exclusão passar sempre, soltando os produtos em "Sem
+subcategoria" (`ondelete="SET NULL"`). Não perdia nada — e também não perguntava
+nada: um clique desmanchava, calado, a classificação de dezenas de itens, e
+refazê-la é trabalho manual. Agora são dois caminhos, por dois riscos
+diferentes:
+
+* **vazia** — confirmação simples, e sai. É o caso do pedido;
+* **com produtos** — o service **recusa**, com o número ("existem 3 produtos
+  vinculados a ela"). A tela diz a mesma frase antes de tentar, porque quem
+  insistir e for barrado tem que ler a mesma coisa, senão parecem dois
+  problemas diferentes;
+* **com produtos + Senha Master** — a cascata. Nível 3, `PinPadDialog.
+  para_exclusao`, a mesma credencial que abre a Central de Loja. A barreira é
+  da TELA, e não do service, pela razão do §9.10: `exigir_gerente()` é
+  satisfeito pela SESSÃO, e quem abriu o turno de manhã autorizaria a cascata
+  que alguém clicasse à tarde.
+
+**Nem todo produto pode sair do banco, e é o histórico que decide.** Quem já
+apareceu numa comanda (ou está preso a um combo) tem linha apontando para ele:
+apagá-lo arrancaria junto o item da venda, o total do turno e o cupom que já
+saiu na bobina. Esses são **arquivados**; o resto é apagado de verdade. Tudo num
+commit só — metade dos produtos apagados e a subcategoria de pé é um estado que
+ninguém pediu e que a tela não sabe mostrar.
+
+Daí a coluna `produtos.arquivado`, e ela **não** é o mesmo que `ativo=False`:
+
+| | some do balcão | some do Cardápio | dá para reativar |
+|---|---|---|---|
+| `ativo = False` | sim | **não** (selo DESATIVADO) | sim, é o gesto de todo dia |
+| `arquivado = True` | sim | sim | não, foi excluído |
+
+Reaproveitar `ativo` para o arquivamento faria um produto meramente desativado
+sumir do Cardápio — e aí não haveria como reativá-lo. As duas colunas existem
+porque são duas perguntas diferentes, e `ComandaService.lancar_item` confere as
+duas: o arquivado é barrado com mensagem própria ("foi excluído do cardápio"),
+antes da de desativado, senão o operador ficaria procurando como reativar um
+item que não aparece mais na tela.
+
+#### Achado no caminho: a confirmação de excluir CATEGORIA mentia
+
+Promover a ação ao rodapé tornou visível que o `QMessageBox` dizia "Todos os
+produtos vinculados a ela também serão excluídos permanentemente" — e
+`excluir_categoria` faz o **oposto**: recusa categoria com produto dentro,
+justamente para não arrancar item com histórico. O texto passou a dizer o que o
+service faz.
+
+#### Conferência
+
+* suíte **1596** (de 1530), 0 falhas — 66 testes novos, a maioria em três
+  arquivos (`test_subcategoria_no_balcao.py`,
+  `test_migracao_subcategoria_ativa.py`, `test_barra_de_acoes_do_cardapio.py`);
+* **24 mutações, 23 reprovam**. As sobreviventes da primeira passada não viraram
+  teste novo — viraram correção, e as quatro estão registradas porque cada uma
+  apontou um problema real:
+  * `ativar_produto` aceitava um produto **arquivado**: virou recusa com
+    mensagem (o buraco de verdade, e o único que teria chegado ao balcão);
+  * o filtro `arquivado` de `SubcategoriaRepository.contar_produtos` **nunca
+    exclui linha nenhuma** (arquivado sempre tem `subcategoria_id` nulo, porque
+    a cascata apaga a subcategoria no mesmo commit): saiu;
+  * a linha `self._selecao = ... _SUB_TODAS` depois de excluir **repetia** o
+    `reserva` do `_montar` (§9.11): saiu;
+  * as duas restantes ganharam o teste que faltava — a pintura apagada da
+    pílula na árvore (recorte da linha **fora da seleção**, com a fonte da
+    marca registrada) e o clique numa linha de produto não movendo a árvore;
+* bancada visual a 1366x738: **22 das 24 telas idênticas byte a byte**, as duas
+  do Cardápio diferindo **só na faixa do rodapé** (y=659..695) — que é o item;
+* bancada de cupons: os **2 idênticos** linha a linha;
+* memória, sobre o cardápio real (15 categorias, 113 produtos), com o mesmo
+  leitor de RSS do `tools/medir_memoria.py`: **+0,9 MB** e **zero widget novo**
+  (72 → 72) depois de 60 voltas de desativar/ativar/selecionar e 40 de
+  criar+escolher+excluir subcategoria. A linha de base do processo é ~115 MB,
+  como o §9.11 já registrou;
+* os diálogos abrem de verdade nos testes da view (`executar_modal` roda,
+  `exec()` roda, o service grava): um dublê provaria só que o teste sabe chamar
+  o service.
+
+#### Ficou de fora, de propósito
+
+- **`subcategorias.ativo` não tem tela própria de relatório nem filtro.** O
+  estado aparece onde se age sobre ele: o carimbo `DESATIVADA · 3 PRODUTOS` no
+  cabeçalho do bloco e a pílula apagada na árvore. Na árvore é só o tom, e não a
+  palavra: a pílula tem ~190px na coluna de 300, e "DESATIVADA" comeria o nome.
+- **Não há registro de quem arquivou o quê.** Não existe tabela de log no
+  projeto (a mesma nota do §9.10 sobre quem olhou um segredo).
+- **O arquivado não tem como voltar pela tela.** É a consequência aceita de
+  "some de todas as telas do cardápio": a linha continua no banco para os
+  relatórios, e desarquivar exigiria uma tela de lixeira que ninguém pediu.
+- **A exclusão de categoria continua no `QMessageBox` do sistema**, como o §9.12
+  já tinha anotado. Só o texto foi corrigido.
+- **A assimetria das duas regras de nome repetido** (§9.12) continua de pé.
+
+---
+
 ## 10. As melhores mudanças que o programa teve — em português de balcão
 
 > **Por que esta seção existe.** Todo o resto do documento é escrito para quem

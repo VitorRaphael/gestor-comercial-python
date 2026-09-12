@@ -1137,24 +1137,57 @@ def test_editar_subcategoria_exige_gerente(cardapio, categoria, como_atendente):
         cardapio.editar_subcategoria(9999, "Podrão")
 
 
-def test_excluir_subcategoria_solta_os_produtos_em_vez_de_apaga_los(cardapio, categoria):
-    """A diferença para `excluir_categoria`, que é bloqueada com produto dentro.
+def test_excluir_subcategoria_com_produto_dentro_e_recusado(cardapio, categoria):
+    """A regra virou a da categoria, por decisão do Vitor no §9.13.
 
-    Lá o produto ficaria sem impressora e sumiria do balcão; aqui ele só perde a
-    etiqueta e reaparece no grupo "Sem subcategoria". Excluir uma ETIQUETA nunca
-    pode apagar o que ela etiquetava.
+    Até o §9.12 a exclusão sempre passava e os produtos voltavam para "Sem
+    subcategoria" (o `ondelete="SET NULL"`). Não perdia nada — e também não
+    perguntava nada: um clique desmanchava, calado, a classificação de dezenas
+    de itens, e refazê-la é trabalho manual. Agora a etiqueta com itens dentro
+    exige uma decisão explícita sobre os itens.
+
+    A mensagem diz o NÚMERO porque é ele que dimensiona o trabalho de quem vai
+    ter que mover os produtos antes.
     """
     sub = cardapio.criar_subcategoria(categoria.id, "Podrão")
     produto = cardapio.criar_produto(
         "X Burguer", Decimal("13.00"), categoria.id, subcategoria_id=sub.id
     )
 
+    with pytest.raises(RegraDeNegocioError, match="existe 1 produto vinculado"):
+        cardapio.excluir_subcategoria(sub.id)
+
+    assert [s.nome for s in cardapio.listar_subcategorias(categoria.id)] == ["Podrão"]
+    assert cardapio.buscar_produto(produto.id).subcategoria_id == sub.id
+
+
+def test_excluir_subcategoria_vazia_passa_direto(cardapio, categoria):
+    """O caso que o §9.13 quis destravar: a subdivisão recém-criada e vazia."""
+    sub = cardapio.criar_subcategoria(categoria.id, "Combo pastel")
+
     cardapio.excluir_subcategoria(sub.id)
 
     assert cardapio.listar_subcategorias(categoria.id) == []
+
+
+def test_o_ondelete_set_null_continua_de_pe_como_cinto(cardapio, categoria, uow):
+    """A recusa é do service; o banco continua garantindo que não sobra órfão.
+
+    Vale testar porque a recusa nova poderia dar a impressão de que o
+    `ondelete="SET NULL"` virou letra morta. Ele é o que garante que, por
+    qualquer caminho que a linha saia (uma cascata, a exclusão da categoria, um
+    script), produto nenhum fica apontando para uma subdivisão que não existe.
+    """
+    sub = cardapio.criar_subcategoria(categoria.id, "Podrão")
+    produto = cardapio.criar_produto(
+        "X Burguer", Decimal("13.00"), categoria.id, subcategoria_id=sub.id
+    )
+
+    uow.subcategorias.remover(sub)
+    uow.commit()
+
     assert cardapio.buscar_produto(produto.id).subcategoria_id is None
-    assert produto.ativo is True
-    assert produto.categoria_id == categoria.id
+    assert cardapio.buscar_produto(produto.id).ativo is True
 
 
 def test_excluir_subcategoria_inexistente(cardapio):
@@ -1332,10 +1365,17 @@ def test_a_subcategoria_nao_mexe_na_categoria_nem_na_impressora(cardapio, catego
         "X Podrão", Decimal("12.00"), categoria.id, subcategoria_id=sub.id
     )
     cardapio.editar_subcategoria(sub.id, "Podrão do Bairro")
-    cardapio.excluir_subcategoria(sub.id)
-
+    # As duas operações que o §9.13 acrescentou entram nesta varredura: são
+    # elas que mexem no estado da subdivisão, e é onde um vínculo de impressão
+    # poderia ser tocado sem ninguém notar.
+    cardapio.desativar_subcategoria(sub.id)
+    cardapio.ativar_subcategoria(sub.id)
     assert novo.categoria_id == categoria.id
     assert novo.categoria.impressora_id == impressora.id
+
+    cardapio.excluir_subcategoria_em_cascata(sub.id)
+
+    assert cardapio.buscar_categoria(categoria.id).impressora_id == impressora.id
     assert [c.id for c in cardapio.listar_categorias_da_impressora(impressora.id)] == [
         categoria.id
     ]

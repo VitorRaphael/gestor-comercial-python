@@ -47,6 +47,7 @@ from gestor_comercial.ui.views.cardapio_view import (
     _SUB_TODAS,
     CardapioView,
     SelecaoCardapio,
+    TipoDeAlvo,
 )
 from gestor_comercial.ui.widgets.cardapio_cartoes import PAPEL_LINHA, TipoDeItem, _fonte
 
@@ -488,8 +489,15 @@ def test_o_cabecalho_de_grupo_some_quando_a_busca_esvazia_o_grupo(tela):
 
 
 def test_o_cabecalho_de_grupo_nao_pode_ser_selecionado(tela):
-    """Clicar nele não pode habilitar Editar/Excluir apontando para produto
-    nenhum."""
+    """Clicar nele não pode marcar a linha nem passar por um produto.
+
+    A segunda metade da asserção mudou no §9.13, e a mudança é o item: os três
+    botões do rodapé deixaram de ser botões de produto e passaram a agir sobre
+    o alvo selecionado. Com "Lanches" aberta em "Todas", o alvo é a CATEGORIA e
+    os botões ficam ligados — o que continua valendo, e é o que este teste
+    guarda, é que o cabeçalho não vira seleção e que o alvo não é produto
+    nenhum.
+    """
     _abrir(tela, "Lanches")
     painel = tela._painel_produtos
     cabecalho = painel.lista.item(0)
@@ -497,13 +505,9 @@ def test_o_cabecalho_de_grupo_nao_pode_ser_selecionado(tela):
     assert not cabecalho.flags() & Qt.ItemFlag.ItemIsSelectable
     painel.lista.setCurrentItem(cabecalho)
 
-    # `produto_atual()` sozinho responderia `None` de qualquer jeito (a linha
-    # não tem produto), então ele não distingue nada. O que distingue é a linha
-    # NÃO ficar marcada: com ela selecionada, a lista mostraria um cabeçalho
-    # destacado e o rodapé diria "SELECIONE UM PRODUTO" ao lado dele.
     assert painel.lista.selectedItems() == [], "o cabeçalho de bloco ficou selecionado"
     assert painel.produto_atual() is None
-    assert painel._botao_editar.isEnabled() is False
+    assert painel.alvo_atual().tipo is not TipoDeAlvo.PRODUTO
 
 
 def test_selecionar_um_produto_com_a_lista_agrupada_devolve_o_produto_certo(tela):

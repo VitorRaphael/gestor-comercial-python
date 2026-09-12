@@ -1,4 +1,4 @@
-from sqlalchemy import ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from gestor_comercial.repository.base import Base
@@ -14,12 +14,22 @@ class Subcategoria(Base):
     aquela string, e uma reescrita em massa que falha no meio deixa metade do
     cardápio num grupo e metade no outro.
 
-    Não tem `ativo`, ao contrário de `Categoria`, e é de propósito: categoria
-    desativada some do balcão junto com os produtos dela (é uma regra de
-    venda), enquanto subcategoria é só organização de catálogo — desativar não
-    significaria nada que excluir já não signifique. Excluir é seguro porque os
-    produtos apenas voltam a ficar sem subcategoria (ver `ondelete="SET NULL"`
-    em `Produto.subcategoria_id`), sem perder venda nem histórico.
+    Ganhou `ativo` no §9.13, e isto **reverte a decisão escrita aqui no §9.9**
+    ("subcategoria é só organização, desativar não significaria nada"). O que
+    mudou foi o significado pedido: desativar uma subcategoria agora é uma
+    REGRA DE VENDA, igual à da categoria — os produtos dela somem do balcão (do
+    "Adicionar item" e de qualquer listagem de lançamento) sem sair do cadastro
+    e sem perder histórico. É o gesto de "hoje não tem podrão" sem precisar
+    desativar item por item.
+
+    Quem aplica a regra é a consulta de lançamento
+    (`ProdutoRepository.listar_para_lancamento`), no mesmo lugar e da mesma
+    forma que `Categoria.ativo` — duas regras iguais escritas em dois lugares
+    diferentes divergiriam na primeira manutenção.
+
+    O que **não** mudou: a impressora continua saindo de
+    `produto.categoria.impressora` e só (§9.8), então desativar uma subdivisão
+    não reconfigura bobina nenhuma — ela apenas deixa de ter item para mandar.
 
     O nome é único DENTRO da categoria, e não no cardápio inteiro: "Podrão" em
     Lanches e "Podrão" em Porções são duas subdivisões independentes, cada uma
@@ -33,6 +43,10 @@ class Subcategoria(Base):
     categoria_id: Mapped[int] = mapped_column(
         ForeignKey("categorias.id"), nullable=False, index=True
     )
+    # `default=True` e `NOT NULL`, como em `Categoria.ativo`: subdivisão nasce
+    # vendendo, e a migração `a3e6b91c4d05` liga as que já existem — um `NULL`
+    # aqui sumiria com produto do balcão sem ninguém ter pedido isso.
+    ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     __table_args__ = (
         # O banco também recusa o par repetido, e não só o service: a checagem

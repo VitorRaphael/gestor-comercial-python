@@ -9,9 +9,11 @@ arquivo original — a compressão acontece na UI antes de chamar este service.
 `Subcategoria` é a subdivisão de catálogo DENTRO da categoria — "Lanches" →
 "Artesanal", "Podrão", "Combos" (§9.9). Ela tem CRUD próprio porque precisa
 poder nascer VAZIA, esperando os itens: o gerente planeja a organização antes
-de classificar. É organização e nada mais — quem manda no roteamento do cupom
-continua sendo a categoria, via `produto.categoria.impressora`, e este service
-não tem um único caminho em que a subcategoria toque em impressora.
+de classificar. Desde o §9.13 ela também tem `ativo`, e desativá-la tira os
+produtos dela do balcão — a mesma regra da categoria, um nível abaixo. O que
+continua valendo é a REGRA DE OURO: quem manda no roteamento do cupom é a
+categoria, via `produto.categoria.impressora`, e este service não tem um único
+caminho em que a subcategoria toque em impressora.
 
 Cadastrar, editar, desativar e excluir são ações administrativas (§3.1) e
 exigem gerente. Listar e buscar não exigem: o atendente precisa do cardápio
@@ -95,6 +97,33 @@ class ResumoCardapio:
     # Média das margens de cada produto — a margem típica de um item, e não a
     # margem do cardápio somado, que um único produto caro dominaria.
     margem_media: float
+
+
+def produtos_vinculados(total: int) -> str:
+    """"existe 1 produto vinculado" / "existem 3 produtos vinculados".
+
+    Função de módulo, e não texto solto dentro da recusa, porque a TELA diz a
+    mesma frase antes de chamar o service (o aviso do modal de exclusão, §9.13):
+    a mensagem que o gerente lê ao ser barrado e a que ele leu ao ser avisado
+    têm que ser a mesma, senão parecem dois problemas diferentes.
+    """
+    if total == 1:
+        return "existe 1 produto vinculado a ela"
+    return f"existem {total} produtos vinculados a ela"
+
+
+@dataclass(frozen=True, slots=True)
+class ResultadoCascata:
+    """O que a exclusão em cascata de uma subcategoria fez, em números (§9.13).
+
+    Devolvido, e não só registrado, porque a tela precisa DIZER o que aconteceu:
+    "excluí 2 e arquivei 1" é a única forma de o gerente entender por que o
+    cardápio encolheu menos do que ele esperava — e por que o relatório do mês
+    passado continua fechando.
+    """
+
+    excluidos: int
+    arquivados: int
 
 
 @transacional
@@ -272,28 +301,151 @@ class CardapioService:
         self.uow.commit()
         return subcategoria
 
-    def excluir_subcategoria(self, subcategoria_id: int) -> None:
-        """Apaga a subdivisão. Os produtos dela voltam a ficar sem subcategoria.
+    def desativar_subcategoria(self, subcategoria_id: int) -> Subcategoria:
+        """Tira do balcão os produtos desta subdivisão, sem mexer no cadastro.
 
-        Diferente de `excluir_categoria`, que é bloqueada quando há produto
-        dentro: lá o produto ficaria órfão de impressora e sumiria do balcão;
-        aqui ele só perde a etiqueta e reaparece no grupo "Sem subcategoria",
-        que é a fila de trabalho de quem organiza. Excluir uma etiqueta nunca
-        pode apagar o que ela etiquetava.
+        Mesma forma de `desativar_categoria`, e mesmo alcance: quem aplica a
+        regra é a consulta de lançamento (`ProdutoRepository._vendavel`), então
+        um item de subdivisão desativada some do "Adicionar item" e continua no
+        Cardápio, inteiro, esperando a subdivisão voltar.
+
+        Recusar quando já está desativada não é preciosismo: é o que faz um
+        duplo clique no botão do rodapé não virar dois commits e uma recarga a
+        mais na máquina do food truck.
         """
         self.auth.exigir_gerente()
         subcategoria = self.buscar_subcategoria(subcategoria_id)
+        if not subcategoria.ativo:
+            raise RegraDeNegocioError(
+                f"A subcategoria '{subcategoria.nome}' já está desativada."
+            )
 
-        # Sem laço para soltar os produtos, e isso é uma constatação e não um
-        # descuido: o SQLAlchemy carrega `subcategoria.produtos` ao remover o
-        # pai e anula a FK de cada um deles, e o `ondelete="SET NULL"` do banco
-        # é o cinto para qualquer linha que não esteja na sessão. Havia um laço
-        # explícito aqui; a checagem por mutação mostrou que apagá-lo não
-        # reprovava teste nenhum — ele repetia o que a camada de baixo já fazia.
-        # Quem prova o comportamento é
-        # `test_excluir_subcategoria_solta_os_produtos_em_vez_de_apaga_los`.
+        subcategoria.ativo = False
+        self.uow.subcategorias.salvar(subcategoria)
+        self.uow.commit()
+        return subcategoria
+
+    def ativar_subcategoria(self, subcategoria_id: int) -> Subcategoria:
+        """Devolve ao balcão os produtos desta subdivisão.
+
+        Devolve os que ESTÃO à venda: um produto desativado individualmente
+        (`ativo=False`) continua fora, e é assim que tem que ser — reativar o
+        grupo não pode desfazer, calado, a decisão que alguém tomou item a item.
+        """
+        self.auth.exigir_gerente()
+        subcategoria = self.buscar_subcategoria(subcategoria_id)
+        if subcategoria.ativo:
+            raise RegraDeNegocioError(f"A subcategoria '{subcategoria.nome}' já está ativa.")
+
+        subcategoria.ativo = True
+        self.uow.subcategorias.salvar(subcategoria)
+        self.uow.commit()
+        return subcategoria
+
+    def excluir_subcategoria(self, subcategoria_id: int) -> None:
+        """Apaga a subdivisão VAZIA. Com produto dentro, recusa com o número.
+
+        Mudou no §9.13, e a mudança é uma decisão do Vitor sobre risco, não uma
+        correção: antes a exclusão sempre passava e os produtos voltavam para
+        "Sem subcategoria" (o `ondelete="SET NULL"`). Isso não perdia nada, mas
+        também não perguntava nada — um clique em "Excluir" desmanchava, calado,
+        a classificação de dezenas de itens, e refazê-la é trabalho manual.
+
+        Agora a etiqueta com itens dentro exige uma decisão explícita sobre os
+        itens: ou o gerente os move antes, ou usa
+        `excluir_subcategoria_em_cascata` com a Senha Master. O
+        `ondelete="SET NULL"` continua de pé no banco como cinto — ele é quem
+        garante que, por qualquer caminho que a linha saia, produto nenhum fica
+        apontando para uma subdivisão que não existe mais.
+        """
+        self.auth.exigir_gerente()
+        subcategoria = self.buscar_subcategoria(subcategoria_id)
+        vinculados = self.uow.produtos.listar_da_subcategoria(subcategoria.id)
+        if vinculados:
+            raise RegraDeNegocioError(
+                f"Não é possível excluir a subcategoria '{subcategoria.nome}': "
+                f"{produtos_vinculados(len(vinculados))}. "
+                "Mova ou exclua os produtos primeiro."
+            )
+
         self.uow.subcategorias.remover(subcategoria)
         self.uow.commit()
+
+    def excluir_subcategoria_em_cascata(self, subcategoria_id: int) -> ResultadoCascata:
+        """Apaga a subdivisão E os produtos dela — o caminho da Senha Master.
+
+        A credencial é conferida pela TELA, na hora
+        (`PinPadDialog.para_exclusao`, Nível 3), e não aqui: é a convenção do
+        §9.10, e o motivo é o mesmo — `exigir_gerente()` é satisfeito pela
+        SESSÃO, então quem abriu o turno de manhã autorizaria qualquer cascata
+        clicada à tarde. Este método continua exigindo gerente porque é uma
+        operação administrativa como todas as outras.
+
+        **Nem todo produto pode sair do banco, e é o histórico que decide.** Um
+        produto que já apareceu numa comanda tem `itens_comanda` apontando para
+        ele: apagar a linha arrancaria junto o item da venda, o total do turno e
+        o cupom que já saiu na bobina. Esses são ARQUIVADOS
+        (`Produto.arquivado`) — somem de todas as telas e o passado continua
+        fechando. O resto é apagado de verdade.
+
+        Combo é o outro caso de não apagar: um produto que é combo, ou é
+        componente de um, tem `combo_itens` apontando para ele, e apagá-lo
+        desmontaria a composição de outro item do cardápio que ninguém mandou
+        excluir. Arquiva também, pelo mesmo critério — a regra é "quem tem
+        vínculo fica marcado".
+
+        Tudo num commit só: metade dos produtos apagados e a subcategoria de pé
+        é um estado que ninguém pediu e que a tela não sabe mostrar.
+        """
+        self.auth.exigir_gerente()
+        subcategoria = self.buscar_subcategoria(subcategoria_id)
+        excluidos = arquivados = 0
+        for produto in self.uow.produtos.listar_da_subcategoria(subcategoria.id):
+            if self._tem_historico(produto):
+                # Já arquivado (uma cascata anterior deixou a marca e a FK caiu
+                # para NULL, ou alguém o reclassificou) não conta de novo: o
+                # número que a tela mostra é o do que ESTA cascata fez.
+                if not produto.arquivado:
+                    produto.arquivado = True
+                    # Sair do balcão junto: `arquivado` é lido pelas telas, mas
+                    # `ativo` é o que `ComandaService.lancar_item` confere, e um
+                    # produto excluído não pode ser lançável por caminho nenhum.
+                    produto.ativo = False
+                    self.uow.produtos.salvar(produto)
+                    arquivados += 1
+                continue
+            self.uow.produtos.remover(produto)
+            excluidos += 1
+
+        self.uow.subcategorias.remover(subcategoria)
+        self.uow.commit()
+        return ResultadoCascata(excluidos=excluidos, arquivados=arquivados)
+
+    def _tem_historico(self, produto: Produto) -> bool:
+        """O produto está preso a alguma linha que não pode ser reescrita?
+
+        As mesmas três perguntas de `excluir_produto`, num lugar só: lá elas
+        viram mensagem de recusa, aqui viram a escolha entre apagar e arquivar.
+        Duas cópias divergiriam, e a divergência apareceria como
+        "FOREIGN KEY constraint failed" no meio de uma cascata.
+        """
+        return (
+            self.uow.itens.existe_com_produto(produto.id)
+            or self.uow.combo_itens.existe_como_combo(produto.id)
+            or self.uow.combo_itens.existe_como_componente(produto.id)
+        )
+
+
+    def contar_produtos_da_subcategoria(self, subcategoria_id: int) -> int:
+        """Quantos produtos estão presos a esta subdivisão.
+
+        É o número que a tela precisa ANTES de tentar excluir, para escolher
+        entre a confirmação simples e o aviso com a saída pela Senha Master —
+        e para dizê-lo com a mesma frase que a recusa do service usaria.
+        Conta o arquivado junto, como `excluir_subcategoria`: a linha dele
+        continua apontando para cá.
+        """
+        return len(self.uow.produtos.listar_da_subcategoria(subcategoria_id))
 
     def contagem_de_produtos_por_subcategoria(self) -> dict[int, int]:
         """Quantos produtos em cada subdivisão — uma consulta para a árvore toda."""
@@ -309,7 +461,10 @@ class CardapioService:
         média para baixo nem dividir por zero.
         """
         categorias = self.uow.categorias.listar_todos()
-        produtos = self.uow.produtos.listar_todos()
+        # Sem os arquivados: o topo descreve o catálogo que está NA TELA, e um
+        # "108 itens cadastrados" contando o que nenhuma lista mostra seria o
+        # KPI discordando da lista logo abaixo dele.
+        produtos = self.uow.produtos.listar_do_cardapio()
         subcategorias = self.uow.subcategorias.listar_todos()
 
         precificados = [p for p in produtos if p.preco is not None and p.preco > 0]
@@ -371,7 +526,8 @@ class CardapioService:
         return self.uow.produtos.listar_para_lancamento()
 
     def listar_produtos(self) -> list[Produto]:
-        return self.uow.produtos.listar_todos()
+        """O catálogo que a tela do Cardápio administra — sem os arquivados (§9.13)."""
+        return self.uow.produtos.listar_do_cardapio()
 
     def listar_produtos_ativos(self) -> list[Produto]:
         return self.uow.produtos.listar_ativos_de_categoria_ativa()
@@ -434,6 +590,14 @@ class CardapioService:
     def ativar_produto(self, produto_id: int) -> Produto:
         self.auth.exigir_gerente()
         produto = self.buscar_produto(produto_id)
+        # Arquivado (§9.13) não volta: a linha só continua no banco para o
+        # relatório e o cupom que já saíram. Sem esta recusa, o único caminho
+        # que ainda enxerga um arquivado — um instantâneo de tela aberta antes
+        # da cascata — o traria de volta ao balcão calado.
+        if produto.arquivado:
+            raise RegraDeNegocioError(
+                f"O produto '{produto.nome}' foi excluído do cardápio e não pode ser reativado."
+            )
         if produto.ativo:
             raise RegraDeNegocioError(f"O produto '{produto.nome}' já está ativo.")
 

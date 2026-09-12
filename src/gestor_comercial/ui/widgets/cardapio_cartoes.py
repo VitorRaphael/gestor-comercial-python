@@ -487,6 +487,10 @@ class LinhaDeSubdivisao:
     # A última filha fecha o cartão da categoria aberta: cantos de baixo
     # arredondados e o respiro antes da próxima categoria.
     ultima: bool
+    # Subdivisão desativada (§9.13) — os produtos dela saíram do balcão. As
+    # duas entradas fixas ("Todas", "Sem subcategoria") nascem `True` e nunca
+    # mudam: não são subdivisões e não têm estado a mostrar.
+    ativa: bool = True
 
 
 class DelegadoArvore(QStyledItemDelegate):
@@ -720,6 +724,13 @@ class DelegadoArvore(QStyledItemDelegate):
             cor_rotulo = "acento_texto"
         elif sob_o_mouse:
             cor_rotulo = "texto"
+        elif not linha.ativa:
+            # Um tom abaixo do normal, e não um carimbo "DESATIVADA": a pílula
+            # tem ~190px na coluna de 300 e a palavra comeria o nome. Quem diz
+            # o estado em letras é o cabeçalho do bloco da direita, que tem
+            # largura para isso — e o botão do rodapé, que passa a dizer
+            # "Ativar".
+            cor_rotulo = "texto_fraquissimo"
         else:
             cor_rotulo = "texto_fraco"
         pintor.setPen(cor_do_token(tokens[cor_rotulo]))
@@ -774,11 +785,18 @@ class FotoGrupo:
     # "Sem subcategoria" não é uma subcategoria cadastrada: não tem o que editar.
     editavel: bool
     produtos: tuple[FotoProduto, ...]
+    # Subdivisão desativada (§9.13): os produtos dela continuam aqui, inteiros,
+    # e fora do balcão.
+    ativa: bool = True
 
     @property
     def contagem_texto(self) -> str:
         total = len(self.produtos)
-        return f"{total} {'PRODUTO' if total == 1 else 'PRODUTOS'}"
+        contagem = f"{total} {'PRODUTO' if total == 1 else 'PRODUTOS'}"
+        # Mesma forma do subtítulo da categoria (`LinhaDeCategoria.subtitulo`),
+        # e pelo mesmo motivo: o que muda o que se VENDE é dito em texto, não
+        # só num tom mais apagado que ninguém interpreta.
+        return contagem if self.ativa else f"DESATIVADA · {contagem}"
 
 
 class TipoDeItem(Enum):
@@ -1072,7 +1090,10 @@ class DelegadoProdutos(QStyledItemDelegate):
         altura = metricas_titulo.height() + 2 + metricas_contagem.height()
         topo = area.center().y() - altura / 2.0
         pintor.setFont(fontes["titulo"])
-        pintor.setPen(cor_do_token(tokens["texto"]))
+        # Mesmo par da linha de categoria: nome apagado quando o grupo não
+        # vende, e a palavra DESATIVADA logo abaixo, vinda de `contagem_texto`.
+        ativa = grupo.ativa if grupo is not None else True
+        pintor.setPen(cor_do_token(tokens["texto" if ativa else "texto_fraquissimo"]))
         pintor.drawText(
             QRectF(texto_x, topo, largura, metricas_titulo.height()),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
@@ -1242,6 +1263,12 @@ class ListaDeProdutos(QListWidget):
     """
 
     editar_subcategoria_pedida = Signal(str)
+    # Clicar no cabeçalho de um bloco (ou no aviso de bloco vazio) escolhe
+    # aquela subdivisão — quem move a seleção é a ÁRVORE, que ouve isto (§9.13).
+    # Sem este caminho, a subdivisão sem produto nenhum era inalcançável pela
+    # direita: não há linha para clicar, e o rodapé ficava com os três botões
+    # desligados em cima de um bloco que está na tela.
+    subcategoria_escolhida = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1360,12 +1387,37 @@ class ListaDeProdutos(QListWidget):
                 self.viewport().unsetCursor()
         super().mouseMoveEvent(event)
 
+    def _grupo_em(self, posicao: QPoint) -> FotoGrupo | None:
+        """O grupo do cabeçalho (ou do aviso de vazio) sob `posicao`.
+
+        Só estas duas linhas: a de produto já tem dono (a seleção da lista), e
+        o espaço entre blocos não é de ninguém — clicar nele não pode mudar o
+        contexto do rodapé pelas costas.
+        """
+        indice = self.indexAt(posicao)
+        if not indice.isValid():
+            return None
+        dado = indice.data(PAPEL_LINHA)
+        if not isinstance(dado, ItemDaLista):
+            return None
+        if dado.tipo not in (TipoDeItem.CABECALHO, TipoDeItem.VAZIO):
+            return None
+        return dado.grupo
+
     @nao_deixa_escapar()
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (override Qt)
         if event.button() == Qt.MouseButton.LeftButton:
-            dado = self._link_em(event.position().toPoint())
+            posicao = event.position().toPoint()
+            dado = self._link_em(posicao)
             if dado is not None and dado.grupo is not None:
                 event.accept()
                 self.editar_subcategoria_pedida.emit(dado.grupo.chave)
+                return
+            # O link é conferido ANTES: ele mora dentro do cabeçalho, e trocar a
+            # ordem faria "Editar subcategoria" virar um clique de seleção.
+            grupo = self._grupo_em(posicao)
+            if grupo is not None:
+                event.accept()
+                self.subcategoria_escolhida.emit(grupo.chave)
                 return
         super().mouseReleaseEvent(event)

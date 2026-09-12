@@ -15,6 +15,21 @@ class Produto(Base):
     custo: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0, nullable=False)
     descricao: Mapped[str | None] = mapped_column(String(500))
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Excluído de verdade, mas com a linha de pé (§9.13). NÃO é o mesmo que
+    # `ativo=False`, e a diferença é o que faz os dois existirem:
+    #
+    # * `ativo=False` é "acabou o pão de hambúrguer" — some do balcão, CONTINUA
+    #   no Cardápio com o selo DESATIVADO, e o gerente o reativa amanhã;
+    # * `arquivado=True` é "este produto não existe mais" — some do Cardápio
+    #   também, e nenhuma tela chega mais nele.
+    #
+    # Existe por causa da exclusão em cascata da subcategoria: quem nunca foi
+    # vendido é apagado de verdade (`excluir_produto`), mas quem já aparece numa
+    # comanda não pode sair do banco sem arrancar a linha do relatório e do
+    # cupom junto. Marcar é o único jeito de atender "exclua tudo" sem reescrever
+    # o passado. Reaproveitar `ativo` para isso faria um produto meramente
+    # desativado sumir do Cardápio — e aí não haveria como reativá-lo.
+    arquivado: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_combo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     categoria_id: Mapped[int] = mapped_column(ForeignKey("categorias.id"), nullable=False, index=True)
     imagem_path: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -37,8 +37,11 @@ RAIZ_UI = Path(pacote_ui.__file__).parent
 ARQUIVO_DO_HELPER = "modais.py"
 # 31 no diagnóstico do §3.2; +3 com a subcategoria do §9.9 (o cadastro e a
 # renomeação, que reaproveitam o modal num `while`, e a confirmação de
-# exclusão, que é um `QMessageBox` comum).
-SITES_ESPERADOS = 36
+# exclusão, que é um `QMessageBox` comum); +2 com a exclusão de subcategoria do
+# §9.13, que virou dois caminhos — a confirmação simples da subdivisão vazia e,
+# para a que tem produtos dentro, o aviso de bloqueio seguido do cartão de PIN
+# da Senha Master (os dois últimos são sites distintos do mesmo gesto).
+SITES_ESPERADOS = 38
 
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
 

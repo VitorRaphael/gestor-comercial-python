@@ -47,6 +47,14 @@ class SubcategoriaRepository(Repository[Subcategoria]):
         Subcategoria sem produto nenhum não aparece no resultado (é um `GROUP
         BY` sobre `produtos`), e quem lê trata a ausência como zero — que é a
         contagem certa e o estado normal de uma subdivisão recém-criada.
+
+        **Sem filtro de `arquivado`, e isso é uma constatação e não um descuido**
+        (§9.13): produto arquivado sempre tem `subcategoria_id` nulo, porque a
+        única coisa que arquiva é a cascata — e ela apaga a subcategoria no
+        mesmo commit, o que zera a FK pelo `ondelete="SET NULL"`. Um
+        `arquivado.is_(False)` aqui seria um filtro que nunca exclui linha
+        nenhuma; a checagem por mutação mostrou que apagá-lo não reprova teste
+        algum, e filtro que não filtra mente sobre o que pode acontecer.
         """
         stmt = (
             select(Produto.subcategoria_id, func.count(Produto.id))
