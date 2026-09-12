@@ -3479,6 +3479,109 @@ service faz.
 
 ---
 
+### 9.14 Excluir a categoria inteira, com itens e subcategorias dentro ✅ CONCLUÍDO — 2026-09-12
+
+Pedido do Vitor, logo depois do §9.13: *"devemos implementar uma regra, deixando
+excluir toda uma categoria por mais que tenha itens e subclasses, mas deverá
+gerar uma tela de senha de pin exigindo a senha master"*. É o §9.13 um nível
+acima — e o nível acima esbarra numa coisa que o de baixo não tinha.
+
+#### A restrição que desenha o item inteiro
+
+`produtos.subcategoria_id` é **anulável** (`ondelete="SET NULL"`), então a
+subdivisão do §9.13 sempre sai do banco: o produto guardado apenas perde a
+etiqueta. `produtos.categoria_id` é **NOT NULL**, e essa diferença não é
+enfeite — foi escolhida no §9.8 porque produto sem categoria não tem impressora
+e não sairia em cupom nenhum.
+
+Consequência direta: um produto que precisa sobreviver à exclusão (já foi
+vendido, e apagá-lo arrancaria o item da comanda, o total do turno e o cupom que
+já saiu na bobina) **tem que continuar apontando para alguma categoria**. Por
+isso a cascata da categoria tem dois finais:
+
+| o que há dentro | o que acontece com a categoria |
+|---|---|
+| nada com histórico | **apagada de verdade**, e as subdivisões vão junto pelo `cascade` da relação |
+| algo com histórico | **fica marcada** (`categorias.arquivado`), some de todas as telas, e é a linha dela que sustenta a venda antiga |
+
+Daí a coluna `categorias.arquivado` (migração `c7b4e0f12a86`) — o mesmo par
+`ativo`/`arquivado` do produto, e pela mesma razão de existirem os dois:
+`ativo=False` some do balcão e **continua** no Cardápio para poder voltar;
+`arquivado=True` some de todas as telas e não volta.
+
+#### O nome, que é o detalhe que morderia depois
+
+`categorias.nome` é `UNIQUE`. A categoria guardada continuaria ocupando
+"Lanches" — que é exatamente o nome que o gerente vai querer recadastrar ao
+reorganizar o cardápio. Sem tratar isso, excluir "Lanches" e criar "Lanches" de
+novo esbarraria numa linha que ninguém vê, com um erro que ninguém entende.
+
+Quem libera o nome é o **service**, renomeando a linha guardada para
+`Lanches [excluída #3]`. O marcador leva o `id`, então é único por construção
+mesmo que o mesmo nome seja excluído duas vezes, e o corte a 80 tira o fim do
+NOME e nunca o marcador — é ele que dá a unicidade.
+
+A alternativa era tirar a `UNIQUE` do banco, e ela foi **recusada**: isso exige
+recriar a tabela `categorias` inteira com `produtos` e `subcategorias`
+apontando para ela e o `PRAGMA foreign_keys=ON` ligado (o mesmo perigo do
+cabeçalho da `f8d1a6c40b27`). Risco grande, no banco que é a única cópia dos
+dados do pai do Vitor, para resolver o que uma linha de service resolve.
+
+#### "Vazia" ficou mais estrito que na subcategoria
+
+A exclusão simples agora exige **nem produto nem subdivisão**. As subdivisões
+sempre foram junto pelo `cascade` da relação (§9.9) — e irem junto **em
+silêncio**, num clique em "Excluir" na CATEGORIA, desmanchava a organização de
+um grupo inteiro sem perguntar, e refazê-la é trabalho manual. A recusa soma as
+duas parcelas ("ela tem 1 produto e 2 subcategorias"), porque é o par que
+dimensiona o trabalho de esvaziar.
+
+#### As portas que a categoria guardada fecha
+
+`_categoria_viva()` é o guarda por onde passam editar, ativar, desativar,
+associar impressora, criar subcategoria e criar/atualizar produto. Não é
+simetria com `ativar_produto`: a linha guardada existe **só** para segurar a FK
+das vendas, e reativá-la traria de volta um grupo cujos itens continuam
+arquivados — uma categoria vazia com nome de lápide. As listagens do Cardápio,
+do seletor de cadastro, dos KPIs e da tela de Impressoras passaram a filtrar.
+
+#### Conferência
+
+* suíte **1628** (de 1596), 0 falhas, 32 testes novos em dois arquivos
+  (`test_categoria_em_cascata.py`, `test_migracao_categoria_arquivada.py`) mais
+  a seção 6b de `test_barra_de_acoes_do_cardapio.py`;
+* **18 mutações, as 18 reprovam**. A primeira passada teve uma sobrevivente — o
+  filtro de `arquivado` em `listar_ativas`, que a cascata torna redundante ao
+  desligar `ativo` junto — e ela virou o teste que prende o cinto, o mesmo par
+  (e a mesma razão) do `Produto.arquivado` no §9.13;
+* bancada visual a 1366x738: as **24 telas idênticas byte a byte** às do §9.13.
+  É o esperado e vale registrar: o item inteiro vive em diálogos, e a tela
+  parada não mudou um pixel;
+* bancada de cupons: os **2 idênticos** linha a linha;
+* boot de ponta a ponta em banco novo: migrations + seed duas vezes, 60 mesas,
+  15 categorias, 113 produtos, 0 arquivados, WAL ligado, head `c7b4e0f12a86`.
+
+**Um defeito do próprio teste, achado por mutação e corrigido:** o helper
+`encenar()` do §9.13 **travava** quando o diálogo aberto era de tipo diferente
+do que o roteiro esperava — foi o que aconteceu com a mutação que tirava o aviso
+de bloqueio, fazendo o cartão de PIN abrir onde se esperava um `QMessageBox`. O
+relógio girava para sempre dentro do `exec()`. Ele ganhou um teto de espera e
+passa a fechar o diálogo inesperado: um teste que pendura a suíte é pior que um
+teste que falha.
+
+#### Ficou de fora, de propósito
+
+- **Desarquivar categoria pela tela** — não existe lixeira, pela mesma razão do
+  §9.13.
+- **Escolher para onde mover os produtos com histórico.** Seria mais uma decisão
+  no meio de um gesto destrutivo; a regra automática (guarda quem tem venda,
+  apaga o resto) é a que não exige pensar na hora.
+- **Relatório de vendas por categoria**, que é o que daria valor a preservar a
+  associação do produto arquivado com a categoria guardada. O dado está lá para
+  quando for.
+
+---
+
 ## 10. As melhores mudanças que o programa teve — em português de balcão
 
 > **Por que esta seção existe.** Todo o resto do documento é escrito para quem

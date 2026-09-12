@@ -10,6 +10,18 @@ class Categoria(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     nome: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Excluída de verdade, mas com a linha de pé (§9.14) — o mesmo par
+    # `ativo`/`arquivado` do `Produto`, e pela mesma razão de existirem os dois:
+    # `ativo=False` some do balcão e CONTINUA no Cardápio, para poder voltar;
+    # `arquivado=True` some de todas as telas e não volta.
+    #
+    # Aqui ele existe por uma razão a mais, que é de banco: `produtos.
+    # categoria_id` é **NOT NULL**, então um produto que precisa sobreviver à
+    # exclusão da categoria (porque já foi vendido) precisa continuar
+    # apontando para alguma categoria. Apagar a linha arrancaria a venda junto;
+    # marcá-la a tira da tela sem tocar no passado. Ver
+    # `CardapioService.excluir_categoria_em_cascata`.
+    arquivado: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     impressora_id: Mapped[int | None] = mapped_column(ForeignKey("impressoras.id"), index=True)
 
     impressora: Mapped["Impressora | None"] = relationship(back_populates="categorias")

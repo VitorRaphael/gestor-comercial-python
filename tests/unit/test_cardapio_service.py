@@ -1200,14 +1200,31 @@ def test_excluir_subcategoria_exige_gerente(cardapio, categoria, como_atendente)
         cardapio.excluir_subcategoria(9999)
 
 
-def test_excluir_a_categoria_leva_as_subcategorias_dela(cardapio, categoria):
-    """Subcategoria órfã não é alcançável por tela nenhuma — toda navegação
-    entra pela categoria."""
+def test_excluir_a_categoria_com_subcategoria_dentro_e_recusado(cardapio, categoria):
+    """Mudou no §9.14, e é uma decisão sobre risco e não uma correção.
+
+    A subdivisão sempre foi junto pelo `cascade` da relação — e ir junto em
+    SILÊNCIO, num clique em "Excluir" na CATEGORIA, desmanchava a organização de
+    um grupo inteiro sem perguntar. Agora a categoria só sai vazia de vez; com
+    conteúdo dentro, o caminho é a cascata com a Senha Master.
+    """
     cardapio.criar_subcategoria(categoria.id, "Podrão")
 
-    cardapio.excluir_categoria(categoria.id)
+    with pytest.raises(RegraDeNegocioError, match="ela tem 1 subcategoria"):
+        cardapio.excluir_categoria(categoria.id)
+
+    assert [s.nome for s in cardapio.listar_subcategorias(categoria.id)] == ["Podrão"]
+
+
+def test_a_cascata_da_categoria_leva_as_subcategorias_dela(cardapio, categoria):
+    """Subcategoria órfã não é alcançável por tela nenhuma — toda navegação
+    entra pela categoria. A regra do §9.9 continua; mudou só a porta."""
+    cardapio.criar_subcategoria(categoria.id, "Podrão")
+
+    cardapio.excluir_categoria_em_cascata(categoria.id)
 
     assert cardapio.uow.subcategorias.listar_todos() == []
+    assert cardapio.listar_categorias() == []
 
 
 def test_contagem_de_produtos_por_subcategoria(cardapio, categoria):

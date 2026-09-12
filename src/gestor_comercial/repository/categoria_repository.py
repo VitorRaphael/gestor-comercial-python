@@ -13,8 +13,30 @@ class CategoriaRepository(Repository[Categoria]):
     def listar_todos(self) -> list[Categoria]:
         return list(self.session.scalars(select(Categoria).order_by(Categoria.nome)))
 
+    def listar_do_cardapio(self) -> list[Categoria]:
+        """Os grupos que a tela do Cardápio administra — sem os arquivados (§9.14).
+
+        Separado de `listar_todos` pelo mesmo motivo de
+        `ProdutoRepository.listar_do_cardapio`: o arquivado tem que continuar
+        alcançável por quem olha para o passado (é ele que segura a FK dos
+        produtos já vendidos) e sumir de quem olha para o cardápio de hoje.
+        """
+        stmt = select(Categoria).where(Categoria.arquivado.is_(False)).order_by(Categoria.nome)
+        return list(self.session.scalars(stmt))
+
     def listar_ativas(self) -> list[Categoria]:
-        stmt = select(Categoria).where(Categoria.ativo.is_(True)).order_by(Categoria.nome)
+        """As que vendem: ativas E não arquivadas.
+
+        As duas condições, e não só `ativo`: uma categoria arquivada nunca é
+        desativada junto (arquivar não é desativar), então filtrar só por
+        `ativo` a devolveria para o seletor do cadastro de produto — e o
+        gerente cadastraria item novo dentro de um grupo que não existe mais.
+        """
+        stmt = (
+            select(Categoria)
+            .where(Categoria.ativo.is_(True), Categoria.arquivado.is_(False))
+            .order_by(Categoria.nome)
+        )
         return list(self.session.scalars(stmt))
 
     def existe_com_impressora(self, impressora_id: int) -> bool:

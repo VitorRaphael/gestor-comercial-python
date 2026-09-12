@@ -111,6 +111,19 @@ class ProdutoRepository(Repository[Produto]):
             )
         )
 
+    def listar_da_categoria(self, categoria_id: int) -> list[Produto]:
+        """Os produtos de uma categoria — quem a exclusão em cascata vai pegar.
+
+        Traz os arquivados junto (sem filtro de `arquivado`), como a irmã da
+        subcategoria: eles continuam apontando para cá, e é justamente a
+        existência deles que decide se a categoria pode sair do banco ou tem
+        que ficar marcada.
+        """
+        stmt = (
+            select(Produto).where(Produto.categoria_id == categoria_id).order_by(Produto.nome)
+        )
+        return list(self.session.scalars(stmt))
+
     def listar_da_subcategoria(self, subcategoria_id: int) -> list[Produto]:
         """Os produtos de uma subdivisão — quem a exclusão em cascata vai pegar.
 

@@ -226,26 +226,42 @@ def encenar(qapp, tela: CardapioView, roteiro: list[tuple[str, str]], acao) -> l
     """
     vistos: list[str] = []
     pendentes = list(roteiro)
+    # Quantas voltas do relógio um diálogo aberto pode ficar sem casar com o
+    # passo esperado antes de ser fechado à força. Sem este teto o helper
+    # TRAVA — e travou: uma mutação que tirava o aviso de bloqueio fazia o
+    # cartão de PIN abrir onde o roteiro esperava um `QMessageBox`, os dois
+    # ramos abaixo não casavam, e o relógio girava para sempre dentro do
+    # `exec()`. Um teste que pendura a suíte é pior que um teste que falha.
+    TETO_DE_ESPERA = 200
+    parado = 0
 
     def visivel(tipo) -> list:
         return [d for d in tela.findChildren(tipo) if d.isVisible()]
 
+    def soltar(dialogo) -> None:
+        vistos.append("INESPERADO")
+        dialogo.reject()
+
     def proximo() -> None:
+        nonlocal parado
         caixas, pins = visivel(QMessageBox), visivel(PinPadDialog)
-        if not caixas and not pins:
+        abertos = caixas + pins
+        if not abertos:
+            parado = 0
             return
         if not pendentes:
-            # Diálogo que o roteiro não previu: fecha para não travar a suíte e
-            # deixa o rastro na lista, para a asserção do teste acusar.
-            vistos.append("INESPERADO")
-            (caixas + pins)[-1].reject()
+            # Diálogo que o roteiro não previu: fecha e deixa o rastro na lista,
+            # para a asserção do teste acusar.
+            soltar(abertos[-1])
             return
         tipo, valor = pendentes[0]
         if tipo == "caixa" and caixas:
+            parado = 0
             pendentes.pop(0)
             vistos.append(caixas[-1].text())
             _clicar_no_botao(caixas[-1], valor)
         elif tipo == "pin" and pins:
+            parado = 0
             pendentes.pop(0)
             pin = pins[-1]
             vistos.append(pin.windowTitle())
@@ -253,6 +269,13 @@ def encenar(qapp, tela: CardapioView, roteiro: list[tuple[str, str]], acao) -> l
             pin._confirmar()
             if pin.result() != QDialog.DialogCode.Accepted:
                 pin.reject()  # PIN recusado: o teste não pode ficar preso no exec()
+        else:
+            # Há diálogo na tela, mas de um tipo que o roteiro não esperava
+            # agora. Espera um pouco (ele pode estar nascendo) e desiste.
+            parado += 1
+            if parado >= TETO_DE_ESPERA:
+                parado = 0
+                soltar(abertos[-1])
 
     relogio = QTimer()
     relogio.setInterval(0)
@@ -819,6 +842,124 @@ def test_o_botao_do_rodape_e_o_menu_de_contexto_chamam_a_mesma_rotina(
     tela._painel_produtos._botao_editar.click()
 
     assert pelo_menu == modal_de_organizacao.abertos == [("subcategoria", "Podrão")]
+
+
+# ---------------------------------------------------------------------------
+# 6b. Excluir a CATEGORIA — as mesmas duas barreiras, um nível acima (§9.14)
+# ---------------------------------------------------------------------------
+
+
+def test_categoria_vazia_sai_com_uma_confirmacao(qapp, tela, cardapio):
+    """"Vazia" aqui é mais estrito: nem produto, nem subdivisão."""
+    vazia = cardapio.criar_categoria("Sobremesas")
+    tela.atualizar()
+    _abrir(tela, "Sobremesas")
+
+    vistos = encenar(
+        qapp, tela, [("caixa", "Excluir")], tela._painel_produtos._botao_excluir.click
+    )
+
+    assert "Deseja excluir a categoria 'Sobremesas'?" in vistos[0]
+    assert vazia.nome not in [c.nome for c in cardapio.listar_categorias()]
+
+
+def test_categoria_com_conteudo_avisa_e_exige_a_senha_master(qapp, tela, cardapio):
+    """A recusa soma as duas parcelas: é o tamanho do trabalho de esvaziar."""
+    _abrir(tela, "Lanches")
+
+    vistos = encenar(
+        qapp, tela, [("caixa", "Cancelar")], tela._painel_produtos._botao_excluir.click
+    )
+
+    assert "ela tem 3 produtos e 2 subcategorias" in vistos[0]
+    assert "SENHA MASTER" in vistos[0]
+    assert [c.nome for c in cardapio.listar_categorias()] == ["Bebidas", "Lanches"]
+
+
+def test_a_senha_master_apaga_a_categoria_inteira(qapp, tela, cardapio):
+    """Nada foi vendido neste cenário: sai tudo do banco, de verdade."""
+    _abrir(tela, "Lanches")
+
+    vistos = encenar(
+        qapp,
+        tela,
+        [("caixa", "Excluir com Senha Master"), ("pin", PIN_MASTER)],
+        tela._painel_produtos._botao_excluir.click,
+    )
+
+    assert vistos[1] == "Confirmar Exclusão"
+    assert [c.nome for c in cardapio.listar_categorias()] == ["Bebidas"]
+    assert [p.nome for p in cardapio.listar_produtos()] == ["Coca Lata"]
+    assert cardapio.listar_todas_as_subcategorias() == []
+
+
+def test_a_senha_operacional_nao_apaga_a_categoria(qapp, tela, cardapio):
+    _abrir(tela, "Lanches")
+
+    encenar(
+        qapp,
+        tela,
+        [("caixa", "Excluir com Senha Master"), ("pin", PIN_OPERACIONAL)],
+        tela._painel_produtos._botao_excluir.click,
+    )
+
+    assert [c.nome for c in cardapio.listar_categorias()] == ["Bebidas", "Lanches"]
+
+
+def test_depois_de_excluir_a_categoria_a_arvore_recomeca(qapp, tela, cardapio):
+    """Não há "mesmo lugar" para onde voltar: a categoria em que o gerente
+    estava deixou de existir."""
+    _abrir(tela, "Lanches")
+
+    encenar(
+        qapp,
+        tela,
+        [("caixa", "Excluir com Senha Master"), ("pin", PIN_MASTER)],
+        tela._painel_produtos._botao_excluir.click,
+    )
+
+    selecao = tela._painel_categorias.selecao_atual()
+    assert selecao.categoria is not None and selecao.categoria.nome == "Bebidas"
+    assert _rodape(tela)["rotulo"] == "CATEGORIA: BEBIDAS"
+
+
+def test_a_categoria_guardada_some_da_arvore(qapp, tela, cardapio, uow, gerente, caixa_aberto):
+    """O caso em que a linha precisa ficar no banco: para o gerente, some igual."""
+    from datetime import datetime
+
+    from gestor_comercial.domain.comanda import Comanda
+    from gestor_comercial.domain.item_comanda import ItemComanda
+
+    vendido = next(p for p in cardapio.listar_produtos() if p.nome == "X Burguer")
+    comanda = uow.comandas.salvar(
+        Comanda(
+            aberta_em=datetime(2026, 9, 12, 12, 0),
+            usuario_id=gerente.id,
+            caixa_id=caixa_aberto.id,
+        )
+    )
+    uow.itens.salvar(
+        ItemComanda(
+            quantidade=1,
+            preco_unit_congelado=vendido.preco,
+            comanda_id=comanda.id,
+            produto_id=vendido.id,
+        )
+    )
+    tela.atualizar()
+    _abrir(tela, "Lanches")
+
+    encenar(
+        qapp,
+        tela,
+        [("caixa", "Excluir com Senha Master"), ("pin", PIN_MASTER)],
+        tela._painel_produtos._botao_excluir.click,
+    )
+
+    assert [c.nome for c in cardapio.listar_categorias()] == ["Bebidas"]
+    assert uow.categorias.buscar_por_id(vendido.categoria_id).arquivado is True
+    with pytest.raises(AssertionError):
+        _item_categoria(tela, "Lanches")
 
 
 # ---------------------------------------------------------------------------

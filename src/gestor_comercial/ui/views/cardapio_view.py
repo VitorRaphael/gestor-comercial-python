@@ -79,6 +79,7 @@ from gestor_comercial.domain.produto import Produto
 from gestor_comercial.services.cardapio_service import (
     CardapioService,
     ResumoCardapio,
+    conteudo_da_categoria,
     margem_percentual,
     produtos_vinculados,
 )
@@ -1364,23 +1365,42 @@ class _CategoriasPainel(PainelPontilhado):
         self.alterado.emit()
 
     def excluir(self) -> None:
+        """Exclui a categoria destacada — vazia num clique, cheia com barreira.
+
+        Os mesmos dois caminhos da subcategoria (§9.13), um nível acima e com
+        uma diferença que o §9.14 registra: aqui "vazia" é **nem produto nem
+        subdivisão**. As subdivisões sempre foram junto pelo `cascade` da
+        relação, e ir junto em silêncio desmanchava a organização de um grupo
+        inteiro num clique.
+        """
         categoria = self.categoria_atual()
         if categoria is None:
             return
+        produtos, subcategorias = self._service.contar_conteudo_da_categoria(categoria.id)
+        if not produtos and not subcategorias:
+            if not self._confirmar_categoria_vazia(categoria.nome):
+                return
+            self._aplicar_exclusao_de_categoria(categoria.id, cascata=False)
+            return
+
+        if not self._confirmar_cascata_de_categoria(categoria.nome, produtos, subcategorias):
+            return
+        pin = PinPadDialog.para_exclusao(
+            self._service.auth,
+            f"a categoria '{categoria.nome}' e tudo o que está dentro dela",
+            self,
+        )
+        if executar_modal(pin) != QDialog.DialogCode.Accepted:
+            return
+        self._aplicar_exclusao_de_categoria(categoria.id, cascata=True)
+
+    def _confirmar_categoria_vazia(self, nome: str) -> bool:
         caixa = QMessageBox(self)
-        caixa.setWindowTitle("Atenção: Exclusão de Categoria")
+        caixa.setWindowTitle("Excluir categoria")
         caixa.setIcon(QMessageBox.Icon.Warning)
-        # A mensagem antiga prometia o oposto do que acontece ("todos os
-        # produtos vinculados também serão excluídos permanentemente"):
-        # `excluir_categoria` RECUSA categoria com produto dentro, justamente
-        # para não arrancar item com histórico de venda. O texto passou a dizer
-        # o que o service faz — promover esta ação ao rodapé (§9.13) é o que
-        # tornou a divergência visível.
         caixa.setText(
-            f"Excluir a categoria '{categoria.nome}'?\n\n"
-            "As subcategorias dela são excluídas junto. Os PRODUTOS não: se "
-            "houver algum na categoria, a exclusão é recusada — desative a "
-            "categoria ou mude esses produtos de categoria antes."
+            f"Deseja excluir a categoria '{nome}'?\n\n"
+            "Ela está vazia — sem produtos e sem subcategorias. Nada mais é afetado."
         )
         botao_cancelar = caixa.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
         botao_confirmar = caixa.addButton("Excluir", QMessageBox.ButtonRole.DestructiveRole)
@@ -1388,11 +1408,59 @@ class _CategoriasPainel(PainelPontilhado):
         caixa.setDefaultButton(botao_cancelar)
         caixa.setEscapeButton(botao_cancelar)
         executar_modal(caixa)
-        if caixa.clickedButton() is not botao_confirmar:
-            return
+        return caixa.clickedButton() is botao_confirmar
+
+    def _confirmar_cascata_de_categoria(self, nome: str, produtos: int, subcategorias: int) -> bool:
+        """O aviso de bloqueio da categoria — e o que a Senha Master libera.
+
+        A frase do bloqueio é a MESMA do service (`conteudo_da_categoria`), pela
+        razão do §9.13: quem insistir e for barrado tem que ler a mesma coisa
+        que leu aqui.
+
+        O texto diz **a coisa mais fácil de sair errado**: um item já vendido
+        não pode sair do banco, então a categoria dele também não pode. Quem
+        clica precisa saber que "excluir tudo" pode terminar com a categoria
+        guardada, invisível, em vez de apagada.
+        """
+        caixa = QMessageBox(self)
+        caixa.setWindowTitle("Excluir categoria")
+        caixa.setIcon(QMessageBox.Icon.Warning)
+        caixa.setText(
+            f"Não é possível excluir a categoria '{nome}': "
+            f"{conteudo_da_categoria(produtos, subcategorias)}.\n\n"
+            "Mova ou exclua o que está dentro primeiro.\n\n"
+            "Com a SENHA MASTER do dono é possível excluir tudo de uma vez: as "
+            "subcategorias saem, os produtos que nunca foram vendidos saem do "
+            "cadastro, e os que já têm venda registrada são arquivados — somem "
+            "do cardápio e do lançamento, e os relatórios e cupons passados "
+            "continuam intactos. Se sobrar algum item arquivado, a própria "
+            "categoria fica guardada com ele, fora de todas as telas: é a linha "
+            "dela que sustenta a venda antiga."
+        )
+        botao_cancelar = caixa.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
+        botao_cascata = caixa.addButton(
+            "Excluir com Senha Master", QMessageBox.ButtonRole.DestructiveRole
+        )
+        botao_cascata.setProperty("variante", "perigo")
+        caixa.setDefaultButton(botao_cancelar)
+        caixa.setEscapeButton(botao_cancelar)
+        executar_modal(caixa)
+        return caixa.clickedButton() is botao_cascata
+
+    def _aplicar_exclusao_de_categoria(self, categoria_id: int, *, cascata: bool) -> None:
+        """Roda a exclusão e recarrega a árvore do zero.
+
+        Do zero, e não `atualizar_mantendo_selecao()`: a categoria em que o
+        gerente estava deixou de existir, e não há "mesmo lugar" para onde
+        voltar — é a diferença para a exclusão de subdivisão, que devolve à
+        categoria que continua ali.
+        """
         self._mostrar_erro("")
         try:
-            self._service.excluir_categoria(categoria.id)
+            if cascata:
+                self._service.excluir_categoria_em_cascata(categoria_id)
+            else:
+                self._service.excluir_categoria(categoria_id)
         except _ERROS_SERVICE as erro:
             self._mostrar_erro(str(erro))
             return

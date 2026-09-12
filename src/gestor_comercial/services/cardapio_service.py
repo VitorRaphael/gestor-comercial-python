@@ -99,6 +99,22 @@ class ResumoCardapio:
     margem_media: float
 
 
+def conteudo_da_categoria(produtos: int, subcategorias: int) -> str:
+    """"ela tem 3 produtos e 2 subcategorias" — o que barra a exclusão simples.
+
+    Função de módulo pelo mesmo motivo de `produtos_vinculados`: a TELA diz esta
+    frase no aviso antes de tentar, e a recusa do service a repete. Quem
+    insistir e for barrado tem que ler a mesma coisa que leu no aviso, senão
+    parecem dois problemas diferentes.
+    """
+    partes = []
+    if produtos:
+        partes.append(f"{produtos} produto" + ("" if produtos == 1 else "s"))
+    if subcategorias:
+        partes.append(f"{subcategorias} subcategoria" + ("" if subcategorias == 1 else "s"))
+    return "ela tem " + " e ".join(partes)
+
+
 def produtos_vinculados(total: int) -> str:
     """"existe 1 produto vinculado" / "existem 3 produtos vinculados".
 
@@ -124,6 +140,10 @@ class ResultadoCascata:
 
     excluidos: int
     arquivados: int
+    # O grupo (categoria) não pôde sair do banco e ficou marcado (§9.14).
+    # Sempre `False` na cascata de subcategoria, que nunca precisa disso: a FK
+    # do produto para a subdivisão é anulável, a da categoria não é.
+    grupo_arquivado: bool = False
 
 
 @transacional
@@ -149,7 +169,8 @@ class CardapioService:
         return categoria
 
     def listar_categorias(self) -> list[Categoria]:
-        return self.uow.categorias.listar_todos()
+        """Os grupos que a tela do Cardápio administra — sem os arquivados (§9.14)."""
+        return self.uow.categorias.listar_do_cardapio()
 
     def listar_categorias_ativas(self) -> list[Categoria]:
         return self.uow.categorias.listar_ativas()
@@ -162,7 +183,7 @@ class CardapioService:
 
     def editar_categoria(self, categoria_id: int, nome: str) -> Categoria:
         self.auth.exigir_gerente()
-        categoria = self.buscar_categoria(categoria_id)
+        categoria = self._categoria_viva(categoria_id)
         nome_limpo = self._texto_obrigatorio(nome, "Informe o nome da categoria.")
         self._exigir_nome_de_categoria_livre(nome_limpo, categoria.id)
 
@@ -173,7 +194,7 @@ class CardapioService:
 
     def desativar_categoria(self, categoria_id: int) -> Categoria:
         self.auth.exigir_gerente()
-        categoria = self.buscar_categoria(categoria_id)
+        categoria = self._categoria_viva(categoria_id)
         if not categoria.ativo:
             raise RegraDeNegocioError(f"A categoria '{categoria.nome}' já está desativada.")
 
@@ -184,7 +205,7 @@ class CardapioService:
 
     def ativar_categoria(self, categoria_id: int) -> Categoria:
         self.auth.exigir_gerente()
-        categoria = self.buscar_categoria(categoria_id)
+        categoria = self._categoria_viva(categoria_id)
         if categoria.ativo:
             raise RegraDeNegocioError(f"A categoria '{categoria.nome}' já está ativa.")
 
@@ -193,24 +214,127 @@ class CardapioService:
         self.uow.commit()
         return categoria
 
-    def excluir_categoria(self, categoria_id: int) -> None:
-        self.auth.exigir_gerente()
+    def _categoria_viva(self, categoria_id: int) -> Categoria:
+        """A categoria, desde que não tenha sido excluída (§9.14).
+
+        Arquivada não volta, e não é só simetria com `ativar_produto`: a linha
+        dela existe unicamente para segurar a FK dos produtos já vendidos, e
+        reativá-la traria de volta um grupo cujos itens continuam arquivados —
+        uma categoria vazia com nome de lápide.
+        """
         categoria = self.buscar_categoria(categoria_id)
-        # Apagar a categoria com produto dentro deixaria o produto órfão e
-        # quebraria o histórico de venda dele. Desativar é o caminho certo.
-        if self.uow.produtos.existe_com_categoria(categoria.id):
+        if categoria.arquivado:
+            raise RecursoNaoEncontradoError(
+                f"A categoria '{categoria.nome}' foi excluída do cardápio."
+            )
+        return categoria
+
+    def excluir_categoria(self, categoria_id: int) -> None:
+        """Apaga a categoria VAZIA. Com conteúdo dentro, recusa com o número.
+
+        "Vazia" aqui é mais estrito que na subcategoria: nem produto, nem
+        subdivisão. Apagar as subdivisões junto sempre foi a regra (§9.9, o
+        `cascade` da relação), mas fazê-lo em silêncio quando o gerente clicou
+        em "Excluir" na CATEGORIA desmancharia, sem perguntar, a organização de
+        um grupo inteiro — e refazê-la é trabalho manual.
+
+        Quem tem conteúdo sai por `excluir_categoria_em_cascata`, atrás da
+        Senha Master.
+        """
+        self.auth.exigir_gerente()
+        categoria = self._categoria_viva(categoria_id)
+        produtos = len(self.uow.produtos.listar_da_categoria(categoria.id))
+        subcategorias = len(self.uow.subcategorias.listar_da_categoria(categoria.id))
+        if produtos or subcategorias:
             raise RegraDeNegocioError(
                 f"Não é possível excluir a categoria '{categoria.nome}': "
-                "há produtos vinculados a ela. Desative a categoria ou "
-                "mude esses produtos de categoria antes."
+                f"{conteudo_da_categoria(produtos, subcategorias)}. "
+                "Mova ou exclua o que está dentro primeiro."
             )
 
         self.uow.categorias.remover(categoria)
         self.uow.commit()
 
+    def excluir_categoria_em_cascata(self, categoria_id: int) -> ResultadoCascata:
+        """Apaga a categoria, as subdivisões e os produtos — com a Senha Master.
+
+        A credencial é conferida pela TELA, na hora (`PinPadDialog.para_exclusao`,
+        Nível 3), pela razão do §9.10 e do §9.13: `exigir_gerente()` é satisfeito
+        pela SESSÃO, e quem abriu o turno de manhã autorizaria a cascata clicada
+        à tarde.
+
+        O critério dos PRODUTOS é o mesmo do §9.13: quem nunca foi vendido (nem
+        está preso a um combo) sai do banco; quem tem histórico é arquivado,
+        porque apagá-lo arrancaria junto o item da comanda, o total do turno e o
+        cupom que já saiu na bobina.
+
+        **A diferença para a subcategoria está na própria categoria.** A FK
+        `produtos.subcategoria_id` é anulável, então a subdivisão sempre sai do
+        banco; `produtos.categoria_id` é **NOT NULL**, e um produto arquivado
+        precisa continuar apontando para alguma categoria. Por isso:
+
+        * se nenhum produto precisou ser guardado, a categoria é **apagada de
+          verdade** — e as subdivisões vão junto pelo `cascade` da relação;
+        * se algum precisou, a categoria **fica marcada** (`arquivado`), some de
+          todas as telas, e as subdivisões são apagadas na mão (uma subdivisão
+          de categoria invisível não é alcançável por tela nenhuma, o mesmo
+          argumento do §9.9). Os produtos guardados perdem a subdivisão pelo
+          `ondelete="SET NULL"` e mantêm a categoria, que é o que a FK exige.
+
+        Tudo num commit só: metade dos produtos apagados e a categoria de pé é
+        um estado que ninguém pediu e que a tela não sabe mostrar.
+        """
+        self.auth.exigir_gerente()
+        categoria = self._categoria_viva(categoria_id)
+        excluidos = arquivados = guardados = 0
+        for produto in self.uow.produtos.listar_da_categoria(categoria.id):
+            if not (produto.arquivado or self._tem_historico(produto)):
+                self.uow.produtos.remover(produto)
+                excluidos += 1
+                continue
+            guardados += 1
+            # Já arquivado (uma cascata de subcategoria anterior o marcou) não
+            # conta de novo: o número que a tela mostra é o do que ESTA cascata
+            # fez. Ele conta, isso sim, para a categoria ter que ficar.
+            if not produto.arquivado:
+                produto.arquivado = True
+                produto.ativo = False
+                self.uow.produtos.salvar(produto)
+                arquivados += 1
+
+        if guardados:
+            for subcategoria in self.uow.subcategorias.listar_da_categoria(categoria.id):
+                self.uow.subcategorias.remover(subcategoria)
+            categoria.arquivado = True
+            categoria.ativo = False
+            categoria.nome = self._nome_de_categoria_arquivada(categoria)
+            self.uow.categorias.salvar(categoria)
+        else:
+            self.uow.categorias.remover(categoria)
+        self.uow.commit()
+        return ResultadoCascata(
+            excluidos=excluidos, arquivados=arquivados, grupo_arquivado=bool(guardados)
+        )
+
+    @staticmethod
+    def _nome_de_categoria_arquivada(categoria: Categoria) -> str:
+        """Libera o nome para o gerente poder recriar o grupo no minuto seguinte.
+
+        `categorias.nome` é `UNIQUE` no banco. Sem renomear, excluir "Lanches"
+        e cadastrar "Lanches" de novo — que é exatamente o que se faz ao
+        reorganizar um cardápio — esbarraria numa linha que ninguém vê, com um
+        erro que ninguém entende.
+
+        O sufixo leva o `id`, então é único por construção mesmo que o mesmo
+        nome seja excluído duas vezes. O corte a 80 é o da coluna: nome longo
+        perde o fim do nome, e não o marcador, que é o que dá a unicidade.
+        """
+        marcador = f" [excluída #{categoria.id}]"
+        return categoria.nome[: 80 - len(marcador)] + marcador
+
     def associar_impressora(self, categoria_id: int, impressora_id: int) -> Categoria:
         self.auth.exigir_gerente()
-        categoria = self.buscar_categoria(categoria_id)
+        categoria = self._categoria_viva(categoria_id)
         impressora = self.buscar_impressora(impressora_id)
 
         categoria.impressora = impressora
@@ -220,7 +344,7 @@ class CardapioService:
 
     def desassociar_impressora(self, categoria_id: int) -> Categoria:
         self.auth.exigir_gerente()
-        categoria = self.buscar_categoria(categoria_id)
+        categoria = self._categoria_viva(categoria_id)
 
         categoria.impressora = None
         self.uow.categorias.salvar(categoria)
@@ -231,7 +355,7 @@ class CardapioService:
         """Categorias hoje vinculadas a esta impressora (para a tela Impressoras)."""
         return [
             categoria
-            for categoria in self.uow.categorias.listar_todos()
+            for categoria in self.uow.categorias.listar_do_cardapio()
             if categoria.impressora_id == impressora_id
         ]
 
@@ -247,7 +371,7 @@ class CardapioService:
         primeiro e classifica os itens depois, e não o contrário.
         """
         self.auth.exigir_gerente()
-        categoria = self.buscar_categoria(categoria_id)
+        categoria = self._categoria_viva(categoria_id)
         nome_limpo = self._texto_obrigatorio(nome, "Informe o nome da subcategoria.")
         self._exigir_nome_de_subcategoria_livre(categoria.id, nome_limpo, subcategoria_id=None)
 
@@ -436,6 +560,18 @@ class CardapioService:
         )
 
 
+    def contar_conteudo_da_categoria(self, categoria_id: int) -> tuple[int, int]:
+        """Quantos produtos e quantas subdivisões a categoria tem dentro.
+
+        É o par que a tela precisa ANTES de tentar excluir, para escolher entre
+        a confirmação simples e o aviso com a saída pela Senha Master — e para
+        dizê-lo com a mesma frase que a recusa do service usaria.
+        """
+        return (
+            len(self.uow.produtos.listar_da_categoria(categoria_id)),
+            len(self.uow.subcategorias.listar_da_categoria(categoria_id)),
+        )
+
     def contar_produtos_da_subcategoria(self, subcategoria_id: int) -> int:
         """Quantos produtos estão presos a esta subdivisão.
 
@@ -460,7 +596,7 @@ class CardapioService:
         porque o cadastro recusa preço zero, mas um dado antigo não pode puxar a
         média para baixo nem dividir por zero.
         """
-        categorias = self.uow.categorias.listar_todos()
+        categorias = self.uow.categorias.listar_do_cardapio()
         # Sem os arquivados: o topo descreve o catálogo que está NA TELA, e um
         # "108 itens cadastrados" contando o que nenhuma lista mostra seria o
         # KPI discordando da lista logo abaixo dele.
@@ -504,7 +640,7 @@ class CardapioService:
         nome_limpo = self._texto_obrigatorio(nome, "Informe o nome do produto.")
         preco_final = self._preco_valido(preco)
         custo_final = self._custo_valido(custo)
-        categoria = self.buscar_categoria(categoria_id)
+        categoria = self._categoria_viva(categoria_id)
 
         produto = Produto(
             nome=nome_limpo,
@@ -554,7 +690,7 @@ class CardapioService:
         nome_limpo = self._texto_obrigatorio(nome, "Informe o nome do produto.")
         preco_final = self._preco_valido(preco)
         custo_final = self._custo_valido(custo)
-        categoria = self.buscar_categoria(categoria_id)
+        categoria = self._categoria_viva(categoria_id)
 
         # Mudar o preço aqui não mexe em venda passada: o ItemComanda guarda o
         # preço congelado do momento do lançamento (§3.6).
