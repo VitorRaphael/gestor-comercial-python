@@ -117,8 +117,9 @@ from gestor_comercial.ui.widgets.cardapio_cartoes import (
 )
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 from gestor_comercial.ui.widgets.modais import descartar_modal, executar_modal
+from gestor_comercial.ui.widgets.organizacao_cardapio_dialog import OrganizacaoCardapioDialog
 from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
-from gestor_comercial.ui.widgets.subcategoria_dialog import SubcategoriaDialog
+from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
 from gestor_comercial.ui.widgets.tabelas import limpar_tabela
 from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
 
@@ -883,21 +884,40 @@ class _CategoriasPainel(PainelPontilhado):
         menu.exec(self.arvore.viewport().mapToGlobal(posicao))
 
     def criar(self) -> None:
-        modal = _CategoriaDialog("Nova categoria", self)
-        if executar_modal(modal) != QDialog.DialogCode.Accepted:
-            return
+        """Cadastra o grupo principal, pelo mesmo cartão da subdivisão (§9.12).
+
+        Reabre o MESMO diálogo quando o service recusa o nome, como a
+        subcategoria já fazia desde o §9.9: o gerente corrige sem redigitar, e
+        o erro aparece dentro do cartão em vez de na linha vermelha da tela de
+        trás, que ele nem está olhando.
+        """
+        modal = OrganizacaoCardapioDialog.para_categoria(self._nomes_de_categoria(), self)
         self._mostrar_erro("")
         try:
-            categoria = self._service.criar_categoria(modal.nome())
-        except _ERROS_SERVICE as erro:
-            self._mostrar_erro(str(erro))
-            return
-        # A categoria nova já abre selecionada: quem acabou de criá-la vai
-        # cadastrar as subdivisões dela em seguida, e a árvore antiga levava o
-        # gerente de volta para a primeira categoria da lista.
-        self._selecao = SelecaoCardapio(categoria=categoria, chave=_SUB_TODAS)
-        self.atualizar_mantendo_selecao()
-        self.alterado.emit()
+            while modal.exec() == QDialog.DialogCode.Accepted:
+                try:
+                    categoria = self._service.criar_categoria(modal.resultado().nome)
+                except _ERROS_SERVICE as erro:
+                    modal.mostrar_erro_servico(str(erro))
+                    continue
+                # A categoria nova já abre selecionada: quem acabou de criá-la
+                # vai cadastrar as subdivisões dela em seguida, e a árvore
+                # antiga levava o gerente de volta para a primeira da lista.
+                self._selecao = SelecaoCardapio(categoria=categoria, chave=_SUB_TODAS)
+                self.atualizar_mantendo_selecao()
+                self.alterado.emit()
+                return
+        finally:
+            descartar_modal(modal)
+
+    def _nomes_de_categoria(self) -> list[str]:
+        """Os nomes já usados, para o cartão avisar do repetido antes de salvar.
+
+        Vem do service e não de `self._categorias` de propósito: a lista da
+        tela é a da última recarga, e o aviso que mente é pior que aviso
+        nenhum. É uma consulta, na abertura de um modal.
+        """
+        return [categoria.nome for categoria in self._service.listar_categorias()]
 
     def criar_subcategoria(self) -> None:
         """Abre o cartão de cadastro de subdivisão na categoria selecionada."""
@@ -906,7 +926,7 @@ class _CategoriasPainel(PainelPontilhado):
             self._mostrar_erro("Selecione uma categoria antes de criar uma subcategoria.")
             return
         existentes = [s.nome for s in self._service.listar_subcategorias(categoria.id)]
-        modal = SubcategoriaDialog(
+        modal = OrganizacaoCardapioDialog.para_subcategoria(
             categoria.nome,
             categoria.impressora.nome if categoria.impressora is not None else None,
             existentes,
@@ -952,7 +972,7 @@ class _CategoriasPainel(PainelPontilhado):
             return
         nome_antigo = subcategoria.nome
         existentes = [s.nome for s in self._service.listar_subcategorias(categoria.id)]
-        modal = SubcategoriaDialog(
+        modal = OrganizacaoCardapioDialog.para_subcategoria(
             categoria.nome,
             categoria.impressora.nome if categoria.impressora is not None else None,
             existentes,
@@ -1025,17 +1045,22 @@ class _CategoriasPainel(PainelPontilhado):
         categoria = self.categoria_atual()
         if categoria is None:
             return
-        modal = _CategoriaDialog("Editar categoria", self, nome_inicial=categoria.nome)
-        if executar_modal(modal) != QDialog.DialogCode.Accepted:
-            return
+        modal = OrganizacaoCardapioDialog.para_categoria(
+            self._nomes_de_categoria(), self, nome_inicial=categoria.nome
+        )
         self._mostrar_erro("")
         try:
-            self._service.editar_categoria(categoria.id, modal.nome())
-        except _ERROS_SERVICE as erro:
-            self._mostrar_erro(str(erro))
-            return
-        self.atualizar_mantendo_selecao()
-        self.alterado.emit()
+            while modal.exec() == QDialog.DialogCode.Accepted:
+                try:
+                    self._service.editar_categoria(categoria.id, modal.resultado().nome)
+                except _ERROS_SERVICE as erro:
+                    modal.mostrar_erro_servico(str(erro))
+                    continue
+                self.atualizar_mantendo_selecao()
+                self.alterado.emit()
+                return
+        finally:
+            descartar_modal(modal)
 
     def alternar_status(self) -> None:
         categoria = self.categoria_atual()
@@ -1672,31 +1697,6 @@ class _ComboComponentesDialog(QDialog):
             self._label_erro.setText(str(erro))
             return
         self._atualizar_componentes()
-
-
-class _CategoriaDialog(QDialog):
-    """Modal de criação/edição de categoria: só o nome."""
-
-    def __init__(self, titulo: str, parent: QWidget | None = None, *, nome_inicial: str = "") -> None:
-        super().__init__(parent)
-        self.setWindowTitle(titulo)
-
-        layout = QVBoxLayout(self)
-        formulario = QFormLayout()
-
-        self._campo_nome = QLineEdit(nome_inicial)
-        formulario.addRow("Nome", self._campo_nome)
-        layout.addLayout(formulario)
-
-        botoes = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        botoes.accepted.connect(self.accept)
-        botoes.rejected.connect(self.reject)
-        layout.addWidget(botoes)
-
-    def nome(self) -> str:
-        return self._campo_nome.text().strip()
 
 
 class _ProdutoDialog(QDialog):

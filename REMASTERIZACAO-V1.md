@@ -2518,8 +2518,10 @@ Duas colunas saíram e uma entrou:
   não decide nada; quantas subdivisões existem, sim — é o que diz se a
   organização avançou.
 
-**O modal "Nova subcategoria"** (`widgets/subcategoria_dialog.py`) é o **sétimo
-modal em cartão** do app, e o primeiro que cadastra algo que antes não existia.
+**O modal "Nova subcategoria"** (`widgets/subcategoria_dialog.py` — **substituído
+no §9.12** por `widgets/organizacao_cardapio_dialog.py`, que atende os dois
+níveis) é o **sétimo modal em cartão** do app, e o primeiro que cadastra algo
+que antes não existia.
 Cartão de contexto com a categoria e a impressora, campo com anel de foco e
 contador, as subdivisões que já existem como pílulas **apagadas e não
 clicáveis** (elas informam; clicar numa delas só poderia levar a "já existe"), e
@@ -3074,6 +3076,207 @@ que é onde a folga do raio na conta inversa deixa de ser inerte).
   subcategoria continuam fora, pelos motivos do §9.9.
 
 ---
+
+### 9.12 Categoria e subcategoria num cartão só ✅ CONCLUÍDO — 2026-09-12
+
+Pedido do Vitor, com dois mockups (Nova categoria e Nova subcategoria) e uma
+exigência escrita acima do desenho: **DRY**. "Observe que os dois modais
+compartilham 95% da mesma estrutura visual. Implemente um único componente base
+reutilizável e parametrizável que receba os parâmetros de contexto (Categoria
+Raiz vs. Subcategoria de uma Categoria Pai) em vez de duplicar classes
+inteiras." Junto vieram o ciclo de vida limpo (descarte dos widgets, `unbind`
+dos atalhos, desconexão dos ouvintes de texto), o teto de hardware do Celeron e
+a ordem de não encostar em regra de negócio nem no `WAL`.
+
+#### O que havia antes
+
+Duas telas para a mesma pergunta — "que nome tem este grupo?":
+
+* `_CategoriaDialog`, 20 linhas dentro de `cardapio_view.py`: moldura do
+  sistema, `QFormLayout`, `QDialogButtonBox` de fábrica. Era a última janela do
+  Cardápio que ainda parecia formulário de 2005, e a única do fluxo sem
+  contador, sem aviso de nome repetido e sem `Esc` documentado;
+* `SubcategoriaDialog` (§9.9), já em cartão, mas anterior ao mockup — e com uma
+  cópia inteira de cabeçalho, campo com anel de foco, contador, rodapé e
+  limpeza. Eram exatamente as cinco peças que a categoria teria de copiar para
+  ficar parecida com ela.
+
+#### A decisão: uma classe parametrizada, não duas irmãs
+
+`widgets/organizacao_cardapio_dialog.py` é **um** `QDialog`
+(`OrganizacaoCardapioDialog`) com dois papéis. O que separa um do outro mora em
+`PAPEIS`, uma linha por papel: o glifo do cabeçalho, o rótulo do campo, o
+*placeholder*, o destino padrão, a função que decide se o nome já existe e as
+seis frases de cada modo (criar/renomear). É a forma do §9.6 (`OPERACOES`, a
+movimentação de caixa), pelo mesmo motivo: a tela é a mesma tela com outras
+palavras dentro.
+
+**Não** é base + subclasses, a forma do §9.7: lá as duas colunas da esquerda não
+tinham nada em comum e parametrizar produziria uma classe com metade dos
+atributos `None`. Aqui é o oposto — o que muda cabe numa `dataclass` de sete
+campos, e um `if nivel is CATEGORIA` no meio da montagem é justamente como duas
+telas voltam a existir sem ninguém ter decidido isso.
+
+Quem chama usa os construtores nomeados (`para_categoria`, `para_subcategoria`),
+a convenção do `PinPadDialog` do §9.10: a view diz **o que** quer cadastrar, não
+como o cartão se veste.
+
+#### O achado: as duas regras de nome repetido são diferentes
+
+O que mais fácil sairia errado num modal compartilhado é a única coisa que os
+dois níveis fazem de formas diferentes no service:
+
+| | regra do service | o que o cartão compara |
+|---|---|---|
+| Categoria | `Categoria.nome == nome` — **exato** | o nome aparado, exato |
+| Subcategoria | `chave_de_agrupamento` — ignora acento, caixa e espaço repetido | a mesma `chave_de_agrupamento` |
+
+Espelhar a regra de cada nível (o campo `normalizar` do papel) é o que impede a
+tela de **mentir**. Um "✕ Nome já existente" ao digitar `lanches` com `Lanches`
+cadastrada seria um botão desligado por uma regra que o service não tem, e o
+gerente ficaria sem saber por que não consegue salvar. Os dois testes ficam lado
+a lado no arquivo, um afirmando o que o outro nega, com o porquê escrito em
+cada um: se um dia a categoria passar a comparar como a subcategoria, é o
+segundo que reprova — e o conserto é **uma linha em `PAPEIS`**, não uma tela
+nova.
+
+Fica registrado que a assimetria é do service e não desta tela: duas categorias
+`Lanches` e `lanches` continuam possíveis no banco, como sempre foram. Mudar
+isso é regra de negócio, o pedido dizia para não mexer, e nada aqui mexeu.
+
+#### O ciclo de vida, item a item do pedido
+
+* **descarte dos widgets** — `executar_modal()`/`descartar_modal()` (§3.2)
+  continuam sendo quem destrói, **depois** de `resultado()` ser lido;
+  `WA_DeleteOnClose` segue fora, porque `done()` faz `hide()` e não `close()`.
+  Os filhos morrem com o cartão; o único widget que não é filho dele é o
+  escurecedor, filho da JANELA, e é por isso que `done()` existe aqui;
+* **`unbind` de atalhos** — não há nenhum a soltar, e isso é uma decisão: quem
+  lê o teclado é o `keyPressEvent` do diálogo. Um `QShortcut` de aplicação
+  sobreviveria ao cartão, e é exatamente o vazamento que o pedido descreve;
+* **desconexão dos ouvintes de texto** — `_soltar_recursos()` tira o filtro de
+  eventos do campo e desconecta as três ligações nominalmente, com a trava
+  `_limpo` para a segunda passagem. Elas morreriam com os filhos de qualquer
+  forma; explicitá-las é o que impede que uma quarta ligação, a um objeto de
+  **fora** do cartão, entre um dia sem ninguém notar que aquela, sim,
+  sobreviveria ao fechamento.
+
+A trava `_limpo` rendeu uma correção de teste que vale registrar. A primeira
+versão dizia que o segundo `disconnect` levanta `RuntimeError` — **não levanta**
+nesta versão do PySide6: devolve `False` e imprime
+`RuntimeWarning: libpyside: Failed to disconnect`. O teste escrito contra a
+exceção passava verde com a trava apagada (a mutação mostrou), e ainda era
+enganado duas vezes: `done()` carrega o `@nao_deixa_escapar`, que engoliria a
+exceção de qualquer jeito. Ele passou a medir o **aviso**, chamando
+`_soltar_recursos()` na mão.
+
+#### O que o mockup pediu e a fonte da marca não deixou
+
+A largura. O pedido escrito dizia "entre 460px e 500px"; o cartão das duas
+imagens tem **576px**, e é dele que sai o rodapé de uma linha do desenho
+(atalhos à esquerda, os dois botões à direita). Medido a 480px com a fonte do
+app — Archivo Black, ~20% mais larga que a do mockup — o rodapé pede 570px e o
+Qt espreme o que não cabe: `+ Criar subcategoria` saía como `Criar subcategol` e
+`ENTER PARA CRIAR · ESC PARA FECHAR` virava `ENTER PARA CRIAR · ES`. Um rodapé
+que corta a própria instrução de teclado.
+
+O cartão ficou nos 576px do mockup, a linha de atalhos caiu para 9px com metade
+do espaçamento, e a folga no pior caso é de 6px — pequena demais para depender
+de quem vier depois lembrar dela. Está trancada em
+`test_o_rodape_cabe_no_cartao`, que mede `width() < sizeHint().width()` de cada
+peça nos dois níveis e nos dois modos, com a fonte da marca registrada na
+fixture. Sem essa fixture o teste passaria verde sem ter olhado: a plataforma
+`offscreen` sobe sem banco de fontes e ali o aperto não acontece — a mesma
+armadilha do card de mesa do §9.5.
+
+#### O resto do desenho
+
+Nenhum token novo. O tema escuro da paleta "Concreto" **já é** o do mockup
+(`superficie` `#161615`, `borda` `rgba(255,255,255,0.08)`, `texto_fraco`
+`#A1A1AA`, `texto_fraquissimo` `#71717A`, `acento` `#E5A93C`, `sucesso`
+`#4ADE80`), e o resto veio das famílias que o Cardápio já tinha
+(`cardapio_icone_*` para a insígnia âmbar, `cardapio_painel_bg` para as
+superfícies recuadas, `subcategoria_grupo_*` para o selo da impressora). Por
+isso o cartão nasce correto no tema claro também, sem uma segunda paleta para
+divergir.
+
+* os **glifos** entraram no sistema de `cardapio_cartoes.py`
+  (`GLIFO_PASTA_MAIS`, `GLIFO_RAMO`), na mesma grade de 24 dos outros — o
+  `_IconeDeRamo`, que o §9.9 desenhava à mão dentro do modal, deixou de existir;
+* o **corpo do cartão é um `PainelPontilhado`**, a textura do login, da barra
+  lateral e dos dois painéis do Cardápio: é o que as imagens mostram atrás do
+  formulário, e custa um `paintEvent` com ~30 pontos na região suja;
+* o **cartão de contexto** responde "onde isto vai nascer" antes de qualquer
+  digitação: `SERÁ CRIADA EM · Raiz do cardápio` ou `SERÁ CRIADA DENTRO DE ·
+  <categoria>`;
+* a **linha de validação** tem dois papéis fixos: à esquerda a ajuda (ou o erro
+  do service, que é frase inteira e precisa da largura), à direita o veredito
+  curto — `✓ Nome válido` / `✕ Nome já existente`. `✓` e `✕` e não `✅`/`❌`,
+  pela armadilha do emoji já paga no cadeado do PIN e no olho das senhas;
+* o **teto do campo** caiu de 80 (a coluna do banco) para os 60 do mockup, com
+  uma ressalva: `setMaxLength` **apara o texto que já está no campo**, então
+  abrir a edição de um nome mais longo que o teto e devolvê-lo cortado seria
+  perder dado calado. O teto do campo é `max(60, len(nome_atual))`.
+
+#### O que mudou na view, além da troca de modal
+
+Criar e editar **categoria** passaram para o `while modal.exec()` que a
+subcategoria já usava desde o §9.9: quando o service recusa, o cartão reabre com
+o que foi digitado e a mensagem dentro dele. Antes o erro saía na linha vermelha
+da tela de trás, com o cartão já fechado e o texto perdido — e essa linha é
+justamente onde o gerente **não** está olhando. São os dois sites novos que
+levam `test_o_modal_reaproveitado_no_while_e_descartado_fora_do_laco` de 4 para
+6; o total de 36 sites de modal não mudou.
+
+#### Como foi conferido
+
+* **suíte 1530** (de 1495), 0 falhas. 55 testes novos no cartão + 1 na tela;
+  os 22 da suíte antiga da subcategoria foram absorvidos e reescritos para rodar
+  **nos dois níveis**;
+* **19 mutações, as 19 reprovam** — entre elas: trocar a regra de duplicidade de
+  um nível pela do outro (nas duas direções), apagar o selo da impressora,
+  deixar `setMaxLength` cortar o nome existente, tirar a trava de limpeza dupla,
+  deixar o `Enter` passar por cima do botão desligado, não desconectar o
+  `textChanged`, não soltar o escurecedor, encolher o cartão para 480px e fazer
+  `editar_categoria` não chamar o service;
+* **bancada visual**: as **24 telas idênticas byte a byte** ao commit anterior,
+  nos dois temas — o cartão é modal e não entra em nenhuma delas, e o QSS novo
+  não encosta em widget de tela;
+* **bancada de cupons**: os 2 cupons idênticos linha a linha. Roteamento de
+  impressão intocado, como o pedido exigia;
+* renderização nativa do cartão nos dois níveis, nos dois modos e nos dois
+  temas: **576x374**, muito abaixo dos 728px úteis de um monitor de 768px.
+
+#### Decisões
+
+| Data | Decisão | Por quê |
+|---|---|---|
+| 2026-09-12 | **Uma classe parametrizada** por `NivelDoCardapio`, com `PAPEIS` | O pedido (DRY) e o precedente do §9.6; o que difere cabe em sete campos |
+| 2026-09-12 | Construtores nomeados `para_categoria`/`para_subcategoria` | Convenção do `PinPadDialog` (§9.10): a view diz o que cadastra, não como o cartão se veste |
+| 2026-09-12 | Cada nível compara duplicidade com **a regra do próprio service** | Uma regra só faria a tela mentir num dos dois lados |
+| 2026-09-12 | O `SubcategoriaDialog` foi **apagado**, não mantido ao lado | Mantê-lo seria a duplicação que o pedido mandou eliminar |
+| 2026-09-12 | O selo da **impressora** continua no cartão de contexto, fora do mockup | É a regra de ouro do §9.8 dita em voz alta; some na raiz, onde não há bobina a citar |
+| 2026-09-12 | Cartão com **576px**, e não os 460–500 do texto do pedido | É a largura das próprias imagens; abaixo disso o rodapé de uma linha corta os próprios rótulos com a fonte da marca |
+| 2026-09-12 | Mínimo de **2 letras** para ligar o botão | O mockup pede; o service só recusa vazio, e está escrito nos dois lugares que é trava de tela |
+| 2026-09-12 | Teto do campo `max(60, len(nome_atual))` | `setMaxLength` apara o texto existente, e perder dado calado é pior que um contador passando de 60 |
+| 2026-09-12 | Criar/editar categoria passaram ao `while modal.exec()` | O erro do service passa a aparecer dentro do cartão, sem redigitar |
+
+#### Ficou de fora, e por quê
+
+- **A assimetria das duas regras de duplicidade** não foi corrigida no service:
+  `Lanches` e `lanches` continuam podendo coexistir como categorias. É regra de
+  negócio, e o pedido dizia para não mexer. Fica anotado como candidato — a
+  correção seria um `_exigir_nome_de_categoria_livre` comparando pela
+  `chave_de_agrupamento`, com o mesmo `PAPEIS` acompanhando numa linha.
+- **As pílulas "já existem nesta categoria"** do §9.9 saíram: não estão no
+  mockup, e a linha de validação faz o trabalho que elas faziam — avisar do
+  quase-igual antes de salvar — sem gastar duas fileiras do cartão.
+- **A exclusão** de categoria e de subcategoria continua no `QMessageBox` do
+  sistema. O pedido era sobre as janelas de **criação**; refazer a confirmação
+  destrutiva no mesmo desenho é item próprio.
+- **`_ProdutoDialog`, `_ComponenteDialog` e `_ComboComponentesDialog`** seguem
+  sendo formulários de fábrica dentro do `cardapio_view.py`. São os três últimos
+  do Cardápio, e o `_ProdutoDialog` é bem maior que estes dois cartões.
 
 ## 10. As melhores mudanças que o programa teve — em português de balcão
 

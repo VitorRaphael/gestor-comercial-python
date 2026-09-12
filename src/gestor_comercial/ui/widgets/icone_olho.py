@@ -7,7 +7,7 @@ da letra. `👁` (U+1F441) mora no bloco de emoji: no Windows ele cai no *Segoe
 UI Emoji*, sai colorido e chapado, ignora a paleta e fica do tamanho errado ao
 lado de um botão de 32px. É a mesma armadilha já registrada no cadeado do
 `pin_pad_dialog`, na lupa do `adicionar_item_dialog` e no ramo do
-`subcategoria_dialog` — e vale em dobro aqui, porque a máquina limpa do food
+`organizacao_cardapio_dialog` — e vale em dobro aqui, porque a máquina limpa do food
 truck pode nem ter a fonte de emoji instalada, e aí o botão sai como um
 retângulo vazio.
 

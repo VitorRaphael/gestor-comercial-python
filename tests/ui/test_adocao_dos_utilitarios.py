@@ -13,9 +13,9 @@ A regra é a do §3.2, escrita como código:
   * `X.exec()` sem argumento é abertura de diálogo, e tem que virar
     `executar_modal(X)`;
   * a única exceção é o modal **reaproveitado** entre voltas de um `while`
-    (`cardapio_view.criar`/`editar`), onde `executar_modal` destruiria o
-    diálogo já na primeira iteração. Lá o `.exec()` cru é obrigatório — e, em
-    troca, a função tem que descartar a instância ela mesma;
+    (as seis funções de cadastro do `cardapio_view`), onde `executar_modal`
+    destruiria o diálogo já na primeira iteração. Lá o `.exec()` cru é
+    obrigatório — e, em troca, a função tem que descartar a instância ela mesma;
   * `menu.exec(posicao)` e `app.exec()` não entram: o primeiro leva argumento,
     o segundo não mora na camada de UI.
 
@@ -145,16 +145,21 @@ def test_nenhuma_tela_abre_modal_com_exec_cru():
 
 
 def test_o_modal_reaproveitado_no_while_e_descartado_fora_do_laco():
-    """Os quatro `while modal.exec()` do cardápio são a exceção da regra — e a
+    """Os seis `while modal.exec()` do cardápio são a exceção da regra — e a
     exceção só é legítima porque a função descarta a instância ela mesma.
 
     Eram dois (criar/editar produto). O §9.9 trouxe mais dois, pelo mesmo
     motivo: o cadastro e a renomeação de subcategoria reabrem o MESMO diálogo
-    quando o service recusa o nome, para o gerente corrigir sem redigitar."""
+    quando o service recusa o nome, para o gerente corrigir sem redigitar. O
+    §9.12 trouxe os dois últimos ao unificar os cartões: criar e editar
+    CATEGORIA passaram a usar o mesmo diálogo da subcategoria e, com ele, o
+    mesmo caminho de correção — antes o erro do service saía na linha vermelha
+    da tela de trás, com o cartão já fechado e o que foi digitado perdido."""
     _, reaproveitados, _ = _varrer()
-    assert len(reaproveitados) == 4, (
-        "esperados exatamente 4 modais reaproveitados (cardapio_view: produto e "
-        f"subcategoria, criar/editar), achados {len(reaproveitados)}: {reaproveitados}"
+    assert len(reaproveitados) == 6, (
+        "esperados exatamente 6 modais reaproveitados (cardapio_view: produto, "
+        "categoria e subcategoria, criar/editar), achados "
+        f"{len(reaproveitados)}: {reaproveitados}"
     )
     assert all("cardapio_view.py" in site for site in reaproveitados), reaproveitados
 

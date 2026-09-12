@@ -773,104 +773,139 @@ def construir_qss_app(t: dict[str, str]) -> str:
 
     QComboBox#seletorSubcategoria {{ min-width: 180px; }}
 
-    /* ---------- Modal "Nova subcategoria" (`widgets/subcategoria_dialog.py`)
+    /* ---------- Modal "Nova categoria" / "Nova subcategoria"
+       (`widgets/organizacao_cardapio_dialog.py`, §9.12)
        Setimo modal em cartao do app, e por isso o setimo a NAO poder herdar o
        `QDialog {{ background }}` la de cima: a janela e frameless e translucida
-       para os cantos de 16px sairem redondos de verdade. O ✕, o Cancelar e o
-       Confirmar nao aparecem aqui porque ja estao declarados nas familias
-       compartilhadas com o modal "Adicionar item". */
+       para os cantos de 16px sairem redondos de verdade. E UM cartao para os
+       dois niveis do cardapio: o que muda entre eles sao palavras e um glifo,
+       nada aqui. O ✕, o Cancelar e o Confirmar nao aparecem neste bloco porque
+       ja estao declarados nas familias compartilhadas com o modal "Adicionar
+       item". */
 
-    QDialog#subDialog {{ background: transparent; }}
-    QWidget#subDialogGlifo {{ background: transparent; }}
-    QFrame#subDialogCard {{
+    QDialog#orgDialog {{ background: transparent; }}
+    QFrame#orgDialogCard {{
       background: {t['superficie']};
       border: 1px solid {t['borda']};
       border-radius: 16px;
     }}
-    QFrame#subDialogIcone {{
-      background: {t['subcategoria_grupo_bg']};
-      border: 1px solid {t['subcategoria_grupo_borda']};
-      border-radius: 21px;
+    /* As tres faixas do cartao sao transparentes e quem as separa e o divisor
+       de 1px -- pintar fundo em cada uma repetiria a cor do cartao em tres
+       lugares, e bastaria uma delas ficar para tras numa troca de paleta. */
+    QWidget#orgDialogCabecalho, QWidget#orgDialogRodape {{ background: transparent; }}
+    QFrame#orgDialogCorpo {{ background: transparent; border: none; }}
+    QFrame#orgDialogDivisor {{
+      background: {t['cardapio_bloco_divisor']};
+      border: none;
     }}
-    QLabel#subDialogTitulo {{
+    QFrame#orgDialogBadge {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['cardapio_card_borda']};
+      border-radius: 13px;
+    }}
+    QLabel#orgDialogSecao {{
+      color: {t['cardapio_icone_glifo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      background: transparent;
+    }}
+    QLabel#orgDialogTitulo {{
       color: {t['texto']};
       font-size: 18px;
       font-weight: 800;
       background: transparent;
     }}
-    QLabel#subDialogSubtitulo {{
+    QLabel#orgDialogSubtitulo {{
       color: {t['texto_fraco']};
       font-size: 12px;
       background: transparent;
     }}
-    QLabel#subDialogRotulo {{
+    /* O cartao de contexto: a pergunta "onde isto vai nascer" respondida antes
+       de o gerente digitar qualquer coisa. Recuado em relacao ao cartao (a
+       superficie de painel, mais funda), para ler como informacao e nao como
+       campo. */
+    QFrame#orgDialogContexto {{
+      background: {t['cardapio_painel_bg']};
+      border: 1px solid {t['cardapio_card_borda']};
+      border-radius: 12px;
+    }}
+    QFrame#orgDialogContextoIcone {{
+      background: {t['cardapio_icone_tinta']};
+      border: 1px solid {t['cardapio_icone_borda']};
+      border-radius: 11px;
+    }}
+    QLabel#orgDialogRotulo {{
       color: {t['texto_fraquissimo']};
       font-size: 10px;
       font-weight: 700;
-      letter-spacing: 1.5px;
+      letter-spacing: 1.2px;
       background: transparent;
     }}
-    QFrame#subDialogContexto {{
-      background: {t['superficie_2']};
-      border: 1px solid {t['borda']};
-      border-radius: 12px;
-    }}
-    QLabel#subDialogDestino {{
-      color: {t['subcategoria_glifo']};
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 1px;
-      background: transparent;
-    }}
-    QFrame#subDialogCaixa {{
-      background: {t['superficie_2']};
-      border: 1px solid {t['borda']};
-      border-radius: 12px;
-    }}
-    QFrame#subDialogCaixa[foco="true"] {{ border: 1px solid {t['acento']}; }}
-    QLineEdit#subDialogCampo {{
-      background: transparent;
-      border: none;
-      padding: 0;
+    QLabel#orgDialogDestino {{
       color: {t['texto']};
       font-size: 14px;
-    }}
-    QLabel#subDialogContador {{
-      color: {t['texto_fraquissimo']};
-      font-size: 10px;
-      font-weight: 700;
+      font-weight: 800;
       background: transparent;
     }}
-    /* A linha de aviso troca de papel entre dica, erro e pronto -- mesmo
-       mecanismo do rodape do modal "Adicionar item". */
-    QLabel#subDialogAviso {{
-      color: {t['texto_fraquissimo']};
-      font-size: 9px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      background: transparent;
-    }}
-    QLabel#subDialogAviso[estado="erro"] {{ color: {t['perigo']}; }}
-    QLabel#subDialogAviso[estado="ok"] {{ color: {t['sucesso']}; }}
-    QWidget#subDialogFaixa {{ background: transparent; }}
-    /* As pilulas do "ja existem" sao QLabel e nao QPushButton de proposito:
-       elas informam, nao acionam. Um controle cuja unica resposta possivel e
-       "ja existe" seria uma armadilha. */
-    QLabel#subDialogPill {{
+    /* O selo da bobina (so na subcategoria): a regra de ouro do §9.8 dita em
+       voz alta -- quem decide a impressora e a CATEGORIA, e criar uma divisao
+       dentro dela nao muda isso. */
+    QLabel#orgDialogImpressora {{
       background: {t['subcategoria_grupo_bg']};
       border: 1px solid {t['subcategoria_grupo_borda']};
-      border-radius: 11px;
-      padding: 4px 11px;
+      border-radius: 9px;
+      padding: 3px 9px;
       color: {t['subcategoria_grupo_texto']};
       font-size: 9px;
       font-weight: 700;
       letter-spacing: 1px;
     }}
-    QLabel#subDialogNota {{
+    QFrame#orgDialogCaixa {{
+      background: {t['cardapio_painel_bg']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+    }}
+    QFrame#orgDialogCaixa[foco="true"] {{ border: 1px solid {t['acento']}; }}
+    QLineEdit#orgDialogCampo {{
+      background: transparent;
+      border: none;
+      padding: 0;
+      color: {t['texto']};
+      font-size: 15px;
+      font-weight: 600;
+    }}
+    QLabel#orgDialogContador {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    /* A linha de baixo tem dois papeis fixos: a ESQUERDA o que vai acontecer
+       (ou o erro que o service devolveu, que e frase inteira e precisa da
+       largura), a DIREITA o veredito curto do nome. */
+    QLabel#orgDialogAjuda {{
+      color: {t['texto_fraquissimo']};
+      font-size: 11px;
+      background: transparent;
+    }}
+    QLabel#orgDialogAjuda[estado="erro"] {{ color: {t['perigo']}; font-weight: 700; }}
+    QLabel#orgDialogStatus {{
+      color: {t['texto_fraquissimo']};
+      font-size: 11px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel#orgDialogStatus[estado="ok"] {{ color: {t['sucesso']}; }}
+    QLabel#orgDialogStatus[estado="erro"] {{ color: {t['perigo']}; }}
+    /* 9px e nao 10px, e a metade do espacamento: e a linha mais larga do
+       rodape, e a fonte da marca (Archivo Black) e ~20% mais larga que a do
+       mockup -- a 10px ela empurrava o botao primario para fora do cartao. */
+    QLabel#orgDialogAtalhos {{
       color: {t['texto_fraquissimo']};
       font-size: 9px;
       font-weight: 700;
-      letter-spacing: 0.8px;
+      letter-spacing: 0.4px;
       background: transparent;
     }}
 
@@ -1336,7 +1371,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
        o Qt descarta o glifo -- o botao sai como um circulo vazio. Vale para o
        fechar e para os dois passos de quantidade. */
     QPushButton#addItemFechar, QPushButton#addItemPasso, QPushButton#funcDialogFechar,
-    QPushButton#movCaixaFechar, QPushButton#turnoFechar, QPushButton#subDialogFechar,
+    QPushButton#movCaixaFechar, QPushButton#turnoFechar, QPushButton#orgDialogFechar,
     QPushButton#cpfDialogFechar {{
       padding: 0;
       background: {t['botao_circular_bg']};
@@ -1346,11 +1381,11 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
     QPushButton#addItemFechar, QPushButton#funcDialogFechar,
     QPushButton#movCaixaFechar, QPushButton#turnoFechar,
-    QPushButton#subDialogFechar, QPushButton#cpfDialogFechar {{ border-radius: 16px; font-size: 13px; }}
+    QPushButton#orgDialogFechar, QPushButton#cpfDialogFechar {{ border-radius: 16px; font-size: 13px; }}
     QPushButton#addItemPasso {{ border-radius: 17px; font-size: 18px; }}
     QPushButton#addItemFechar:hover, QPushButton#addItemPasso:hover,
     QPushButton#funcDialogFechar:hover, QPushButton#movCaixaFechar:hover,
-    QPushButton#turnoFechar:hover, QPushButton#subDialogFechar:hover,
+    QPushButton#turnoFechar:hover, QPushButton#orgDialogFechar:hover,
     QPushButton#cpfDialogFechar:hover {{
       background: {t['botao_circular_hover']};
       color: {t['texto']};
@@ -1492,7 +1527,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QLabel#addItemAviso[estado="erro"] {{ color: {t['perigo']}; }}
     QLabel#addItemAviso[estado="sucesso"] {{ color: {t['sucesso']}; }}
 
-    QPushButton#subDialogCancelar,
+    QPushButton#orgDialogCancelar,
     QPushButton#cpfDialogCancelar,
     QPushButton#addItemCancelar, QPushButton#funcDialogCancelar,
     QPushButton#movCaixaCancelar, QPushButton#turnoCancelar {{
@@ -1504,14 +1539,14 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-size: 12px;
       font-weight: 700;
     }}
-    QPushButton#subDialogCancelar:hover,
+    QPushButton#orgDialogCancelar:hover,
     QPushButton#cpfDialogCancelar:hover,
     QPushButton#addItemCancelar:hover, QPushButton#funcDialogCancelar:hover,
     QPushButton#movCaixaCancelar:hover,
     QPushButton#turnoCancelar:hover {{ background: {t['botao_circular_hover']}; }}
 
     QPushButton#addItemConfirmar, QPushButton#funcDialogConfirmar,
-    QPushButton#subDialogConfirmar,
+    QPushButton#orgDialogConfirmar,
     QPushButton#cpfDialogConfirmar {{
       padding: 9px 22px;
       background: {t['acento']};
@@ -1522,13 +1557,13 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-weight: 800;
     }}
     QPushButton#addItemConfirmar:hover, QPushButton#funcDialogConfirmar:hover,
-    QPushButton#subDialogConfirmar:hover,
+    QPushButton#orgDialogConfirmar:hover,
     QPushButton#cpfDialogConfirmar:hover {{
       background: {t['acento_hover']};
       border-color: {t['acento_hover']};
     }}
     QPushButton#addItemConfirmar:disabled, QPushButton#funcDialogConfirmar:disabled,
-    QPushButton#subDialogConfirmar:disabled,
+    QPushButton#orgDialogConfirmar:disabled,
     QPushButton#cpfDialogConfirmar:disabled {{
       background: {t['pilula_disabled_bg']};
       border-color: {t['pilula_disabled_bg']};

@@ -92,6 +92,8 @@ GLIFO_ETIQUETA = "etiqueta"
 GLIFO_CAIXA = "caixa"
 GLIFO_CIFRAO = "cifrao"
 GLIFO_PASTA = "pasta"
+GLIFO_PASTA_MAIS = "pasta_mais"
+GLIFO_RAMO = "ramo"
 GLIFO_LUPA = "lupa"
 GLIFO_SETA_DIREITA = "seta_direita"
 GLIFO_SETA_BAIXO = "seta_baixo"
@@ -173,6 +175,44 @@ def _caminho_do_glifo(nome: str) -> QPainterPath:
         p.closeSubpath()
         p.moveTo(3.5, 10.2)
         p.lineTo(20.5, 10.2)
+    elif nome == GLIFO_PASTA_MAIS:
+        # A mesma pasta, com o "+" dentro: é o cabeçalho do modal "Nova
+        # categoria" (§9.12). Não reaproveita o traço de `GLIFO_PASTA` porque
+        # o `lru_cache` devolve o MESMO `QPainterPath` a cada chamada — somar o
+        # "+" nele acrescentaria a cruz também na insígnia do painel, que usa a
+        # pasta lisa. Um caminho por glifo, e nenhum deles muda depois de
+        # montado.
+        p.moveTo(3.5, 6.5)
+        p.quadTo(3.5, 4.5, 5.5, 4.5)
+        p.lineTo(9.2, 4.5)
+        p.lineTo(11.2, 6.8)
+        p.lineTo(18.5, 6.8)
+        p.quadTo(20.5, 6.8, 20.5, 8.8)
+        p.lineTo(20.5, 17.5)
+        p.quadTo(20.5, 19.5, 18.5, 19.5)
+        p.lineTo(5.5, 19.5)
+        p.quadTo(3.5, 19.5, 3.5, 17.5)
+        p.closeSubpath()
+        p.moveTo(3.5, 10.2)
+        p.lineTo(20.5, 10.2)
+        p.moveTo(12.0, 12.3)
+        p.lineTo(12.0, 17.3)
+        p.moveTo(9.5, 14.8)
+        p.lineTo(14.5, 14.8)
+    elif nome == GLIFO_RAMO:
+        # Um tronco com dois nós e um ramo que sai dele: a própria ideia da
+        # subcategoria. Substitui o `_IconeDeRamo` que o §9.9 desenhava à mão
+        # dentro do modal — mesma figura, agora na grade de 24 que todos os
+        # outros glifos do Cardápio usam, e por isso na mesma espessura deles.
+        p.addEllipse(QPointF(6.5, 5.0), 2.5, 2.5)
+        p.addEllipse(QPointF(6.5, 19.0), 2.5, 2.5)
+        p.addEllipse(QPointF(17.5, 5.0), 2.5, 2.5)
+        p.moveTo(6.5, 7.5)
+        p.lineTo(6.5, 16.5)
+        p.moveTo(17.5, 7.5)
+        p.lineTo(17.5, 9.8)
+        p.quadTo(17.5, 13.2, 14.1, 13.2)
+        p.lineTo(6.5, 13.2)
     elif nome == GLIFO_LUPA:
         p.addEllipse(QPointF(10.5, 10.5), 6.5, 6.5)
         p.moveTo(15.4, 15.4)

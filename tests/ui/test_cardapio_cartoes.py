@@ -318,46 +318,63 @@ def test_a_rolagem_volta_mesmo_sem_produto_escolhido(qapp, tela, cardapio, lanch
     assert barra.value() == rolagem
 
 
-class _ModalDeSubcategoria(QDialog):
-    """Faz as vezes do cartão de subcategoria: devolve `nome` e fecha."""
+class _ModalDeOrganizacao(QDialog):
+    """Faz as vezes do cartão dos dois níveis (§9.12): devolve `nome` e fecha.
+
+    Um dublê só para categoria e subcategoria porque o app também tem um modal
+    só. O que ele precisa imitar são os dois construtores nomeados, o `exec()`
+    que responde UMA vez (a view reabre o mesmo diálogo no `while` enquanto o
+    service recusar — um dublê que sempre aceita giraria para sempre) e o
+    `resultado()`.
+    """
 
     abertos: list[str] = []
     nome_a_devolver: str | None = None
 
-    def __init__(self, _categoria, _impressora, _existentes, parent=None, *, nome_inicial="") -> None:
+    def __init__(self, parent=None, *, nome_inicial="") -> None:
         super().__init__(parent)
-        _ModalDeSubcategoria.abertos.append(nome_inicial)
+        _ModalDeOrganizacao.abertos.append(nome_inicial)
         self._respondido = False
 
+    @classmethod
+    def para_categoria(cls, _existentes, parent=None, *, nome_inicial=""):
+        return cls(parent, nome_inicial=nome_inicial)
+
+    @classmethod
+    def para_subcategoria(
+        cls, _categoria, _impressora, _existentes, parent=None, *, nome_inicial=""
+    ):
+        return cls(parent, nome_inicial=nome_inicial)
+
     def exec(self) -> int:
-        if self._respondido or _ModalDeSubcategoria.nome_a_devolver is None:
+        if self._respondido or _ModalDeOrganizacao.nome_a_devolver is None:
             return QDialog.DialogCode.Rejected
         self._respondido = True
         return QDialog.DialogCode.Accepted
 
     def resultado(self):
-        return type("Resultado", (), {"nome": _ModalDeSubcategoria.nome_a_devolver})()
+        return type("Resultado", (), {"nome": _ModalDeOrganizacao.nome_a_devolver})()
 
     def mostrar_erro_servico(self, mensagem: str) -> None:
         raise AssertionError(mensagem)
 
 
 @pytest.fixture
-def modal_de_subcategoria(monkeypatch):
-    _ModalDeSubcategoria.abertos = []
-    _ModalDeSubcategoria.nome_a_devolver = None
-    monkeypatch.setattr(modulo_da_tela, "SubcategoriaDialog", _ModalDeSubcategoria)
-    return _ModalDeSubcategoria
+def modal_de_organizacao(monkeypatch):
+    _ModalDeOrganizacao.abertos = []
+    _ModalDeOrganizacao.nome_a_devolver = None
+    monkeypatch.setattr(modulo_da_tela, "OrganizacaoCardapioDialog", _ModalDeOrganizacao)
+    return _ModalDeOrganizacao
 
 
-def test_renomear_a_subcategoria_escolhida_mantem_a_selecao(tela, modal_de_subcategoria):
+def test_renomear_a_subcategoria_escolhida_mantem_a_selecao(tela, modal_de_organizacao):
     """O defeito que o §9.11 achou no caminho: a recarga procurava a
     subdivisão pelo nome ANTIGO, não achava, e levava o gerente para a
     primeira categoria da lista — renomear fechava o acordeão em que ele
     trabalhava."""
     item = _abrir(tela, "Lanches")
     tela._painel_categorias.arvore.setCurrentItem(item.child(2))  # Podrão
-    modal_de_subcategoria.nome_a_devolver = "Podrão Raiz"
+    modal_de_organizacao.nome_a_devolver = "Podrão Raiz"
 
     tela._painel_categorias.editar_subcategoria()
 
@@ -406,20 +423,27 @@ def test_duplo_clique_na_categoria_nao_a_fecha_de_novo(qapp, tela):
     assert item.isExpanded() is True
 
 
-def test_criar_uma_categoria_ja_abre_ela(tela, monkeypatch):
+def test_editar_uma_categoria_grava_o_novo_nome(tela, cardapio, modal_de_organizacao):
+    """O caminho inteiro da renomeação: o cartão devolve o nome, a view chama o
+    service e a árvore recarrega com o gerente onde estava.
+
+    Desde o §9.12 a categoria usa o mesmo cartão da subcategoria, e por isso o
+    mesmo `while modal.exec()`: sem este teste, uma volta a mais (ou a menos)
+    no laço passaria despercebida — o modal fecharia e nada seria gravado."""
+    modal_de_organizacao.nome_a_devolver = "Lanches Artesanais"
+    _abrir(tela, "Lanches")
+
+    tela._painel_categorias.editar()
+
+    nomes = {categoria.nome for categoria in cardapio.listar_categorias()}
+    assert "Lanches Artesanais" in nomes and "Lanches" not in nomes
+    assert tela._painel_categorias.selecao_atual().categoria.nome == "Lanches Artesanais"
+
+
+def test_criar_uma_categoria_ja_abre_ela(tela, modal_de_organizacao):
     """Quem cria uma categoria vai cadastrar as subdivisões dela em seguida; a
     árvore antiga levava o gerente de volta para a primeira da lista."""
-
-    class _ModalDeCategoria(QDialog):
-        def exec(self) -> int:
-            return QDialog.DialogCode.Accepted
-
-        def nome(self) -> str:
-            return "Doces"
-
-    monkeypatch.setattr(
-        modulo_da_tela, "_CategoriaDialog", lambda _titulo, parent=None, **_: _ModalDeCategoria(parent)
-    )
+    modal_de_organizacao.nome_a_devolver = "Doces"
     _abrir(tela, "Lanches")
 
     tela._painel_categorias.criar()
@@ -434,7 +458,7 @@ def test_criar_uma_categoria_ja_abre_ela(tela, monkeypatch):
 
 
 def test_o_link_editar_subcategoria_abre_a_subcategoria_daquele_bloco(
-    qapp, tela, modal_de_subcategoria
+    qapp, tela, modal_de_organizacao
 ):
     """Em "Todas" há vários blocos, e o link edita o bloco em que foi clicado —
     não a subdivisão destacada na árvore (que ali é "Todas")."""
@@ -448,10 +472,10 @@ def test_o_link_editar_subcategoria_abre_a_subcategoria_daquele_bloco(
 
     QTest.mouseClick(lista.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, link.center())
 
-    assert modal_de_subcategoria.abertos == ["Podrão"]
+    assert modal_de_organizacao.abertos == ["Podrão"]
 
 
-def test_clicar_no_cabecalho_fora_do_link_nao_edita_nada(qapp, tela, modal_de_subcategoria):
+def test_clicar_no_cabecalho_fora_do_link_nao_edita_nada(qapp, tela, modal_de_organizacao):
     tela.show()
     _abrir(tela, "Lanches")
     qapp.processEvents()
@@ -465,7 +489,7 @@ def test_clicar_no_cabecalho_fora_do_link_nao_edita_nada(qapp, tela, modal_de_su
         QPoint(retangulo.left() + 70, retangulo.center().y()),
     )
 
-    assert modal_de_subcategoria.abertos == []
+    assert modal_de_organizacao.abertos == []
 
 
 def _duplo_clique(alvo: QWidget, ponto: QPoint) -> None:
