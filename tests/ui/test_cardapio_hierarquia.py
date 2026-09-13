@@ -115,11 +115,16 @@ def _item_categoria(tela: CardapioView, nome: str):
 
 
 def _abrir(tela: CardapioView, nome: str):
-    """Faz o que o clique na categoria faz: expande e seleciona "Todas"."""
+    """Deixa a categoria aberta em "Todas", como o clique numa categoria FECHADA.
+
+    Numa já aberta o clique a recolheria (o acordeão do §9.17): este helper
+    descreve o estado de chegada, e não o gesto.
+    """
     item = _item_categoria(tela, nome)
     arvore = tela._painel_categorias.arvore
     arvore.setCurrentItem(item)
-    tela._painel_categorias._ao_clicar(item, 0)
+    if not item.isExpanded():
+        tela._painel_categorias._ao_clicar(item, 0)
     arvore.setCurrentItem(item.child(0))
     return item
 

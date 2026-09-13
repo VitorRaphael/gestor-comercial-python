@@ -1385,6 +1385,23 @@ class ListaDeProdutos(QListWidget):
         finally:
             self.blockSignals(bloqueado)
 
+    def rolar_ate_o_bloco(self, chave: str) -> None:
+        """Põe o cabeçalho do bloco `chave` no topo — se o bloco estiver na lista.
+
+        Não estar é normal: subdivisão vazia não vira bloco em "Todas", e a
+        busca pode ter esvaziado o bloco. Aí a lista fica onde a recarga a pôs.
+        """
+        for linha in range(self.count()):
+            dado = self.item_da_linha(linha)
+            if (
+                dado is not None
+                and dado.tipo is TipoDeItem.CABECALHO
+                and dado.grupo is not None
+                and dado.grupo.chave == chave
+            ):
+                self.scrollToItem(self.item(linha), QAbstractItemView.ScrollHint.PositionAtTop)
+                return
+
     def item_da_linha(self, linha: int) -> ItemDaLista | None:
         item = self.item(linha)
         dado = item.data(PAPEL_LINHA) if item is not None else None

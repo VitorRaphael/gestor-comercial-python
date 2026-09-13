@@ -3873,6 +3873,106 @@ eram pintados **por cima do próprio nome**, e escolher um `.avif` dava erro.
 - **O `_ProdutoDialog` em cartão** — continua o último formulário de fábrica do
   Cardápio; aqui só ganhou o aviso em linha.
 
+### 9.17 O acordeão da árvore do Cardápio: clicar na categoria aberta a recolhe ✅ CONCLUÍDO — 2026-09-13
+
+Relato do Vitor: clicar numa categoria só expandia. Clicar de novo na mesma não
+fechava, e as subdivisões ficavam na tela para sempre.
+
+#### O diagnóstico
+
+- **O gesto inverso não existia.** `_ao_clicar` só tinha o ramo "fechada →
+  abre"; na aberta ele reescolhia o "Todas" e parava.
+- **Inverter a condição não bastava — duas coisas do Qt, medidas numa sonda
+  antes de mexer:** (1) recolher o pai deixa o "atual" preso num filho que saiu
+  da tela; (2) `setCurrentItem` num filho de ramo fechado **não é recusado**: o
+  `scrollTo` do Qt **reabre o ramo sozinho**. A docstring de
+  `_primeiro_filho_visivel` dizia o contrário e foi corrigida.
+- **A recarga reabria.** `_montar` tratava "categoria selecionada" como
+  "categoria aberta": a recolhida voltaria aberta na primeira navegação até a
+  tela ou no primeiro produto salvo.
+
+#### O que foi feito
+
+- **`_ao_clicar` alterna**: aberta recolhe (`_expandida_id = None` e a seleção vai
+  para a linha da categoria, que já é o "Todas" dela); fechada abre por
+  `_abrir_somente`, que fecha as outras. Vale na linha inteira — seta, nome e
+  contador são pintura da mesma linha (§9.11), não alvos separados.
+- **A recarga respeita a recolhida**: `_expandida_id` em `None` com categoria
+  selecionada em "Todas" é esse estado, e a seleção volta para a **linha** (mirar
+  o filho reabriria o ramo). Só em "Todas": com uma subdivisão escolhida — a seta
+  → do teclado abre a categoria por fora do acordeão — a recarga abre a categoria
+  e **não** troca a subdivisão por "Todas" em silêncio.
+- **Três caminhos abrem por conta própria**, porque a recarga agora respeita a
+  recolhida: criar categoria (a nova abre), criar subcategoria (subdivisão vazia
+  não vira bloco em "Todas" — recolhida, o cadastro não apareceria em lugar
+  nenhum) e clicar num cabeçalho de bloco à direita (reabre pelo acordeão; pelo
+  Qt, `_expandida_id` ficaria `None` e a busca da árvore fecharia o ramo debaixo
+  da subdivisão escolhida).
+- **Ampliar não solta o produto** (`_ProdutosPainel.atualizar`): de uma
+  subdivisão para "Todas" na **mesma** categoria — que é o que recolher faz — o
+  produto escolhido fica, e sem produto a lista rola até o bloco de onde o
+  gerente veio (`ListaDeProdutos.rolar_ate_o_bloco`) em vez de ir ao topo. É uma
+  regra de lugar, e não de gesto: clicar em "Todas as subcategorias" dá o mesmo
+  resultado que recolher, porque os dois levam ao mesmo lugar. **Estreitar e
+  trocar de categoria continuam soltando (§9.13)**, e a âncora é presa à mesma
+  categoria porque "Podrão" pode existir em duas.
+- Os três helpers `_abrir` das suítes do Cardápio passaram a descrever o estado
+  de chegada ("aberta em Todas"), e não o gesto: numa já aberta, o clique agora a
+  recolheria.
+
+#### O que o pedido escrito dizia e não foi seguido ao pé da letra
+
+- **"Destruir explicitamente sub-itens, badges e linhas-guia ao recolher"
+  (`destroy()`/`deleteLater()`)**: desde o §9.11 a árvore **não tem widget por
+  linha** — badge, contador, seta e guia são pintura do `DelegadoArvore`. As
+  subdivisões são `QTreeWidgetItem` (objetos C++ sem widget), criados uma vez
+  por recarga em `_montar` e destruídos pelo `clear()` dela. Recolher não cria
+  nem esconde contêiner nenhum que acumule. Destruí-las ao fechar obrigaria a
+  recriá-las a cada abertura — mais alocação por clique, não menos — e quebraria
+  a busca da árvore, que casa pelo nome da subdivisão com a categoria fechada.
+- **"Desconectar sinais das closures `command=lambda`" e "`after_cancel`"**: são
+  idiomas de Tkinter. Aqui não há sinal por linha (os dois da árvore são ligados
+  uma vez no `__init__`, a métodos, sem `lambda`) e não há timer: o
+  `QTreeView.isAnimated()` é `False` (conferido), então abrir e fechar não agenda
+  nada.
+- **"~90 MB no Celeron"**: o gesto não move esse número, para cima nem para
+  baixo — o §9.11 já registrou que o processo passa disso antes de o Cardápio
+  existir. O que se mede é o que o gesto acrescenta, abaixo.
+
+#### Conferência
+
+- suíte **1794** (de 1773), 0 falhas, **21 testes novos** em
+  `tests/ui/test_acordeao_do_cardapio.py`, com **clique de mouse de verdade**
+  (`QTest`) na seta, no nome e no contador: alternância, seta que perde o âmbar
+  e filhas fora da tela, seleção na linha (pelo mouse e pelo código), recarga
+  que não reabre e que não troca subdivisão por "Todas", a direita conferida
+  passo a passo abrindo/fechando/reabrindo categoria com e sem subdivisão,
+  produto mantido vindo de "Todas" e de "Podrão", o limite (escolher a
+  subdivisão do próprio produto solta), âncora da rolagem e o caso das duas
+  "Podrão", os três caminhos que abrem sozinhos, e 200 cliques com os mesmos
+  widgets, `QObject`s e itens e **zero SQL**;
+- **16 mutações, as 16 reprovam**. A única sobrevivente da primeira passada — a
+  exigência de "Todas" na regra da recarga — virou o teste do caminho que a
+  exige (seta → do teclado);
+- **cardápio do seed** (15 categorias, 113 produtos, subdivisões em três),
+  `MainWindow` com QSS e fontes: 1.000 cliques na mesma categoria com **0
+  consultas**, ~1 ms por clique, widgets 72→72, `QObject`s 117→117; RSS +0,38 MB
+  no primeiro bloco de 100 cliques (cache de glifo do Qt) e **plano** nos 900
+  seguintes e em 10 voltas pelas 15 categorias;
+- renderização a 1366x738 dos três estados (aberta em "Podrão", recolhida,
+  reaberta) nos dois temas; bancada visual contra o código anterior com as **24
+  telas idênticas byte a byte** — o esperado: o item vive no clique, e a tela
+  parada não muda um pixel.
+
+#### Ficou de fora, de propósito
+
+- **O teclado.** ← e → abrem e fecham pelo próprio Qt, por fora do acordeão: →
+  abre uma segunda categoria sem fechar a primeira. É anterior a este item, e o
+  pedido era o clique.
+- **A categoria recolhida e selecionada usa o mesmo tom do hover** (é o `realce`
+  do delegado desde o §9.11). Com o mouse fora dela, é o único sinal de onde a
+  seleção está; não foi pedido.
+
 ---
 
 ## 10. As melhores mudanças que o programa teve — em português de balcão

@@ -13,10 +13,10 @@ margem.
 As duas colunas deixaram de ser feitas de widgets e passaram a ser **pintadas**
 por delegado (`widgets/cardapio_cartoes.py`, onde está a medição do porquê).
 Esta view ficou com o que é dela: ler o service, montar os instantâneos,
-reagir a clique — e **manter o gerente onde ele estava**. A categoria aberta, a
-subdivisão escolhida, o produto selecionado e a rolagem das duas listas
-sobrevivem a qualquer recarga: salvar um produto não pode fechar o acordeão nem
-jogar a lista para o topo.
+reagir a clique — e **manter o gerente onde ele estava**. A categoria aberta (ou
+recolhida, §9.17), a subdivisão escolhida, o produto selecionado e a rolagem das
+duas listas sobrevivem a qualquer recarga: salvar um produto não pode abrir nem
+fechar o acordeão, nem jogar a lista para o topo.
 
 Por consequência, a subdivisão escolhida na árvore é dita pelo **cabeçalho do
 bloco**, e não mais por um título "Podrão" no topo do painel: o topo passou a
@@ -554,6 +554,10 @@ class _CategoriasPainel(PainelPontilhado):
     onde a rolagem vira o trabalho principal — e o gerente organiza uma
     categoria de cada vez, não quinze.
 
+    Ou nenhuma (§9.17): clicar na categoria aberta a recolhe, e ela continua
+    recolhida depois de qualquer recarga — `_expandida_id` em `None` com uma
+    categoria selecionada é esse estado, e não "ainda não montei a árvore".
+
     Nenhuma linha tem widget: o `DelegadoArvore` pinta a categoria (seta,
     nome, "2 SUBCATEGORIAS", contador) e as filhas, e a altura de cada linha
     sai da própria fonte — o defeito do §9.9 (linha de duas alturas desenhada
@@ -720,8 +724,22 @@ class _CategoriasPainel(PainelPontilhado):
         self._subcategorias = subcategorias_por_categoria
 
         ids = {categoria.id for categoria in self._categorias}
-        if alvo is not None and alvo.categoria is not None and alvo.categoria.id in ids:
-            self._expandida_id = alvo.categoria.id
+        selecionada_id = (
+            alvo.categoria.id
+            if alvo is not None and alvo.categoria is not None and alvo.categoria.id in ids
+            else None
+        )
+        recolhida_id: int | None = None
+        if selecionada_id is not None:
+            # A categoria que o gerente recolheu continua recolhida (§9.17). Só
+            # em "Todas", que é onde recolher deixa a seleção: com uma subdivisão
+            # escolhida a categoria está aberta de fato — a seta → do teclado a
+            # abre pelo Qt, sem passar por `_expandida_id` — e fechá-la aqui
+            # trocaria a subdivisão por "Todas" em silêncio.
+            if self._expandida_id is None and alvo.e_todas:
+                recolhida_id = selecionada_id
+            else:
+                self._expandida_id = selecionada_id
         elif self._expandida_id not in ids:
             self._expandida_id = self._categorias[0].id if self._categorias else None
 
@@ -765,6 +783,11 @@ class _CategoriasPainel(PainelPontilhado):
                                 reserva = filho
 
                 item.setExpanded(categoria.id == self._expandida_id)
+                if categoria.id == recolhida_id:
+                    # Recolhida, a seleção mora na linha da própria categoria,
+                    # que já é o "Todas" dela. Mirar o filho REABRIRIA o ramo:
+                    # o `setCurrentItem` do Qt expande os pais de quem vira atual.
+                    item_a_selecionar = item
 
             self._filtrar(self._campo_busca.text())
 
@@ -846,27 +869,48 @@ class _CategoriasPainel(PainelPontilhado):
     # ------------------------------------------------------------------
 
     def _ao_clicar(self, item: QTreeWidgetItem, _coluna: int) -> None:
-        """Clicar numa categoria abre ela, fecha a anterior e escolhe "Todas".
+        """Clicar numa categoria alterna: fechada abre (e fecha a anterior),
+        aberta recolhe (§9.17). O clique vale na linha inteira — seta, nome e
+        contador são pintura da mesma linha, não alvos separados.
 
         A troca acontece no CLIQUE e não na seleção porque a seleção também
         muda ao andar de seta pelo teclado, e ali fechar o ramo debaixo do
         cursor tiraria o próprio item selecionado da tela.
 
-        O "Todas" vira a seleção de propósito: é ele que acende na pílula âmbar
-        do mockup. A lista da direita não recarrega duas vezes por isso — a
-        seleção da categoria e a do "Todas" dela são o mesmo lugar, e
+        Abrindo, o "Todas" vira a seleção de propósito: é ele que acende na
+        pílula âmbar do mockup. A lista da direita não recarrega duas vezes por
+        isso — a seleção da categoria e a do "Todas" dela são o mesmo lugar, e
         `_ao_trocar_item` não anuncia o mesmo lugar duas vezes.
+
+        Recolhendo, a seleção vai para a linha da categoria, que é o mesmo
+        "Todas": a direita continua mostrando a categoria inteira. Pelo mouse
+        ela já está lá (o pressionar move a seleção antes do clique); a linha
+        abaixo é para o caminho por código, porque recolher o pai deixa o
+        "atual" do Qt preso num filho que saiu da tela.
+
+        Nada é criado nem destruído no gesto. As subdivisões de todas as
+        categorias nascem em `_montar`, são itens pintados (nenhum widget,
+        nenhuma ligação de sinal, nenhum timer), e abrir ou fechar só muda o
+        que o Qt desenha. Destruí-las ao recolher obrigaria a recriá-las a cada
+        abertura — e `_filtrar` lê o nome delas com a categoria fechada.
         """
-        if item.parent() is not None:
+        if item.parent() is not None or item.childCount() == 0:
             return
-        categoria_id = item.data(0, _PAPEL_CATEGORIA)
-        if not (self._expandida_id == categoria_id and item.isExpanded()):
-            self._expandida_id = categoria_id
-            for indice in range(self.arvore.topLevelItemCount()):
-                topo = self.arvore.topLevelItem(indice)
-                topo.setExpanded(topo.data(0, _PAPEL_CATEGORIA) == categoria_id)
-        if item.childCount() > 0:
-            self.arvore.setCurrentItem(item.child(0))
+        if item.isExpanded():
+            item.setExpanded(False)
+            self._expandida_id = None
+            self.arvore.setCurrentItem(item)
+            return
+        self._abrir_somente(item)
+        self.arvore.setCurrentItem(item.child(0))
+
+    def _abrir_somente(self, categoria: QTreeWidgetItem) -> None:
+        """Abre `categoria` e fecha as outras — o acordeão de uma aberta por vez."""
+        categoria_id = categoria.data(0, _PAPEL_CATEGORIA)
+        self._expandida_id = categoria_id
+        for indice in range(self.arvore.topLevelItemCount()):
+            topo = self.arvore.topLevelItem(indice)
+            topo.setExpanded(topo.data(0, _PAPEL_CATEGORIA) == categoria_id)
 
     def _ao_trocar_item(
         self, atual: QTreeWidgetItem | None, _anterior: QTreeWidgetItem | None
@@ -896,11 +940,12 @@ class _CategoriasPainel(PainelPontilhado):
     def _primeiro_filho_visivel(self) -> QTreeWidgetItem | None:
         """A primeira subdivisão selecionável — abrindo a categoria dela.
 
-        O `setExpanded` não é enfeite: o Qt **recusa** `setCurrentItem` num
-        filho de ramo fechado, e sem ele esta função devolvia um item que a
-        árvore ignorava. O efeito era a seleção "ficar onde estava" por acidente
-        do Qt, e não porque alguém tivesse decidido isso — o tipo de coisa que
-        funciona até o dia em que o ramo já está aberto.
+        O `setExpanded` e o `_expandida_id` não são enfeite. O `setCurrentItem`
+        num filho de ramo fechado não é recusado: o Qt **abre o ramo sozinho**
+        (o `scrollTo` expande os pais de quem vira atual — medido no §9.17, e o
+        registro anterior dizia o contrário). Abrir por lá seria abrir por fora
+        do acordeão, com `_expandida_id` dizendo outra coisa, e a próxima
+        passada de `_filtrar` fecharia o ramo debaixo da seleção.
         """
         for indice in range(self.arvore.topLevelItemCount()):
             topo = self.arvore.topLevelItem(indice)
@@ -960,6 +1005,14 @@ class _CategoriasPainel(PainelPontilhado):
             topo = self.arvore.topLevelItem(indice)
             if topo.data(0, _PAPEL_CATEGORIA) != categoria.id:
                 continue
+            # Com a categoria recolhida (§9.17), o bloco da direita continua
+            # clicável — e escolher uma subdivisão reabre a categoria pelo
+            # acordeão. Sem isto o `setCurrentItem` abaixo a abriria mesmo
+            # assim (o Qt expande os pais), mas por fora: `_expandida_id`
+            # seguiria `None` e a primeira passada de `_filtrar` fecharia o ramo
+            # com a subdivisão escolhida dentro.
+            if not topo.isExpanded():
+                self._abrir_somente(topo)
             for posicao in range(topo.childCount()):
                 filho = topo.child(posicao)
                 if filho.data(0, _PAPEL_CHAVE) == chave:
@@ -1082,6 +1135,9 @@ class _CategoriasPainel(PainelPontilhado):
                 # vai cadastrar as subdivisões dela em seguida, e a árvore
                 # antiga levava o gerente de volta para a primeira da lista.
                 self._selecao = SelecaoCardapio(categoria=categoria, chave=_SUB_TODAS)
+                # Explícito porque a recarga respeita a categoria recolhida
+                # (§9.17): com tudo fechado, a nova nasceria fechada.
+                self._expandida_id = categoria.id
                 self.atualizar_mantendo_selecao()
                 self.alterado.emit()
                 return
@@ -1118,6 +1174,11 @@ class _CategoriasPainel(PainelPontilhado):
                 except _ERROS_SERVICE as erro:
                     modal.mostrar_erro_servico(str(erro))
                     continue
+                # A subdivisão recém-criada está vazia, e subdivisão vazia não
+                # vira bloco em "Todas": com a categoria recolhida (§9.17), a
+                # única prova na tela de que o cadastro aconteceu seria o "3
+                # SUBCATEGORIAS" do subtítulo. Abre a categoria para mostrá-la.
+                self._expandida_id = categoria.id
                 self.atualizar_mantendo_selecao()
                 self.alterado.emit()
                 return
@@ -1643,12 +1704,32 @@ class _ProdutosPainel(PainelPontilhado):
         self._atualizar_cabecalho(categoria, len(produtos), len(subcategorias))
 
         lugar = (categoria.id if categoria is not None else None, self._selecao.chave)
-        mesmo_lugar = lugar == self._lugar_desenhado
+        anterior = self._lugar_desenhado
+        mesmo_lugar = lugar == anterior
+        # Ampliar dentro da MESMA categoria — de uma subdivisão para "Todas",
+        # que é também o que recolher a categoria na árvore faz (§9.17) — não
+        # tira nada da tela: o que estava à vista continua na lista. Soltar o
+        # produto ali seria o clique de navegação desmarcando o alvo do rodapé.
+        # Estreitar ou trocar de categoria continua começando do topo e sem
+        # produto (§9.13).
+        bloco_anterior = (
+            anterior[1]
+            if anterior is not None
+            and not mesmo_lugar
+            and lugar[0] is not None
+            and anterior[0] == lugar[0]
+            and self._selecao.e_todas
+            else None
+        )
         self._lugar_desenhado = lugar
-        if selecionar is None and mesmo_lugar:
+        if selecionar is None and (mesmo_lugar or bloco_anterior is not None):
             selecionar = self._id_selecionado()
         rolagem = self.lista.verticalScrollBar().value() if mesmo_lugar else 0
         self._redesenhar(selecionar=selecionar, rolagem=rolagem)
+        if bloco_anterior is not None and self.lista.produto_selecionado() is None:
+            # Sem produto, quem fica à vista é o bloco de onde o gerente veio —
+            # e não o topo da categoria, que costuma ser outro bloco inteiro.
+            self.lista.rolar_ate_o_bloco(bloco_anterior)
         self._emitir_selecao()
 
     def _categoria_atualizada(self) -> Categoria | None:
@@ -1777,6 +1858,11 @@ class _ProdutosPainel(PainelPontilhado):
         **mover a árvore solta o produto** — trocar de subdivisão recarrega a
         lista sem seleção (ver `atualizar`), então "produto escolhido" só existe
         depois de um clique deliberado numa linha.
+
+        A exceção é ampliar para "Todas" na mesma categoria, inclusive
+        recolhendo-a (§9.17): o produto fica, porque continua na tela e o
+        rótulo do rodapé continua dizendo `PRODUTO: ...`. Escolher uma
+        subdivisão ou outra categoria segue soltando.
         """
         foto = self.lista.produto_selecionado()
         if foto is not None:

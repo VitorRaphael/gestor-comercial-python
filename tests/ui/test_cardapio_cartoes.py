@@ -88,10 +88,13 @@ def _item_categoria(tela: CardapioView, nome: str):
 
 
 def _abrir(tela: CardapioView, nome: str):
+    """A categoria aberta em "Todas" — o estado, não o gesto: numa já aberta o
+    clique a recolheria (§9.17)."""
     item = _item_categoria(tela, nome)
     arvore = tela._painel_categorias.arvore
     arvore.setCurrentItem(item)
-    tela._painel_categorias._ao_clicar(item, 0)
+    if not item.isExpanded():
+        tela._painel_categorias._ao_clicar(item, 0)
     arvore.setCurrentItem(item.child(0))
     return item
 
