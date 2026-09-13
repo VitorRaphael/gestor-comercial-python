@@ -594,6 +594,122 @@ def test_a_lista_de_produtos_mantem_a_altura_com_o_cardapio_cheio(qapp, uow):
 
 
 # ---------------------------------------------------------------------------
+# Modo componente de combo (§9.15)
+# ---------------------------------------------------------------------------
+#
+# O mesmo cartão abre pelo "+ Adicionar componente" da composição do combo. O
+# que estes testes seguram é a fronteira entre os dois modos: o componente não
+# tem observação nem prévia em R$ (e não as tem CRIADAS, não só escondidas), e o
+# modo padrão — o do balcão — continua exatamente o de antes.
+
+
+@pytest.fixture
+def abrir_componente(qapp, cardapio_de_teste):
+    criados: list[AdicionarItemDialog] = []
+
+    def _abrir(lancar=None, combo="Combo Casal", pai=None):
+        modal = AdicionarItemDialog.para_componente(
+            cardapio_de_teste, combo, lancar or _Lancamentos(), pai
+        )
+        criados.append(modal)
+        return modal
+
+    yield _abrir
+    for modal in criados:
+        modal.deleteLater()
+
+
+def _objetos(modal: AdicionarItemDialog) -> set[str]:
+    return {filho.objectName() for filho in modal.findChildren(QWidget)}
+
+
+def test_o_modo_padrao_continua_sendo_o_do_balcao(abrir):
+    """Quem já abria o modal (a comanda) não passa `modo` nenhum — e tem que
+    continuar recebendo a observação, a prévia em R$ e o teto de 999."""
+    modal = abrir()
+
+    assert {"addItemObservacao", "addItemTotal"} <= _objetos(modal)
+    assert modal.windowTitle() == "Adicionar item"
+    modal._definir_quantidade(5000)
+    assert modal._label_quantidade.text() == "999"
+
+
+def test_o_modo_componente_nao_cria_observacao_nem_previa(abrir_componente):
+    """Não criadas, e não só escondidas: um campo escondido continua aceitando
+    `setText`, e é assim que uma observação acabaria chegando a quem chama."""
+    modal = abrir_componente()
+
+    assert modal._campo_observacao is None
+    assert modal._label_total is None
+    assert not ({"addItemObservacao", "addItemTotal"} & _objetos(modal))
+
+
+def test_o_modo_componente_diz_o_que_e(abrir_componente):
+    modal = abrir_componente(combo="Combo Casal")
+
+    contexto = next(
+        f for f in modal.findChildren(QLabel) if f.objectName() == "addItemContexto"
+    )
+    titulo = next(f for f in modal.findChildren(QLabel) if f.objectName() == "addItemTitulo")
+    dica = next(f for f in modal.findChildren(QLabel) if f.objectName() == "addItemDicaEnter")
+
+    assert contexto.texto_completo() == "COMBO CASAL · COMPOSIÇÃO DO COMBO"
+    assert titulo.text() == "Adicionar componente"
+    assert dica.text() == "ENTER\nADICIONA"
+    assert modal._label_aviso.text() == "DUPLO CLIQUE ADICIONA DIRETO"
+
+
+def test_o_modo_componente_lanca_sem_observacao_e_continua_aberto(qapp, abrir_componente):
+    """A adição sequencial do pedido: Enter adiciona, o cartão fica, a busca
+    volta a ter o foco para o próximo componente."""
+    lancamentos = _Lancamentos()
+    modal = abrir_componente(lancar=lancamentos)
+    modal.show()
+    qapp.processEvents()
+    primeiro = modal._lista.item(0).data(Qt.ItemDataRole.UserRole)
+    modal._botao_mais.click()
+
+    _tecla(modal, Qt.Key.Key_Return)
+
+    assert lancamentos.chamadas == [(primeiro.produto_id, 2, None)]
+    assert modal.isVisible()
+    assert modal._label_quantidade.text() == "1"
+    assert modal._campo_busca.hasFocus()
+    assert modal._label_aviso.text() == f"2× {primeiro.nome.upper()} NO COMBO"
+
+
+def test_o_modo_componente_para_a_quantidade_em_99(abrir_componente):
+    """O teto do formulário antigo, e o mesmo do stepper da composição."""
+    modal = abrir_componente()
+
+    modal._definir_quantidade(150)
+
+    assert modal._label_quantidade.text() == "99"
+    assert not modal._botao_mais.isEnabled()
+
+
+def test_o_modo_componente_ainda_diz_qual_produto_vai_entrar(abrir_componente):
+    """Sem a prévia em R$, o nome destacado é o que resta para conferir antes do
+    Enter — e ele não pode ter ido embora junto."""
+    modal = abrir_componente()
+    _digitar(modal, "aipim")
+    modal._filtrar_agora()
+
+    assert modal._label_resumo.text() == "AIPIM"
+
+
+def test_o_erro_do_service_no_modo_componente_vira_aviso(qapp, abrir_componente):
+    modal = abrir_componente(
+        lancar=_Lancamentos(erro=RegraDeNegocioError("'Aipim' já faz parte do combo."))
+    )
+
+    _tecla(modal, Qt.Key.Key_Return)
+
+    assert modal._label_aviso.property("estado") == "erro"
+    assert "JÁ FAZ PARTE DO COMBO" in modal._label_aviso.text()
+
+
+# ---------------------------------------------------------------------------
 # Ciclo de vida (§3.2/§3.9 e o RNF do Celeron)
 # ---------------------------------------------------------------------------
 

@@ -28,6 +28,29 @@ O fluxo rápido também é o de antes: `Enter` no item destacado lança e o moda
 busca, para o próximo produto. É aí que está o ganho de tempo numa mesa de
 oito pessoas.
 
+## Dois modos: comanda e componente de combo (§9.15)
+
+O mesmo cartão serve também o "+ Adicionar componente" da tela de composição do
+combo, pedido do Vitor para não haver uma segunda busca de produto no app. O que
+separa um modo do outro mora em `MODOS`, uma linha por modo — a forma do §9.6
+(`OPERACOES`) e do §9.12 (`PAPEIS`): o título, o sufixo do contexto, as três
+frases de teclado/aviso, o teto do stepper e as duas peças que o componente
+**não tem**:
+
+* a **observação** — "sem cebola" é instrução para a cozinha sobre UMA venda;
+  num combo ela não teria onde ser gravada (`combo_itens` não tem a coluna), e
+  campo que o operador preenche e o sistema descarta é pior que campo nenhum
+  (a regra do §9.7);
+* a **prévia em R$** — preço × quantidade é o que a comanda vai cobrar; o preço
+  de um componente não entra em conta nenhuma do combo, que tem preço próprio.
+
+As duas peças **não são criadas** no modo componente, em vez de criadas e
+escondidas: um widget escondido continua respondendo a `setText`, e é assim que
+uma observação digitada por código acabaria chegando a quem chama.
+
+O modo comanda é o padrão do construtor, então quem já abria o modal (a comanda)
+não mudou uma linha. Quem abre o outro usa `para_componente`.
+
 ## Ciclo de vida (o RNF do Celeron, e §3.2/§3.9/§3.14)
 
 O briefing pediu, no vocabulário do Tkinter, `destroy()` + `unbind` +
@@ -72,6 +95,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import Enum
 
 from PySide6.QtCore import QEvent, QModelIndex, QPointF, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import (
@@ -114,6 +138,7 @@ from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets import cartao_modal
 from gestor_comercial.ui.widgets.busca_produto import filtrar_produtos, nome_da_subcategoria
+from gestor_comercial.ui.widgets.cardapio_cartoes import RotuloComReticencias
 from gestor_comercial.ui.widgets.cartao_modal import Backdrop
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 from gestor_comercial.ui.widgets.flow_layout import FlowLayout
@@ -131,7 +156,60 @@ _ERROS_SERVICE = (
 _TODAS_AS_CATEGORIAS = ""
 _ROTULO_TODAS = "TODOS"
 _SEM_SELECAO = "SELECIONE UM PRODUTO"
-_DICA_PADRAO = "DUPLO CLIQUE LANÇA DIRETO"
+
+
+class ModoDeLancamento(Enum):
+    """Para onde o produto escolhido vai: uma comanda, ou dentro de um combo."""
+
+    COMANDA = "comanda"
+    COMPONENTE = "componente"
+
+
+@dataclass(frozen=True, slots=True)
+class _Modo:
+    """Tudo o que separa lançar na comanda de compor um combo nesta tela.
+
+    Se um dia for preciso mais um campo, ele entra aqui — e não num
+    `if self._modo is ...` espalhado pela montagem, que é como duas telas voltam
+    a existir sem ninguém decidir isso (o aviso do §9.12).
+    """
+
+    titulo: str
+    sufixo_contexto: str
+    dica_enter: str
+    dica_padrao: str
+    # `{quantidade}` e `{nome}` são preenchidos na hora do aviso.
+    aviso_adicionado: str
+    quantidade_maxima: int
+    com_observacao: bool
+    com_previa_em_reais: bool
+
+
+MODOS: dict[ModoDeLancamento, _Modo] = {
+    ModoDeLancamento.COMANDA: _Modo(
+        titulo="Adicionar item",
+        sufixo_contexto="LANÇAMENTO RÁPIDO",
+        dica_enter="ENTER\nLANÇA",
+        dica_padrao="DUPLO CLIQUE LANÇA DIRETO",
+        aviso_adicionado="{quantidade}× {nome} LANÇADO",
+        quantidade_maxima=999,
+        com_observacao=True,
+        com_previa_em_reais=True,
+    ),
+    ModoDeLancamento.COMPONENTE: _Modo(
+        titulo="Adicionar componente",
+        sufixo_contexto="COMPOSIÇÃO DO COMBO",
+        dica_enter="ENTER\nADICIONA",
+        dica_padrao="DUPLO CLIQUE ADICIONA DIRETO",
+        aviso_adicionado="{quantidade}× {nome} NO COMBO",
+        # O teto do `QSpinBox` do formulário antigo, e o mesmo do stepper da
+        # tela de composição: as duas portas de entrada da quantidade de um
+        # componente não podem aceitar tetos diferentes.
+        quantidade_maxima=99,
+        com_observacao=False,
+        com_previa_em_reais=False,
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,7 +453,6 @@ class AdicionarItemDialog(QDialog):
     LADO_BOTAO_FECHAR_PX = 32
     LADO_BOTAO_PASSO_PX = 34
     ALTURA_BUSCA_PX = 46
-    QUANTIDADE_MAXIMA = 999
     LIMITE_OBSERVACAO = 120
     # Agrupa as teclas de uma digitação rápida numa refiltragem só. Curto o
     # bastante para a lista parecer instantânea e longo o bastante para quem
@@ -395,17 +472,24 @@ class AdicionarItemDialog(QDialog):
         contexto: str,
         lancar_item: Callable[[int, int, str | None], None],
         parent: QWidget | None = None,
+        *,
+        modo: ModoDeLancamento = ModoDeLancamento.COMANDA,
     ) -> None:
         super().__init__(parent)
+        self._modo = MODOS[modo]
         self._lancar_item = lancar_item
         self._linhas = _instantaneo(produtos)
         self._categoria_ativa = _TODAS_AS_CATEGORIAS
         self._quantidade = 1
         self._backdrop: Backdrop | None = None
         self._pills: dict[str, QPushButton] = {}
+        # As duas peças que o modo componente não tem (ver o cabeçalho do
+        # módulo). `None` quando o modo não as monta.
+        self._campo_observacao: QLineEdit | None = None
+        self._label_total: QLabel | None = None
 
         self.setObjectName("addItemDialog")
-        self.setWindowTitle("Adicionar item")
+        self.setWindowTitle(self._modo.titulo)
         # Sem moldura do sistema: o cabeçalho (contexto, título e o ✕) é do
         # cartão, e o fundo translúcido é o que faz os cantos de 16px saírem
         # redondos em vez de recortados contra um retângulo opaco.
@@ -442,6 +526,30 @@ class AdicionarItemDialog(QDialog):
         self._definir_quantidade(1)
         self._filtrar_agora()
 
+    @classmethod
+    def para_componente(
+        cls,
+        produtos: list[Produto],
+        combo_nome: str,
+        adicionar_componente: Callable[[int, int, str | None], None],
+        parent: QWidget | None = None,
+    ) -> "AdicionarItemDialog":
+        """O cartão aberto pelo "+ Adicionar componente" da composição do combo.
+
+        `adicionar_componente` tem a mesma assinatura do `lancar_item` da
+        comanda, e neste modo recebe sempre `None` na observação — não há campo
+        para ela. Uma assinatura só é o que mantém um caminho só de lançamento
+        (`_lancar_selecionado`), com as mesmas travas de filtro pendente e de
+        erro do service para os dois modos.
+        """
+        return cls(
+            produtos,
+            combo_nome,
+            adicionar_componente,
+            parent,
+            modo=ModoDeLancamento.COMPONENTE,
+        )
+
     # ------------------------------------------------------------------
     # Montagem
     # ------------------------------------------------------------------
@@ -452,14 +560,18 @@ class AdicionarItemDialog(QDialog):
 
         textos = QVBoxLayout()
         textos.setSpacing(3)
-        rotulo_contexto = QLabel(f"{contexto.upper()} · LANÇAMENTO RÁPIDO")
+        # Com reticências: no modo componente o contexto é o NOME DO COMBO, que
+        # pode ter até 120 letras, e um `QLabel` comum pediria a largura do texto
+        # inteiro — o ✕ seria empurrado para fora do cartão de largura fixa.
+        rotulo_contexto = RotuloComReticencias(
+            f"{contexto.upper()} · {self._modo.sufixo_contexto}"
+        )
         rotulo_contexto.setObjectName("addItemContexto")
         textos.addWidget(rotulo_contexto)
-        titulo = QLabel("Adicionar item")
+        titulo = QLabel(self._modo.titulo)
         titulo.setObjectName("addItemTitulo")
         textos.addWidget(titulo)
-        linha.addLayout(textos)
-        linha.addStretch()
+        linha.addLayout(textos, 1)
 
         self._botao_fechar = QPushButton("✕")
         self._botao_fechar.setObjectName("addItemFechar")
@@ -491,7 +603,7 @@ class AdicionarItemDialog(QDialog):
         self._campo_busca.installEventFilter(self)
         dentro.addWidget(self._campo_busca, 1)
 
-        dica_enter = QLabel("ENTER\nLANÇA")
+        dica_enter = QLabel(self._modo.dica_enter)
         dica_enter.setObjectName("addItemDicaEnter")
         dica_enter.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         dentro.addWidget(dica_enter, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -615,21 +727,25 @@ class AdicionarItemDialog(QDialog):
         passos.addWidget(self._botao_mais)
         grade.addLayout(passos, 1, 0)
 
-        self._campo_observacao = QLineEdit()
-        self._campo_observacao.setObjectName("addItemObservacao")
-        self._campo_observacao.setPlaceholderText("Observação (ex.: sem cebola)")
-        self._campo_observacao.setMaxLength(self.LIMITE_OBSERVACAO)
-        grade.addWidget(self._campo_observacao, 0, 1)
+        if self._modo.com_observacao:
+            self._campo_observacao = QLineEdit()
+            self._campo_observacao.setObjectName("addItemObservacao")
+            self._campo_observacao.setPlaceholderText("Observação (ex.: sem cebola)")
+            self._campo_observacao.setMaxLength(self.LIMITE_OBSERVACAO)
+            grade.addWidget(self._campo_observacao, 0, 1)
 
         resumo = QHBoxLayout()
         resumo.setSpacing(10)
         self._label_resumo = QLabel(_SEM_SELECAO)
         self._label_resumo.setObjectName("addItemRotulo")
         resumo.addWidget(self._label_resumo, 1)
-        self._label_total = QLabel(formatar_reais(Decimal("0")))
-        self._label_total.setObjectName("addItemTotal")
-        self._label_total.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        resumo.addWidget(self._label_total)
+        if self._modo.com_previa_em_reais:
+            self._label_total = QLabel(formatar_reais(Decimal("0")))
+            self._label_total.setObjectName("addItemTotal")
+            self._label_total.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            resumo.addWidget(self._label_total)
         grade.addLayout(resumo, 1, 1)
 
         grade.setColumnStretch(1, 1)
@@ -651,7 +767,7 @@ class AdicionarItemDialog(QDialog):
         linha = QHBoxLayout()
         linha.setSpacing(10)
 
-        self._label_aviso = QLabel(_DICA_PADRAO)
+        self._label_aviso = QLabel(self._modo.dica_padrao)
         self._label_aviso.setObjectName("addItemAviso")
         self._label_aviso.setProperty("estado", "dica")
         linha.addWidget(self._label_aviso, 1)
@@ -734,10 +850,11 @@ class AdicionarItemDialog(QDialog):
     def _definir_quantidade(self, valor: int) -> None:
         # Mínimo de 1: lançar "zero unidades" não é operação que exista na
         # comanda, e o dedo erra o `−` com frequência no balcão.
-        self._quantidade = max(1, min(self.QUANTIDADE_MAXIMA, valor))
+        teto = self._modo.quantidade_maxima
+        self._quantidade = max(1, min(teto, valor))
         self._label_quantidade.setText(str(self._quantidade))
         self._botao_menos.setEnabled(self._quantidade > 1)
-        self._botao_mais.setEnabled(self._quantidade < self.QUANTIDADE_MAXIMA)
+        self._botao_mais.setEnabled(self._quantidade < teto)
         self._atualizar_resumo()
 
     def _linha_selecionada(self) -> _LinhaProduto | None:
@@ -759,10 +876,12 @@ class AdicionarItemDialog(QDialog):
         self._botao_confirmar.setEnabled(linha is not None)
         if linha is None:
             self._label_resumo.setText(_SEM_SELECAO)
-            self._label_total.setText(formatar_reais(Decimal("0")))
+            if self._label_total is not None:
+                self._label_total.setText(formatar_reais(Decimal("0")))
             return
         self._label_resumo.setText(linha.nome.upper())
-        self._label_total.setText(formatar_reais(linha.preco * self._quantidade))
+        if self._label_total is not None:
+            self._label_total.setText(formatar_reais(linha.preco * self._quantidade))
 
     def _ao_trocar_selecao(
         self, atual: QListWidgetItem | None, anterior: QListWidgetItem | None
@@ -793,7 +912,11 @@ class AdicionarItemDialog(QDialog):
             return
 
         quantidade = self._quantidade
-        observacao = self._campo_observacao.text().strip() or None
+        observacao = (
+            self._campo_observacao.text().strip() or None
+            if self._campo_observacao is not None
+            else None
+        )
         try:
             self._lancar_item(linha.produto_id, quantidade, observacao)
         except _ERROS_SERVICE as erro:
@@ -803,11 +926,15 @@ class AdicionarItemDialog(QDialog):
         # Item lançado: reseta para o próximo, mas mantém o modal aberto e o
         # foco na busca — é aí que está o ganho de velocidade do PDV.
         self._definir_quantidade(1)
-        self._campo_observacao.clear()
+        if self._campo_observacao is not None:
+            self._campo_observacao.clear()
         self._campo_busca.clear()
         self._garantir_filtro_aplicado()
         self._campo_busca.setFocus(Qt.FocusReason.OtherFocusReason)
-        self._avisar(f"{quantidade}× {linha.nome.upper()} LANÇADO", "sucesso")
+        self._avisar(
+            self._modo.aviso_adicionado.format(quantidade=quantidade, nome=linha.nome.upper()),
+            "sucesso",
+        )
 
     def _avisar(self, mensagem: str, estado: str) -> None:
         """Uma linha só no rodapé, que troca de papel entre dica, erro e aviso.
@@ -825,7 +952,7 @@ class AdicionarItemDialog(QDialog):
 
     def _restaurar_dica(self) -> None:
         self._timer_aviso.stop()
-        self._label_aviso.setText(_DICA_PADRAO)
+        self._label_aviso.setText(self._modo.dica_padrao)
         aplicar_propriedade(self._label_aviso, "estado", "dica")
 
     # ------------------------------------------------------------------

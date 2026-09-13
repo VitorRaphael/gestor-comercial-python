@@ -646,6 +646,120 @@ def test_remover_componente_exige_gerente(cardapio, categoria, produto, auth, at
         cardapio.remover_componente(item.id)
 
 
+# O stepper da tela de composição (§9.15): antes dele, mudar a quantidade era
+# remover e associar de novo.
+
+
+def test_alterar_quantidade_do_componente_grava_o_novo_valor(cardapio, categoria, produto):
+    combo = cardapio.criar_produto("Combo Lanche", Decimal("30.00"), categoria.id)
+    item = cardapio.associar_componente(combo.id, produto.id, 1)
+
+    alterado = cardapio.alterar_quantidade_componente(item.id, 3)
+
+    assert alterado.quantidade == 3
+    assert [c.quantidade for c in cardapio.listar_componentes(combo.id)] == [3]
+
+
+def test_alterar_quantidade_grava_de_verdade_e_nao_fica_pendente(
+    cardapio, categoria, produto, uow
+):
+    """Sem o `commit`, a quantidade ficaria pendurada na Session — e a leitura
+    na mesma Session ainda a mostraria, que é por que o teste acima não basta. O
+    `rollback` da próxima operação recusada, qualquer uma (§3.1), a desfaria
+    calado. Achado por mutação: tirar o commit passava a suíte inteira."""
+    combo = cardapio.criar_produto("Combo Lanche", Decimal("30.00"), categoria.id)
+    item = cardapio.associar_componente(combo.id, produto.id, 1)
+
+    cardapio.alterar_quantidade_componente(item.id, 4)
+    uow.rollback()
+    uow.session.expire_all()
+
+    assert cardapio.listar_componentes(combo.id)[0].quantidade == 4
+
+
+def test_alterar_quantidade_nao_mexe_nos_outros_componentes_nem_no_combo(
+    cardapio, categoria, produto
+):
+    """Trocar a quantidade é UM update: não pode passar pela remoção, que
+    desfaria o combo se aquele fosse o único item."""
+    combo = cardapio.criar_produto("Combo Lanche", Decimal("30.00"), categoria.id)
+    refrigerante = cardapio.criar_produto("Refrigerante", Decimal("6.00"), categoria.id)
+    item = cardapio.associar_componente(combo.id, produto.id, 1)
+    outro = cardapio.associar_componente(combo.id, refrigerante.id, 2)
+
+    cardapio.alterar_quantidade_componente(item.id, 5)
+
+    componentes = cardapio.listar_componentes(combo.id)
+    assert [(c.id, c.quantidade) for c in componentes] == [(item.id, 5), (outro.id, 2)]
+    assert cardapio.buscar_produto(combo.id).is_combo is True
+
+
+@pytest.mark.parametrize("invalida", [0, -1, "2", True, 1.5])
+def test_alterar_quantidade_recusa_o_que_associar_tambem_recusa(
+    cardapio, categoria, produto, invalida
+):
+    """As mesmas travas de `associar_componente`, inclusive o `True` que é
+    subclasse de `int` em Python e passaria como quantidade 1."""
+    combo = cardapio.criar_produto("Combo Lanche", Decimal("30.00"), categoria.id)
+    item = cardapio.associar_componente(combo.id, produto.id, 2)
+
+    with pytest.raises(RegraDeNegocioError):
+        cardapio.alterar_quantidade_componente(item.id, invalida)
+
+    assert cardapio.listar_componentes(combo.id)[0].quantidade == 2
+
+
+def test_alterar_quantidade_de_componente_inexistente(cardapio):
+    with pytest.raises(RecursoNaoEncontradoError):
+        cardapio.alterar_quantidade_componente(9999, 2)
+
+
+def test_alterar_quantidade_exige_gerente(cardapio, categoria, produto, auth, atendente):
+    combo = cardapio.criar_produto("Combo Lanche", Decimal("30.00"), categoria.id)
+    item = cardapio.associar_componente(combo.id, produto.id, 1)
+    auth.login_como(atendente.id, PIN_ATENDENTE)
+
+    with pytest.raises(AcessoNegadoError):
+        cardapio.alterar_quantidade_componente(item.id, 2)
+
+
+def test_listar_componentes_carrega_produto_e_categoria_juntos(
+    cardapio, categoria, produto, session
+):
+    """A tela de composição lê nome e categoria de todas as linhas na abertura.
+    Sem os `selectinload`, um combo de N itens custaria 1 + 2N consultas; com
+    eles, um número fixo — o mesmo para dois itens e para cinco."""
+    from sqlalchemy import event
+
+    bebidas = cardapio.criar_categoria("Bebidas")
+    combo = cardapio.criar_produto("Combo Lanche", Decimal("30.00"), categoria.id)
+    cardapio.associar_componente(combo.id, produto.id, 1)
+    for indice in range(4):
+        extra = cardapio.criar_produto(f"Bebida {indice}", Decimal("5.00"), bebidas.id)
+        cardapio.associar_componente(combo.id, extra.id, 1)
+    session.expire_all()
+
+    consultas: list[str] = []
+
+    def _contar(conn, cursor, statement, parameters, context, executemany):
+        consultas.append(statement)
+
+    motor = session.get_bind()
+    event.listen(motor, "after_cursor_execute", _contar)
+    try:
+        componentes = cardapio.listar_componentes(combo.id)
+        antes_de_ler = len(consultas)
+        pares = [(c.produto.nome, c.produto.categoria.nome) for c in componentes]
+    finally:
+        event.remove(motor, "after_cursor_execute", _contar)
+
+    assert len(pares) == 5
+    assert pares[0] == ("X-Burger", "Lanches")
+    assert len(consultas) == antes_de_ler, "ler produto/categoria voltou ao banco"
+    # buscar o combo + componentes + produtos + categorias
+    assert antes_de_ler <= 4
+
+
 # ----------------------------------------------------------------------
 # Impressoras
 # ----------------------------------------------------------------------

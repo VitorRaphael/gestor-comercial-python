@@ -97,6 +97,13 @@ GLIFO_RAMO = "ramo"
 GLIFO_LUPA = "lupa"
 GLIFO_SETA_DIREITA = "seta_direita"
 GLIFO_SETA_BAIXO = "seta_baixo"
+# Os três da tela de composição do combo (§9.15): o visto da linha selecionada,
+# a lixeira do "Remover" e o "+" do "Adicionar componente". O `✓` e o `+` até
+# existem na fonte de texto, mas cada um sairia com a espessura e a altura da
+# fonte — ao lado das camadas desenhadas, pareceriam de outro ícone.
+GLIFO_VISTO = "visto"
+GLIFO_LIXEIRA = "lixeira"
+GLIFO_MAIS = "mais"
 
 # Os glifos são traçados numa grade de 24x24 e escalados para o tamanho pedido,
 # então um desenho só serve a insígnia de 40px e a seta de 12px.
@@ -225,6 +232,35 @@ def _caminho_do_glifo(nome: str) -> QPainterPath:
         p.moveTo(5.5, 9.0)
         p.lineTo(12.0, 15.5)
         p.lineTo(18.5, 9.0)
+    elif nome == GLIFO_VISTO:
+        p.moveTo(5.0, 12.5)
+        p.lineTo(10.0, 17.5)
+        p.lineTo(19.0, 7.0)
+    elif nome == GLIFO_LIXEIRA:
+        # Tampa, alça e o corpo levemente afunilado, com as duas ranhuras.
+        p.moveTo(4.0, 6.5)
+        p.lineTo(20.0, 6.5)
+        p.moveTo(9.0, 6.5)
+        p.lineTo(9.0, 4.5)
+        p.quadTo(9.0, 3.5, 10.0, 3.5)
+        p.lineTo(14.0, 3.5)
+        p.quadTo(15.0, 3.5, 15.0, 4.5)
+        p.lineTo(15.0, 6.5)
+        p.moveTo(6.2, 6.5)
+        p.lineTo(7.1, 19.0)
+        p.quadTo(7.2, 20.5, 8.7, 20.5)
+        p.lineTo(15.3, 20.5)
+        p.quadTo(16.8, 20.5, 16.9, 19.0)
+        p.lineTo(17.8, 6.5)
+        p.moveTo(10.0, 10.5)
+        p.lineTo(10.0, 16.5)
+        p.moveTo(14.0, 10.5)
+        p.lineTo(14.0, 16.5)
+    elif nome == GLIFO_MAIS:
+        p.moveTo(12.0, 5.0)
+        p.lineTo(12.0, 19.0)
+        p.moveTo(5.0, 12.0)
+        p.lineTo(19.0, 12.0)
     return p
 
 

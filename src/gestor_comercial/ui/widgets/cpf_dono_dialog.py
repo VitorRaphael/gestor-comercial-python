@@ -325,10 +325,7 @@ class CpfDonoDialog(QDialog):
     @nao_deixa_escapar()
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (override Qt)
         super().showEvent(event)
-        if self._backdrop is None:
-            self._backdrop = cartao_modal.montar(self)
-        self.adjustSize()
-        cartao_modal.centralizar_no_pai(self)
+        self._backdrop = cartao_modal.apresentar(self, self._backdrop)
         # O diálogo, e não um botão, é quem lê o teclado
         # (ver `cartao_modal.preparar_botao`).
         self.setFocus(Qt.FocusReason.OtherFocusReason)

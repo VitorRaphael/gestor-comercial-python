@@ -816,14 +816,51 @@ class CardapioService:
         self.uow.combo_itens.remover(item)
         # Combo sem nenhum componente é só um produto comum: volta a ser um, e
         # com isso pode inclusive virar componente de outro combo.
-        if not self.uow.combo_itens.listar_por_combo(combo_id):
+        #
+        # `existe_como_combo` (um EXISTS) e não `listar_por_combo`: a pergunta é
+        # só "sobrou alguém?", e a listagem carrega produto e categoria de cada
+        # componente para a tela de composição (§9.15) — pagaria duas consultas
+        # para responder um sim/não.
+        if not self.uow.combo_itens.existe_como_combo(combo_id):
             combo = self.uow.produtos.buscar_por_id(combo_id)
             if combo is not None:
                 combo.is_combo = False
                 self.uow.produtos.salvar(combo)
         self.uow.commit()
 
+    def alterar_quantidade_componente(self, combo_item_id: int, quantidade: int) -> ComboItem:
+        """Troca quantas unidades do componente o combo entrega (§9.15).
+
+        Existe por causa do stepper da tela de composição. Antes dele, mudar a
+        quantidade era remover o componente e associá-lo de novo — dois commits,
+        e entre eles um combo com um item a menos (e, se era o único, um combo
+        que tinha deixado de ser combo).
+
+        As mesmas travas de `associar_componente` para o que ela aceita:
+        gerente, inteiro, maior que zero. Não há teto: o service nunca teve um,
+        e o limite de 99 é do stepper — a tela não pode montar um valor que o
+        service recuse, mas o service não precisa conhecer a tela.
+        """
+        self.auth.exigir_gerente()
+        quantidade_final = self._quantidade_valida(quantidade)
+        item = self.uow.combo_itens.buscar_por_id(combo_item_id)
+        if item is None:
+            raise RecursoNaoEncontradoError(
+                f"Item de combo não encontrado (código {combo_item_id})."
+            )
+
+        item.quantidade = quantidade_final
+        self.uow.combo_itens.salvar(item)
+        self.uow.commit()
+        return item
+
     def listar_componentes(self, combo_id: int) -> list[ComboItem]:
+        """Os componentes do combo, na ordem em que foram associados.
+
+        Produto e categoria de cada um já vêm carregados: a tela de composição
+        monta um instantâneo deles na abertura, e sem isso cada linha custaria
+        duas consultas a mais (ver `ComboItemRepository.listar_por_combo`).
+        """
         self.buscar_produto(combo_id)
         return self.uow.combo_itens.listar_por_combo(combo_id)
 

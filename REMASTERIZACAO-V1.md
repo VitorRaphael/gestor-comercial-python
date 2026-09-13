@@ -3580,6 +3580,174 @@ teste que falha.
   associação do produto arquivado com a categoria guardada. O dado está lá para
   quando for.
 
+### 9.15 A composição do combo em cartão, com stepper por linha ✅ CONCLUÍDO — 2026-09-13
+
+Pedido do Vitor com um mockup: trocar o `_ComboComponentesDialog` — moldura do
+sistema, uma `QTableWidget` de duas colunas e dois botões chapados, dentro de
+`cardapio_view.py` — por um cartão com uma linha por componente e o stepper de
+quantidade na própria linha. É o **nono modal em cartão** do app:
+`src/gestor_comercial/ui/widgets/composicao_combo_dialog.py`.
+
+O defeito de uso que o mockup resolve é concreto: na tabela antiga, **mudar a
+quantidade de um componente era removê-lo e associá-lo de novo** — dois
+commits, e entre eles um combo com um item a menos (e, se era o único, um combo
+que tinha deixado de ser combo).
+
+#### Duas decisões do Vitor, respondendo a perguntas feitas antes de começar
+
+1. **"Produto principal" / "Adicional" não existem no banco.** O mockup desenha
+   um selo âmbar com visto para o principal e um neutro para o adicional, mas
+   `combo_itens` é só combo + produto + quantidade. As opções eram inventar por
+   heurística ("o primeiro é o principal", sem jeito de trocar), gravar uma
+   coluna nova que nenhuma outra tela leria, ou não ter papel. O Vitor escolheu a
+   terceira: **o subtítulo de cada linha é a CATEGORIA real do componente** e
+   **o selo âmbar marca a linha SELECIONADA** — a que o "Remover" vai tirar. O
+   schema ficou intacto, sem migração.
+2. **"+ Adicionar componente" reusa o cartão "Adicionar item"** (§9.4) num modo
+   componente, em vez de manter o formulário de fábrica ou criar uma segunda
+   busca de produto. O modo comanda tinha de continuar intacto.
+
+#### O que foi feito
+
+- **Um método novo no service, e só um:** `alterar_quantidade_componente`, com
+  as mesmas travas de `associar_componente` (gerente, inteiro, maior que zero,
+  o `True` que é `int` em Python). Grava na hora — o rodapé do mockup diz
+  "ALTERAÇÕES APLICADAS NESTE COMBO", e não há Salvar/Cancelar para esquecer.
+  Na tela, **o número só muda depois de o service aceitar**: recusa não mexe no
+  stepper e o motivo aparece no status.
+- **Linhas com widget**, e não delegado: a regra do §9.4/§9.11 é "widget por
+  linha só quando a linha tem controle de verdade dentro", e o stepper tem dois
+  botões que gravam. O stepper não remonta a lista (a mesma instância de linha
+  continua na tela, banco não é relido); a remoção destrói a linha na hora; a
+  volta do cartão de adição **sincroniza** — só nasce a linha nova, as que
+  ficaram são as mesmas. A chave da sincronização é o par (componente, produto),
+  e não só o id: o SQLite reaproveita o maior id quando a última linha é
+  apagada, e casar só pelo id reescreveria o nome de uma linha em vez de
+  trocá-la.
+- **Teclado:** ↑/↓ trocam a linha, Delete/Backspace removem, Esc fecha. A
+  seleção passa para quem ocupou o lugar da removida (o comportamento da tabela
+  antiga). Nenhum botão aceita foco (`preparar_botao`), então o Espaço não
+  "clica" o stepper sem ninguém ver.
+- **Modo componente no "Adicionar item"** (`MODOS`, uma linha por modo, a forma
+  do §9.6/§9.12): título, sufixo do contexto, frases de teclado e aviso, teto de
+  99 (o do `QSpinBox` antigo, e o mesmo do stepper), e **sem observação e sem
+  prévia em R$ — não criadas**, e não só escondidas. A lista já chega sem o que o
+  service recusaria (o próprio combo, quem já é combo, quem já está na
+  composição); o service continua recusando. É lida na hora do clique, e não na
+  abertura da composição: o stepper faz commit e expiraria um instantâneo velho
+  (o N+1 do §9.4).
+- **A view só recarrega o Cardápio se algo foi gravado** (`modal.alterou`).
+  Abrir, conferir e fechar deixou de custar a recarga da tela inteira.
+- **Família de cor própria** (`composicao_*`, nos dois temas). A borda e o selo
+  da linha selecionada usam `acento`, de propósito; o "Remover" é pílula escura
+  com texto coral, e **não** o Vermelho Ferrari chapado do Excluir — tirar um
+  componente se desfaz adicionando de novo, e o vermelho chapado fica para o que
+  não volta.
+- **Apagados:** `_ComboComponentesDialog`, `_ComponenteDialog` e o
+  `BuscaProdutoWidget`, que ficou sem ninguém que o usasse (o §9.4 o tinha
+  mantido só por causa do formulário de componente). `busca_produto.py` ficou
+  com a regra de busca, que o cartão usa.
+
+#### O que o pedido escrito dizia e não foi seguido ao pé da letra
+
+- **"Entre 560 e 600px" não fecha**, pelo mesmo motivo do §9.12: o rodapé de uma
+  linha pede **635px** com a fonte da marca. A 600px o botão primário saía como
+  "olonar compone" e o contexto perdia o "COMBO". O cartão ficou em **640px**,
+  entre o teto do pedido e os 672px da própria imagem do mockup, com teste que
+  mede `width() < sizeHint()` de cada peça do rodapé. Altura: 527px, sob os
+  728px úteis.
+- **O vocabulário do Tkinter** (`destroy()`, `unbind`, `with conn:`) virou o do
+  projeto: `executar_modal`/`deleteLater`, `disconnect` nominal com a trava
+  `_limpo`, e a atomicidade é a de sempre — `@transacional` na classe do service
+  e um `uow.commit()` por operação (§3.1). Não existe conexão SQLite crua para
+  um `with conn:` neste código.
+- **"`produtos_combo`" e "baixa de estoque dos componentes" não existem na V1.**
+  Só há `combo_itens`; a baixa que o Java fazia é backlog da V2
+  (`comanda_service.py`), e a impressão não lê `combo_itens` — o combo sai no
+  cupom como um produto, pela impressora da categoria DELE (§9.8). Nada disso
+  foi tocado, e a bancada prova (abaixo).
+- **Hex literais do pedido** viraram tokens: a paleta "Concreto" já é a do
+  mockup, e hex cravado some no tema claro (§3.15).
+- **O teto de ~90 MB** continua valendo o que o §9.11 registrou: o processo já
+  mede ~100 MB antes do Cardápio existir, e nenhuma tela sozinha o alcança. O que
+  este item pode garantir é não crescer — medido abaixo.
+
+#### Achados no caminho, todos com teste
+
+1. **O escurecedor de um cartão sobre outro cartão pintava cantos quadrados.**
+   O "Adicionar componente" abre por cima da composição, que é uma janela
+   translúcida com cantos de 16px; o `Backdrop` enchia o retângulo inteiro.
+   Medido no pixel (1,1) do cartão de baixo: **alfa 150 antes, 0 depois**.
+   `cartao_modal.montar` passou a arredondar quando a janela de trás é
+   translúcida (`RAIO_CARTAO_PX`). É o primeiro caso de cartão sobre cartão; o
+   próximo já nasce certo.
+2. **A barra de rolagem deslocava os steppers.** A partir da quarta linha ela
+   come 8px do viewport e todos os números andavam para a esquerda de uma vez,
+   descasando do rótulo "QUANTIDADE". `_acomodar_barra` devolve a largura pela
+   margem direita (o mesmo cuidado do cartão de Recebimentos do Caixa, §9).
+3. **`border-radius` maior que metade da altura deixa o botão quadrado.** Com
+   20px num botão de 38px o Qt desiste de arredondar, sem aviso. Ficou 18px.
+4. **N+1 na listagem de componentes:** `listar_por_combo` carrega produto e
+   categoria por `selectinload` (1+2N consultas → 3 fixas), e
+   `remover_componente`, que só perguntava "sobrou alguém?", passou a usar o
+   `EXISTS` que já existia em vez de carregar a lista.
+5. **Um `showEvent` idêntico ao do `cpf_dono_dialog`**, que
+   `test_nenhuma_funcao_da_ui_repete_o_corpo_de_outra` reprovou: a rotina saiu
+   para `cartao_modal.apresentar` e os dois cartões a usam.
+
+#### Conferência
+
+- suíte **1698** (de 1628), 0 falhas, **70 testes novos**: 52 em
+  `test_composicao_combo_dialog.py`, 11 em `test_cardapio_service.py`, 7 em
+  `test_adicionar_item_dialog.py`;
+- **30 mutações na primeira passada, 25 reprovaram.** As 5 sobreviventes viraram
+  4 testes e 1 remoção de código:
+  - tirar o `commit()` do stepper passava a suíte inteira — a leitura na mesma
+    Session ainda via o valor. **É o achado sério do item**: sem o commit, o
+    rollback da próxima operação recusada, qualquer uma, desfaria a quantidade
+    calado. O teste agora faz `rollback()` e confere;
+  - tirar o filtro do "próprio combo" não reprovava porque o filtro `is_combo`
+    o mascarava — só o produto que AINDA não tem componente o exercita;
+  - "a seleção vai para quem ocupou o lugar" só era testada com 2 linhas, onde
+    vizinho e primeira coincidem — ganhou o caso de 3;
+  - o teste da linha removida só olhava depois do `deleteLater`, e tirar o
+    `setParent(None)` passava — agora mede antes e depois (e o comentário que
+    prometia "filha até o diálogo fechar" foi corrigido: é só até o laço girar);
+  - um ramo que engolia o Enter não mudava nada (nenhum botão é padrão) e
+    **saiu**.
+
+  Segunda passada: as 4 reprovam;
+- **memória**, banco em arquivo com WAL e `synchronous=FULL`, 5 ciclos de
+  aquecimento e 4 blocos de 60 ciclos (abrir, 6 cliques no stepper, remover,
+  abrir o cartão de adição, readicionar, fechar): widgets vivos **1 → 1** em
+  todos os blocos, nenhum diálogo preso; RSS +0,77 MB no primeiro bloco e depois
+  **+0,05 / +0,10 / +0,17 MB**. A primeira medição dava +0,3 MB por bloco — era a
+  lista de consultas da própria bancada crescendo, e sumiu ao tirar o listener;
+- **tempo:** abrir o cartão 14 ms / 4 consultas; clique no stepper **2,5 ms**
+  (mediana, commit em disco) / 3 consultas;
+- bancada visual a 1366x738 contra `2a87dcf`: **as 24 telas idênticas byte a
+  byte** — o item vive em diálogos, e a tela parada não mudou um pixel;
+- bancada de cupons: os **2 idênticos**, e — como a bancada padrão não vende
+  combo nenhum — uma venda a mais com o "Combo Fritas + Coca Cola Lata" ×2 ao lado
+  de um X Tudo: pedido de produção, pré-conta e recibo **idênticos** linha a
+  linha nos dois códigos;
+- renderização nativa com o cardápio real nos estados que importam: dois temas,
+  linha selecionada trocada, erro do service, lista vazia, cinco componentes com
+  rolagem e nome de combo com reticências, e o cartão de adição por cima.
+
+#### Ficou de fora, de propósito
+
+- **Reordenar componentes.** A ordem é a de associação; sem "principal", ordem
+  não significa nada para o sistema.
+- **Confirmação ao remover.** A tabela antiga não tinha, o mockup não desenha, e
+  remover um componente se desfaz em dois cliques. Excluir PRODUTO continua com
+  confirmação.
+- **O modal no inventário de `test_vazamento_modais.py`.** O ciclo de vida dele
+  (30 aberturas com `exec()`, escurecedor, sinais, linhas removidas) está
+  coberto no arquivo próprio, como o do §9.12.
+- **Os dois formulários de fábrica que sobraram no Cardápio:** `_ProdutoDialog`
+  e a exclusão de categoria no `QMessageBox` do sistema.
+
 ---
 
 ## 10. As melhores mudanças que o programa teve — em português de balcão

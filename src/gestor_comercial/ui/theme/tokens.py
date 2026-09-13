@@ -257,6 +257,33 @@ TEMA_ESCURO: dict[str, str] = {
     "cardapio_excluir_bg": "#DC2626",
     "cardapio_excluir_hover": "#EF4444",
     "cardapio_excluir_texto": "#FFFFFF",
+    # ---- Composição do combo (`composicao_combo_dialog.py`, §9.15) ----
+    # Família PRÓPRIA, pela lição do §9.5: a linha de componente, o selo dela, o
+    # stepper e o "Remover". Hoje vários hex coincidem com `cardapio_*` e
+    # `botao_circular_*`, e é por isso que o empréstimo seria perigoso.
+    #
+    # A linha selecionada é a única exceção, e de propósito: a borda e o selo
+    # dela usam `acento`, porque "esta é a linha que o Remover vai tirar" é
+    # exatamente o papel do acento em todo modal do app.
+    #
+    # O "Remover" NÃO é o Vermelho Ferrari chapado do `cardapio_excluir_*`:
+    # tirar um componente se desfaz adicionando de novo, e não apaga produto
+    # nenhum. Vermelho chapado aqui gastaria o alerta que o app guarda para o
+    # que não volta. É uma pílula escura com o texto em coral.
+    "composicao_linha_bg": "#141413",
+    "composicao_linha_borda": "rgba(255, 255, 255, 0.05)",
+    "composicao_linha_hover_bg": "#181817",
+    "composicao_linha_selecionada_bg": "#1E1A12",
+    "composicao_selo_bg": "#1F1F1D",
+    "composicao_selo_borda": "rgba(255, 255, 255, 0.06)",
+    "composicao_selo_glifo": "#A1A1AA",
+    "composicao_passo_bg": "#1A1A18",
+    "composicao_passo_borda": "rgba(255, 255, 255, 0.08)",
+    "composicao_passo_hover": "#262624",
+    "composicao_remover_bg": "#1A1112",
+    "composicao_remover_borda": "rgba(239, 68, 68, 0.2)",
+    "composicao_remover_hover": "#261517",
+    "composicao_remover_texto": "#EF4444",
     "campo_erro_texto": "#f43f5e",
     "campo_erro_bg": "#fdecea",
     # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`,
@@ -529,6 +556,25 @@ TEMA_CLARO: dict[str, str] = {
     "cardapio_excluir_bg": "#DC2626",
     "cardapio_excluir_hover": "#B91C1C",
     "cardapio_excluir_texto": "#FFFFFF",
+    # ---- Composição do combo (§9.15) ----
+    # Ver o comentário gêmeo em TEMA_ESCURO. No claro a linha selecionada leva
+    # o azul do `acento` desta paleta, com o mesmo fundo tingido da linha
+    # selecionada do Cardápio, e o "Remover" é pastel com o texto no vermelho
+    # escuro — o coral do escuro sobre branco não tem contraste de texto.
+    "composicao_linha_bg": "#FFFFFF",
+    "composicao_linha_borda": "#E2E1D9",
+    "composicao_linha_hover_bg": "#F5F4EE",
+    "composicao_linha_selecionada_bg": "#EEF3FF",
+    "composicao_selo_bg": "#F0EFE9",
+    "composicao_selo_borda": "#E2E1D9",
+    "composicao_selo_glifo": "#64748B",
+    "composicao_passo_bg": "#F5F4EE",
+    "composicao_passo_borda": "#E2E1D9",
+    "composicao_passo_hover": "#E9E8E2",
+    "composicao_remover_bg": "#FEF2F2",
+    "composicao_remover_borda": "#FECACA",
+    "composicao_remover_hover": "#FEE2E2",
+    "composicao_remover_texto": "#DC2626",
     "campo_erro_texto": "#DC2626",
     "campo_erro_bg": "#FEE2E2",
     # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`,

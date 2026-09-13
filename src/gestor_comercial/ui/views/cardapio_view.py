@@ -55,17 +55,13 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidgetItem,
     QMenu,
     QMessageBox,
     QPushButton,
-    QSpinBox,
     QSplitter,
-    QTableWidget,
-    QTableWidgetItem,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -74,7 +70,6 @@ from PySide6.QtWidgets import (
 
 from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.domain.categoria import Categoria
-from gestor_comercial.domain.combo_item import ComboItem
 from gestor_comercial.domain.produto import Produto
 from gestor_comercial.services.cardapio_service import (
     CardapioService,
@@ -97,7 +92,6 @@ from gestor_comercial.ui.formatacao import (
     formatar_reais,
     safe_decimal,
 )
-from gestor_comercial.ui.widgets.busca_produto import BuscaProdutoWidget
 from gestor_comercial.ui.widgets.cardapio_cartoes import (
     GLIFO_CAIXA,
     GLIFO_CAMADAS,
@@ -118,15 +112,13 @@ from gestor_comercial.ui.widgets.cardapio_cartoes import (
     divisor,
     montar_itens,
 )
+from gestor_comercial.ui.widgets.composicao_combo_dialog import ComposicaoComboDialog
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 from gestor_comercial.ui.widgets.modais import descartar_modal, executar_modal
 from gestor_comercial.ui.widgets.organizacao_cardapio_dialog import OrganizacaoCardapioDialog
 from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
 from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
-from gestor_comercial.ui.widgets.tabelas import limpar_tabela
 from gestor_comercial.ui.widgets.thumbnail_cache import obter_pixmap
-
-_COLUNAS_COMPONENTES = ["Componente", "Quantidade"]
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
@@ -2000,16 +1992,24 @@ class _ProdutosPainel(PainelPontilhado):
         return caixa.clickedButton() is botao_criar
 
     def gerenciar_combo(self) -> None:
+        """Abre a composição do combo do produto selecionado (§9.15).
+
+        O cartão grava cada mudança na hora, então não há resultado a ler: a view
+        só recarrega o Cardápio se algo foi gravado — abrir, conferir e fechar
+        não custa a recarga da tela inteira. A lista de candidatos NÃO é montada
+        aqui: o cartão a lê quando o "+ Adicionar componente" é clicado, porque
+        até lá o stepper já pode ter feito commit e expirado as instâncias.
+        """
         produto = self.produto_atual()
         if produto is None:
             self._mostrar_erro("Selecione um produto antes de gerenciar o combo.")
             return
-        candidatos = [p for p in self._service.listar_produtos_ativos() if p.id != produto.id]
-        modal = _ComboComponentesDialog(self._service, produto, candidatos, self)
+        modal = ComposicaoComboDialog(self._service, produto.id, produto.nome, self)
         executar_modal(modal)
         self._mostrar_erro("")
-        self.atualizar()
-        self.alterado.emit()
+        if modal.alterou:
+            self.atualizar()
+            self.alterado.emit()
 
     def alternar_status(self) -> None:
         if self.alvo_atual().tipo is not TipoDeAlvo.PRODUTO:
@@ -2056,108 +2056,12 @@ class _ProdutosPainel(PainelPontilhado):
         self.alterado.emit()
 
 
-class _ComboComponentesDialog(QDialog):
-    """Cadastro de componentes de um combo (o produto já selecionado no painel)."""
-
-    def __init__(
-        self,
-        service: CardapioService,
-        combo: Produto,
-        candidatos: list[Produto],
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self._service = service
-        self._combo = combo
-        self._candidatos = candidatos
-        self._componentes: list[ComboItem] = []
-        self.setWindowTitle(f"Combo: {combo.nome}")
-
-        layout = QVBoxLayout(self)
-
-        self._label_erro = QLabel("")
-        self._label_erro.setObjectName("labelErro")
-        layout.addWidget(self._label_erro)
-
-        self._tabela = QTableWidget(0, len(_COLUNAS_COMPONENTES))
-        self._tabela.setHorizontalHeaderLabels(_COLUNAS_COMPONENTES)
-        self._tabela.verticalHeader().setVisible(False)
-        self._tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._tabela.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._tabela.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self._tabela)
-
-        acoes = QHBoxLayout()
-        botao_adicionar = QPushButton("Adicionar componente")
-        botao_adicionar.setProperty("variante", "primario")
-        botao_adicionar.clicked.connect(self._adicionar_componente)
-        acoes.addWidget(botao_adicionar)
-
-        botao_remover = QPushButton("Remover componente")
-        botao_remover.setProperty("variante", "perigo")
-        botao_remover.clicked.connect(self._remover_componente)
-        acoes.addWidget(botao_remover)
-        acoes.addStretch()
-        layout.addLayout(acoes)
-
-        fechar = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        fechar.rejected.connect(self.accept)
-        fechar.button(QDialogButtonBox.StandardButton.Close).clicked.connect(self.accept)
-        layout.addWidget(fechar)
-
-        self._atualizar_componentes()
-
-    def _atualizar_componentes(self) -> None:
-        self._label_erro.setText("")
-        try:
-            self._componentes = self._service.listar_componentes(self._combo.id)
-        except _ERROS_SERVICE as erro:
-            self._label_erro.setText(str(erro))
-            self._componentes = []
-        limpar_tabela(self._tabela, linhas=len(self._componentes), preservar_selecao=True)
-        for linha, item in enumerate(self._componentes):
-            self._tabela.setItem(linha, 0, QTableWidgetItem(item.produto.nome))
-            self._tabela.setItem(linha, 1, QTableWidgetItem(str(item.quantidade)))
-
-    def _adicionar_componente(self) -> None:
-        candidatos = [p for p in self._candidatos if p.id != self._combo.id]
-        if not candidatos:
-            self._label_erro.setText("Não há outro produto disponível para virar componente.")
-            return
-        modal = _ComponenteDialog(candidatos, self)
-        if executar_modal(modal) != QDialog.DialogCode.Accepted:
-            return
-        produto_id, quantidade = modal.resultado()
-
-        self._label_erro.setText("")
-        try:
-            self._service.associar_componente(self._combo.id, produto_id, quantidade)
-        except _ERROS_SERVICE as erro:
-            self._label_erro.setText(str(erro))
-            return
-        self._atualizar_componentes()
-
-    def _remover_componente(self) -> None:
-        linha = self._tabela.currentRow()
-        if linha < 0 or linha >= len(self._componentes):
-            return
-        item = self._componentes[linha]
-        self._label_erro.setText("")
-        try:
-            self._service.remover_componente(item.id)
-        except _ERROS_SERVICE as erro:
-            self._label_erro.setText(str(erro))
-            return
-        self._atualizar_componentes()
-
-
 class _ProdutoDialog(QDialog):
     """Modal de criação/edição de produto: nome, preço, custo, categoria,
     subcategoria e descrição.
 
     Não tem campo "é combo": isso o service decide sozinho, a partir de o
-    produto ter ou não componentes (ver `_ComboComponentesDialog`).
+    produto ter ou não componentes (ver `ComposicaoComboDialog`).
 
     **Categoria é obrigatória; subcategoria é opcional**, e as duas são
     seletores fechados. A categoria decide em qual impressora o item sai
@@ -2430,49 +2334,6 @@ class _ProdutoDialog(QDialog):
         if self._imagem_path_para_remover:
             remover_thumbnail(self._imagem_path_para_remover)
             self._imagem_path_para_remover = None
-
-
-class _ComponenteDialog(QDialog):
-    """Modal de associação de componente a um combo: busca instantânea de produto + quantidade."""
-
-    def __init__(self, candidatos: list[Produto], parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Adicionar componente")
-        self.setMinimumWidth(420)
-        self._produto_id: int | None = None
-
-        layout = QVBoxLayout(self)
-
-        self._busca = BuscaProdutoWidget(candidatos)
-        self._busca.produto_selecionado.connect(self._produto_selecionado)
-        self._busca.busca_cancelada.connect(self.reject)
-        layout.addWidget(self._busca)
-
-        formulario = QFormLayout()
-
-        self._campo_quantidade = QSpinBox()
-        self._campo_quantidade.setMinimum(1)
-        self._campo_quantidade.setMaximum(99)
-        self._campo_quantidade.setValue(1)
-        formulario.addRow("Quantidade", self._campo_quantidade)
-
-        layout.addLayout(formulario)
-
-        botoes = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
-        botoes.rejected.connect(self.reject)
-
-        self._botao_adicionar = botoes.addButton("Adicionar", QDialogButtonBox.ButtonRole.AcceptRole)
-        self._botao_adicionar.setProperty("variante", "primario")
-        self._botao_adicionar.clicked.connect(self._busca.confirmar_selecionado)
-
-        layout.addWidget(botoes)
-
-    def _produto_selecionado(self, produto_id: int) -> None:
-        self._produto_id = produto_id
-        self.accept()
-
-    def resultado(self) -> tuple[int, int]:
-        return self._produto_id, self._campo_quantidade.value()
 
 
 def _criar_rotulo_erro() -> QLabel:

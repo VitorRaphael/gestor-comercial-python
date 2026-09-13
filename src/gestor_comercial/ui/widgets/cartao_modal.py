@@ -17,26 +17,46 @@ mais.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPaintEvent
 from PySide6.QtWidgets import QPushButton, QWidget
 
 from gestor_comercial.core.resilience import nao_deixa_escapar
 
+# O raio dos cantos de todo cartão modal do app (`border-radius: 16px` no QSS
+# de cada um).
+RAIO_CARTAO_PX = 16.0
+
 
 class Backdrop(QWidget):
-    """Retângulo preto translúcido cobrindo a janela inteira do parent."""
+    """Preto translúcido cobrindo a janela inteira do parent.
+
+    Retângulo cheio sobre a janela principal; retângulo de cantos redondos
+    quando a janela de trás é OUTRO cartão (ver `montar`).
+    """
 
     OPACIDADE = 150  # 0-255 (~59%)
 
-    def __init__(self, parent: QWidget) -> None:
+    def __init__(self, parent: QWidget, raio: float = 0.0) -> None:
         super().__init__(parent)
         self.setObjectName("modalBackdrop")
+        self._raio = raio
+
+    @property
+    def raio(self) -> float:
+        return self._raio
 
     @nao_deixa_escapar()
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
         pintor = QPainter(self)
-        pintor.fillRect(self.rect(), QColor(0, 0, 0, self.OPACIDADE))
+        cor = QColor(0, 0, 0, self.OPACIDADE)
+        if self._raio <= 0:
+            pintor.fillRect(self.rect(), cor)
+        else:
+            pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pintor.setPen(Qt.PenStyle.NoPen)
+            pintor.setBrush(cor)
+            pintor.drawRoundedRect(QRectF(self.rect()), self._raio, self._raio)
         pintor.end()
 
 
@@ -46,12 +66,20 @@ def montar(dono: QWidget) -> Backdrop | None:
     Devolve `None` quando o diálogo não tem parent (caso dos testes que montam
     o modal solto): sem janela de trás não há o que escurecer, e o modal
     continua funcionando igual.
+
+    Quando a janela de trás é **outro cartão** — o "Adicionar componente"
+    aberto de dentro da composição do combo (§9.15) —, ela é translúcida e tem
+    cantos de 16px desenhados pelo QSS. Um retângulo cheio ali pintaria de preto
+    os quatro cantos que o cartão deixa transparentes, e o cartão de baixo
+    apareceria com cantos quadrados e escuros atrás do de cima. O escurecedor
+    então acompanha o raio.
     """
     pai = dono.parentWidget()
     if pai is None:
         return None
     janela = pai.window()
-    backdrop = Backdrop(janela)
+    translucida = janela.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    backdrop = Backdrop(janela, RAIO_CARTAO_PX if translucida else 0.0)
     backdrop.setGeometry(janela.rect())
     backdrop.raise_()
     backdrop.show()
@@ -71,6 +99,25 @@ def descartar(backdrop: Backdrop | None) -> None:
     backdrop.hide()
     backdrop.setParent(None)
     backdrop.deleteLater()
+
+
+def apresentar(dialogo: QWidget, backdrop: Backdrop | None) -> Backdrop | None:
+    """O que o cartão faz ao aparecer: escurecer a janela de trás, fechar na
+    altura do conteúdo e se pôr no meio dela.
+
+    Devolve o escurecedor para o diálogo guardar — e só monta um se ainda não
+    houver: o `showEvent` roda de novo quando a janela é restaurada, e montar a
+    cada vez empilharia escurecedores sobre a janela principal.
+
+    Saiu de dentro do `showEvent` de `cpf_dono_dialog` quando a composição do
+    combo (§9.15) precisou do mesmo corpo, linha por linha — a segunda cópia que
+    `test_nenhuma_funcao_da_ui_repete_o_corpo_de_outra` reprova.
+    """
+    if backdrop is None:
+        backdrop = montar(dialogo)
+    dialogo.adjustSize()
+    centralizar_no_pai(dialogo)
+    return backdrop
 
 
 def preparar_botao(botao: QPushButton) -> None:

@@ -931,6 +931,203 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background: transparent;
     }}
 
+    /* ---------- Modal "Composicao do combo"
+       (`widgets/composicao_combo_dialog.py`, §9.15)
+       Nono modal em cartao. Cartao, cabecalho e divisores seguem o desenho do
+       `orgDialog` logo acima; o que e proprio daqui e a lista de linhas com
+       stepper e o par Remover/Adicionar do rodape. O ✕ entra na familia
+       compartilhada mais abaixo. */
+
+    QDialog#comboDialog {{ background: transparent; }}
+    QFrame#comboDialogCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+    QWidget#comboDialogCabecalho, QWidget#comboDialogRodape {{ background: transparent; }}
+    QFrame#comboDialogCorpo {{ background: transparent; border: none; }}
+    QFrame#comboDialogDivisor {{
+      background: {t['cardapio_bloco_divisor']};
+      border: none;
+    }}
+    QFrame#comboDialogBadge {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['cardapio_card_borda']};
+      border-radius: 14px;
+    }}
+    QLabel#comboDialogSecao {{
+      color: {t['cardapio_icone_glifo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      background: transparent;
+    }}
+    QLabel#comboDialogTitulo {{
+      color: {t['texto']};
+      font-size: 19px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#comboDialogSubtitulo {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QLabel#comboDialogColuna {{
+      color: {t['texto_fraquissimo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      background: transparent;
+    }}
+    /* A lista e um recorte MAIS FUNDO que o cartao (a superficie de painel do
+       Cardapio), para as linhas lerem como cartoes dentro dele. */
+    QFrame#comboDialogLista {{
+      background: {t['cardapio_painel_bg']};
+      border: 1px solid {t['cardapio_painel_borda']};
+      border-radius: 14px;
+    }}
+    QScrollArea#comboDialogRolagem {{ background: transparent; border: none; }}
+    QScrollArea#comboDialogRolagem > QWidget > QWidget {{ background: transparent; }}
+    QScrollArea#comboDialogRolagem QScrollBar:vertical {{
+      background: transparent;
+      width: 6px;
+      margin: 8px 2px 8px 0;
+    }}
+    QScrollArea#comboDialogRolagem QScrollBar::handle:vertical {{
+      background: {t['botao_circular_hover']};
+      border-radius: 3px;
+      min-height: 24px;
+    }}
+    QScrollArea#comboDialogRolagem QScrollBar::add-line:vertical,
+    QScrollArea#comboDialogRolagem QScrollBar::sub-line:vertical {{ height: 0; }}
+    QScrollArea#comboDialogRolagem QScrollBar::add-page:vertical,
+    QScrollArea#comboDialogRolagem QScrollBar::sub-page:vertical {{ background: transparent; }}
+    QLabel#comboDialogVazio {{
+      color: {t['texto_fraquissimo']};
+      font-size: 12px;
+      background: transparent;
+    }}
+
+    QFrame#comboLinha {{
+      background: {t['composicao_linha_bg']};
+      border: 1px solid {t['composicao_linha_borda']};
+      border-radius: 12px;
+    }}
+    QFrame#comboLinha:hover {{ background: {t['composicao_linha_hover_bg']}; }}
+    /* A linha que o Remover e o Delete vao tirar. A borda usa `acento` e nao um
+       token da familia: "esta e a escolhida" e o papel do acento em todo modal
+       do app (ver o comentario em tokens.py). */
+    QFrame#comboLinha[selecionada="true"] {{
+      background: {t['composicao_linha_selecionada_bg']};
+      border: 1px solid {t['acento']};
+    }}
+    QLabel#comboLinhaNome {{
+      color: {t['texto']};
+      font-size: 14px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel#comboLinhaCategoria {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QFrame#comboPasso {{
+      background: {t['composicao_passo_bg']};
+      border: 1px solid {t['composicao_passo_borda']};
+      border-radius: 12px;
+    }}
+    /* `padding: 0` pela mesma razao do ✕: a regra generica de QPushButton pede
+       padding lateral, e num botao de lado fixo isso zera a largura util e o
+       Qt descarta o glifo. */
+    QPushButton#comboPassoBotao {{
+      padding: 0;
+      background: transparent;
+      border: none;
+      border-radius: 10px;
+      color: {t['texto_fraco']};
+      font-size: 17px;
+      font-weight: 700;
+    }}
+    QPushButton#comboPassoBotao:hover {{
+      background: {t['composicao_passo_hover']};
+      color: {t['texto']};
+    }}
+    QPushButton#comboPassoBotao:disabled {{
+      background: transparent;
+      color: {t['pilula_disabled_texto']};
+    }}
+    QLabel#comboPassoValor {{
+      color: {t['texto']};
+      font-size: 14px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel#comboDialogStatus {{
+      color: {t['texto_fraquissimo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      background: transparent;
+    }}
+    /* O erro do service e frase inteira, em caixa normal: a 9px espacados ela
+       seria ilegivel. A altura da linha e fixa no widget, entao trocar de
+       tamanho de letra nao faz o cartao pular. */
+    QLabel#comboDialogStatus[estado="erro"] {{
+      color: {t['perigo']};
+      font-size: 11px;
+      letter-spacing: 0;
+    }}
+    /* 0.8px e nao 1px de espacamento: e a peca mais larga do rodape de uma
+       linha, e cada decimo aqui e folga para o botao primario nao ser
+       espremido (ver `LARGURA_CARTAO_PX`). */
+    QLabel#comboDialogContexto {{
+      color: {t['texto_fraquissimo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      background: transparent;
+    }}
+    /* O `padding-left` de 36px e o espaco do glifo que `BotaoComGlifo` pinta
+       (x=16, 13px de lado). O raio fica em 18px, METADE da altura do botao:
+       acima disso o Qt desiste de arredondar e desenha o canto reto. */
+    QPushButton#comboDialogRemover {{
+      padding: 9px 18px 9px 36px;
+      background: {t['composicao_remover_bg']};
+      border: 1px solid {t['composicao_remover_borda']};
+      border-radius: 18px;
+      color: {t['composicao_remover_texto']};
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    QPushButton#comboDialogRemover:hover {{ background: {t['composicao_remover_hover']}; }}
+    /* Desligado sai do vermelho, pela regra do "Excluir" do Cardapio: um
+       Remover coral sem linha escolhida e alerta gritando por nada. */
+    QPushButton#comboDialogRemover:disabled {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      color: {t['texto_fraquissimo']};
+    }}
+    QPushButton#comboDialogAdicionar {{
+      padding: 9px 20px 9px 36px;
+      background: {t['acento']};
+      border: 1px solid {t['acento']};
+      border-radius: 18px;
+      color: {t['acento_texto']};
+      font-size: 12px;
+      font-weight: 800;
+    }}
+    QPushButton#comboDialogAdicionar:hover {{
+      background: {t['acento_hover']};
+      border-color: {t['acento_hover']};
+    }}
+    QPushButton#comboDialogAdicionar:disabled {{
+      background: {t['pilula_disabled_bg']};
+      border-color: {t['pilula_disabled_bg']};
+      color: {t['pilula_disabled_texto']};
+    }}
+
     /* ---- Modal "Confirmar identidade" (`cpf_dono_dialog.py`) e o olho de
        "Senhas e Acesso" (`icone_olho.py`) ----
        Oitavo modal em cartao. Cabecalho, cartao e rodape seguem o mesmo
@@ -1394,7 +1591,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
        fechar e para os dois passos de quantidade. */
     QPushButton#addItemFechar, QPushButton#addItemPasso, QPushButton#funcDialogFechar,
     QPushButton#movCaixaFechar, QPushButton#turnoFechar, QPushButton#orgDialogFechar,
-    QPushButton#cpfDialogFechar {{
+    QPushButton#cpfDialogFechar, QPushButton#comboDialogFechar {{
       padding: 0;
       background: {t['botao_circular_bg']};
       border: 1px solid {t['botao_circular_borda']};
@@ -1403,12 +1600,13 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
     QPushButton#addItemFechar, QPushButton#funcDialogFechar,
     QPushButton#movCaixaFechar, QPushButton#turnoFechar,
-    QPushButton#orgDialogFechar, QPushButton#cpfDialogFechar {{ border-radius: 16px; font-size: 13px; }}
+    QPushButton#orgDialogFechar, QPushButton#cpfDialogFechar,
+    QPushButton#comboDialogFechar {{ border-radius: 16px; font-size: 13px; }}
     QPushButton#addItemPasso {{ border-radius: 17px; font-size: 18px; }}
     QPushButton#addItemFechar:hover, QPushButton#addItemPasso:hover,
     QPushButton#funcDialogFechar:hover, QPushButton#movCaixaFechar:hover,
     QPushButton#turnoFechar:hover, QPushButton#orgDialogFechar:hover,
-    QPushButton#cpfDialogFechar:hover {{
+    QPushButton#cpfDialogFechar:hover, QPushButton#comboDialogFechar:hover {{
       background: {t['botao_circular_hover']};
       color: {t['texto']};
     }}
