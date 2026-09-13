@@ -1205,7 +1205,13 @@ class DelegadoProdutos(QStyledItemDelegate):
         lado = self.LADO_MINIATURA_PX
         if not produto.ativo:
             pintor.setOpacity(0.45)
+        # Recortada na caixa dela, além de o cache já devolver o lado exato: a
+        # foto 120x67 que invadia o nome (2026-09-13) vinha de o pixmap ser
+        # maior que a caixa e ninguém cortar. Duas travas, porque quem pagava o
+        # defeito era o nome do produto, que é o que se procura na linha.
+        pintor.setClipRect(colunas.miniatura)
         pintor.drawPixmap(colunas.miniatura.topLeft(), obter_pixmap(produto.imagem_path, lado, produto.nome))
+        pintor.setClipping(False)
         pintor.setOpacity(1.0)
 
         # Nome e selos.

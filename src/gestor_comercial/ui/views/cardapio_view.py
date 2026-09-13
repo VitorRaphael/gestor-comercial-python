@@ -85,7 +85,11 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
-from gestor_comercial.services.imagem_service import processar_imagem_produto, remover_thumbnail
+from gestor_comercial.services.imagem_service import (
+    FILTRO_DO_SELETOR,
+    processar_imagem_produto,
+    remover_thumbnail,
+)
 from gestor_comercial.services.texto import chave_de_agrupamento
 from gestor_comercial.ui.formatacao import (
     formatar_para_campo,
@@ -2123,6 +2127,11 @@ class _ProdutoDialog(QDialog):
         self._botao_remover_imagem = QPushButton("Remover imagem")
         self._botao_remover_imagem.clicked.connect(self._remover_imagem)
         botoes_imagem.addWidget(self._botao_remover_imagem)
+        # Aviso de foto recusada, na própria linha da foto e sem QMessageBox:
+        # um modal por cima do cadastro tirava o foco do formulário para dizer
+        # uma coisa que cabe numa linha — e o que foi digitado fica onde está.
+        self._erro_imagem = _criar_rotulo_erro()
+        botoes_imagem.addWidget(self._erro_imagem)
         linha_imagem.addLayout(botoes_imagem)
         linha_imagem.addStretch()
         layout.addLayout(linha_imagem)
@@ -2227,16 +2236,21 @@ class _ProdutoDialog(QDialog):
             self,
             "Escolher imagem do produto",
             "",
-            "Imagens (*.png *.jpg *.jpeg *.webp *.bmp)",
+            FILTRO_DO_SELETOR,
         )
         if not caminho:
             return
         try:
             novo_nome = processar_imagem_produto(caminho)
         except ValueError as erro:
-            QMessageBox.warning(self, "Imagem inválida", str(erro))
+            # O service já deixou o motivo técnico no log; aqui vai só a frase.
+            # A foto que estava (se havia) continua valendo, e nenhum campo do
+            # formulário é tocado.
+            self._erro_imagem.setText(str(erro))
+            self._erro_imagem.setVisible(True)
             return
 
+        self._erro_imagem.setVisible(False)
         # A foto antiga (se houver) fica marcada pra remoção do disco só
         # quando o modal for aceito — se o usuário cancelar o diálogo depois
         # de trocar a foto, a antiga continua valendo e nada é apagado aqui.
@@ -2246,6 +2260,7 @@ class _ProdutoDialog(QDialog):
         self._atualizar_preview_imagem()
 
     def _remover_imagem(self) -> None:
+        self._erro_imagem.setVisible(False)
         if self._imagem_path_processada:
             self._imagem_path_para_remover = self._imagem_path_processada
         self._imagem_path_processada = None

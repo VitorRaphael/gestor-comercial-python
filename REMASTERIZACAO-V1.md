@@ -3748,6 +3748,131 @@ que tinha deixado de ser combo).
 - **Os dois formulários de fábrica que sobraram no Cardápio:** `_ProdutoDialog`
   e a exclusão de categoria no `QMessageBox` do sistema.
 
+### 9.16 A foto do produto: formato recusado na porta, miniatura presa na caixa ✅ CONCLUÍDO — 2026-09-13
+
+Relato do Vitor com captura do bloco "Sucos e Vitaminas" (subcategoria de
+Bebidas): as fotos saíam cada uma de um tamanho, a Limonada Suíça e o SucoAcerola
+eram pintados **por cima do próprio nome**, e escolher um `.avif` dava erro.
+
+#### O diagnóstico, medido antes de mexer
+
+- **O estouro não era do delegado, era do cache.** `processar_imagem_produto`
+  guardava a miniatura "cabendo em 120x120" com a proporção original, e o
+  `thumbnail_cache` a **escalava** com `KeepAspectRatioByExpanding` — que enche
+  o quadrado pelo lado menor e deixa o maior passar, sem cortar (só o formato
+  círculo cortava). No banco real, **18 das 35 miniaturas em disco não eram
+  quadradas** (120x67, 67x120, 93x120...). A 36px a 120x67 virava 64x36, e os
+  28px de sobra caíam no começo do nome; a 67x120 passava do divisor da linha.
+- **O `.avif` não era do Pillow**: o pipeline é `QImage` desde o começo (sem
+  Pillow como dependência, decisão registrada no módulo). O Qt do projeto não lê
+  AVIF nem HEIC ("Unsupported image format"), a leitura voltava nula e a tela
+  abria um `QMessageBox` com o caminho inteiro do arquivo. O filtro do seletor
+  ainda oferecia `*.bmp`.
+- **Um terceiro defeito, achado pela sonda do pipeline e não relatado:** PNG com
+  fundo transparente virava **quadrado preto** no JPEG salvo. JPEG não tem alfa,
+  e o Qt grava a cor que estava por baixo do transparente — (0, 0, 0).
+
+#### O que foi feito
+
+- **`ler_quadrado_central(caminho, lado)`** em `services/imagem_service.py`: o
+  enquadramento do `ImageOps.fit` (escala pelo lado menor, corta o excesso igual
+  dos dois lados), pedido ao **leitor** com `setClipRect` + `setScaledSize`. Nunca
+  devolve outro tamanho — é contrato. Quem grava a foto nova e o cache usam a
+  mesma função, e por isso **as miniaturas antigas em disco ficaram certas sem
+  regravar nenhuma**.
+- **Miniatura em disco exatamente 120x120**, achatada sobre branco se tiver alfa.
+  120 e não os 44 do pedido: a mesma miniatura serve a prévia de 80px do cadastro
+  e os cinco lados que as telas pedem (28, 32, 36, 40, 80), e em tela de 125% os
+  36px lógicos já são 45 físicos. Continua JPEG (1-6 KB): WebP com alfa seria
+  melhor para o transparente, mas dependeria do plugin `qwebp` no `.exe`, que a
+  máquina limpa ainda não conferiu.
+- **Formatos homologados num lugar só**: `EXTENSOES_ACEITAS` (png, jpg, jpeg,
+  webp), e o `FILTRO_DO_SELETOR` sai dela — separado por espaço, que é a grafia do
+  Qt (`*.png,` com vírgula seria um padrão que não casa com nada). **O filtro não
+  é barreira**: no seletor nativo do Windows dá para digitar `*.*` ou colar um
+  caminho, então a extensão é conferida no service, sem diferenciar maiúsculas
+  (`FOTO.JPG` de câmera passa). Um `.avif` renomeado para `.jpg` passa pela lista
+  e é recusado pela leitura — com a **mesma frase**.
+- **Recusa discreta**: `ValueError("Formato inválido. Selecione PNG, JPG ou
+  WEBP.")` para a tela, e o caminho com o motivo técnico no log do app
+  (`logger_do_app().exception`, o `gestor.log` rotativo da caixa-preta — não um
+  `error.log` paralelo, que partiria o registro em dois). No `_ProdutoDialog` o
+  aviso é uma linha `campoErroRotulo` ao lado dos botões da foto, **sem
+  `QMessageBox`**; nome, preço, custo e descrição ficam como estavam, a foto que
+  já estava continua valendo e não é marcada para apagar.
+- **Cartão com cantos de 8px e borda `borda_card`**, na foto e no placeholder,
+  com a mesma silhueta (teste confere os pixels de canto de um contra o outro).
+  O raio tem teto de um quarto do lado, para o 28px do ranking não virar círculo.
+  O círculo do "Adicionar item" ficou como era, sem borda.
+- **Placeholder**: a letra passou de `texto_fraquissimo` para `texto_fraco`, que
+  no Escuro é exatamente o `#A1A1AA` pedido. O fundo segue `superficie_2`
+  (`#1C1C1A`, a 2 pontos do `#1E1E1C` do pedido): o único token com aquele hex é
+  `tecla_numerica_bg`, e pegá-lo seria o empréstimo de cor do §9.5.
+- **Segunda trava no delegado do Cardápio**: `setClipRect` na caixa da miniatura.
+  Com o cache consertado ela não muda um pixel, e existe para o dia em que alguém
+  devolver um pixmap maior — o que pagava o defeito era o nome do produto.
+
+#### O que o pedido escrito dizia e não foi seguido ao pé da letra
+
+- **Pillow e `ImageOps.fit`** viraram `QImageReader`, com o mesmo enquadramento.
+  Trocar de biblioteca não seria cirúrgico, e o leitor do Qt dá uma coisa que o
+  `Image.open` + `fit` não dá sem `draft()`: o JPEG já é decodificado na escala
+  reduzida. Medido (2 rodadas, memória privada do processo, foto 4000x3000):
+  escolher a foto levava o processo de **64 → 110 MB** no pipeline antigo, e vai
+  de **65 → 68 MB** no novo.
+- **"LRU ou limite de 100 itens"**: o LRU já existia, com teto 200, e ficou.
+  O cardápio real tem 113 produtos e duas telas com lados diferentes; com 100,
+  rolar a lista inteira despejaria o que acabou de ser pintado e voltaria ao
+  disco a cada repintura. A 36px um pixmap tem 5,2 KB — o cache cheio fica perto
+  de 1 MB.
+- **"`deleteLater()` nos widgets de imagem ao trocar de categoria"**: desde o
+  §9.11 o Cardápio **não tem widget por linha** (é delegado, com
+  `test_nenhuma_linha_das_duas_listas_e_widget`). Não há o que destruir, e voltar
+  a ter widget para poder destruí-lo seria a regressão. Comanda e ranking do
+  Dashboard continuam com `QLabel` de tamanho fixo, que já recortava.
+- **44x44 e 14px de margem**: a geometria da linha (36px + 12px) não mudou. Na
+  captura do Vitor, a 125%, ela já mede 45 e 15 pixels físicos — os números do
+  pedido são os da própria tela.
+
+#### Conferência
+
+- suíte **1773** (de 1698), 0 falhas, **75 testes novos**: 59 em
+  `tests/ui/test_foto_do_produto.py` (lado exato do cache nas 5 proporções do
+  banco real × 5 lados × 2 recortes, cantos, placeholder por arquivo ilegível,
+  silhueta, a foto deitada pintada numa linha real do delegado, a trava do clip
+  sozinha com um pixmap 64x36 injetado, e o cadastro) e 16 em
+  `tests/unit/test_imagem_service.py`;
+- os testes de pixel da linha têm **duas asserções**: que a foto foi pintada, e
+  que não saiu da caixa — sem a primeira, um `paint` que estourasse (o
+  `nao_deixa_escapar` engole) passaria verde sem ter pintado nada;
+- **13 mutações, as 13 reprovam**: sem checagem de extensão, recorte no canto
+  (0,0), sem recorte, sem achatar o alfa, sem log, `.bmp` de volta na lista, o
+  cache do defeito original, foto sem cantos, placeholder com o raio antigo,
+  delegado sem clip, `QMessageBox` de volta, aviso que não some no sucesso e o
+  filtro literal antigo;
+- **renderização com o banco e as fotos reais** (cópias na pasta temporária),
+  Bebidas rolada até "Sucos e Vitaminas", código de antes e de depois, nos dois
+  temas: o "antes" reproduz a captura do Vitor, o "depois" tem as seis fotos no
+  mesmo quadrado e os nomes alinhados;
+- bancada visual a 1366x738 contra o código anterior: **18 das 24 telas idênticas
+  byte a byte**; as 6 que diferem (Cardápio, Comanda e Dashboard, nos dois temas)
+  mudam **só na coluna das miniaturas** — Cardápio x=614..649, Comanda
+  x=295..326, Dashboard x=741..768 —, que é o placeholder com o raio de 8px e a
+  letra nova.
+
+#### Ficou de fora, de propósito
+
+- **Regravar as 35 miniaturas antigas.** O recorte na leitura já as conserta na
+  tela. As que vieram de PNG transparente continuam com o fundo preto gravado no
+  JPEG até a foto ser escolhida de novo.
+- **Tirar o fundo branco das fotos de catálogo** (Suco de Laranja, Jarra 1L). É
+  a foto, não o pipeline; a borda e os cantos agora dizem onde ela acaba.
+- **Miniatura nítida em tela de 125%** (`devicePixelRatio`): o pixmap de 36px é
+  ampliado para 45 pixels físicos. Não foi pedido, e o monitor do food truck é o
+  de 1366x768 a 100%.
+- **O `_ProdutoDialog` em cartão** — continua o último formulário de fábrica do
+  Cardápio; aqui só ganhou o aviso em linha.
+
 ---
 
 ## 10. As melhores mudanças que o programa teve — em português de balcão

@@ -17,15 +17,28 @@ antes da hora — não há nenhum ciclo de vida automático além do LRU.
 from __future__ import annotations
 
 from collections import OrderedDict
+from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QFont, QPainter, QPainterPath, QPen, QPixmap
 
-from gestor_comercial.services.imagem_service import resolver_caminho_thumbnail
+from gestor_comercial.services.imagem_service import ler_quadrado_central, resolver_caminho_thumbnail
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.theme.cores import cor_do_token
 
+# 200, e não 100: o cardápio real tem 113 produtos, e o Cardápio (36px) e o
+# modal de lançamento (40px) são duas entradas por produto. Com 100, rolar a
+# lista inteira despejaria o que acabou de ser pintado e voltaria ao disco a
+# cada repintura — o Celeron pagaria em CPU o que se economizou de RAM. E a RAM
+# é pouca: a 36px um pixmap tem 36x36x4 = 5,2 KB, e o cache cheio fica perto de
+# 1 MB (a 80px, a prévia do cadastro, ~5 MB no pior caso teórico).
 LIMITE_ENTRADAS = 200
+
+# Raio dos cantos do recorte em cartão — o mesmo na foto e no placeholder, para
+# produto com e sem foto terem a mesma silhueta na lista. 8px é o do pedido; o
+# teto de um quarto do lado é para miniatura pequena (28px no ranking do
+# dashboard) não virar um círculo.
+RAIO_CARTAO_MAXIMO_PX = 8.0
 
 # Os dois recortes que o app pede hoje. `CARTAO` é o retângulo arredondado que
 # o Cardápio e a tabela da comanda sempre usaram; `CIRCULO` entrou com o modal
@@ -63,16 +76,23 @@ def obter_pixmap(
     nome_produto: str = "",
     formato: str = FORMATO_CARTAO,
 ) -> QPixmap:
-    """`QPixmap` quadrado de `tamanho`x`tamanho` para uma foto de produto.
+    """`QPixmap` de EXATAMENTE `tamanho`x`tamanho` para uma foto de produto.
 
-    Sem `imagem_path` (ou arquivo ausente em disco), devolve um placeholder
-    vetorial leve gerado sob demanda — não bate no disco nem lança exceção.
+    Sem `imagem_path` (ou arquivo ausente/ilegível em disco), devolve um
+    placeholder vetorial leve gerado sob demanda — não lança exceção.
+
+    O lado exato é contrato, e não detalhe: quem pinta a linha reserva um
+    quadrado e desenha o nome logo depois dele. Até 2026-09-13 a foto era só
+    ESCALADA (`KeepAspectRatioByExpanding`), sem corte — uma miniatura 120x67
+    em disco saía 64x36, e os 28px de sobra eram pintados em cima do nome.
+    Agora ela sai de `ler_quadrado_central`, o mesmo enquadramento de quem grava
+    a foto nova, e isso conserta também as miniaturas antigas sem regravá-las.
 
     `formato` escolhe o recorte: `FORMATO_CARTAO` (padrão, retângulo
-    arredondado) ou `FORMATO_CIRCULO` (avatar redondo do modal de lançamento).
-    O recorte é feito UMA vez, na hora de entrar no cache — quem pinta a linha
-    da lista recebe o pixmap pronto e não gasta `QPainterPath` por repaint, que
-    é o que o Celeron do food truck não tem para dar.
+    arredondado com borda sutil) ou `FORMATO_CIRCULO` (avatar redondo do modal
+    de lançamento). O recorte é feito UMA vez, na hora de entrar no cache — quem
+    pinta a linha da lista recebe o pixmap pronto e não gasta `QPainterPath` por
+    repaint, que é o que o Celeron do food truck não tem para dar.
     """
     _descartar_se_o_tema_virou()
     sigla = _sigla(nome_produto, formato)
@@ -82,22 +102,9 @@ def obter_pixmap(
         _cache.move_to_end(chave)
         return pixmap_cacheado
 
-    caminho = resolver_caminho_thumbnail(imagem_path)
-    if caminho is None:
+    pixmap = _foto_recortada(resolver_caminho_thumbnail(imagem_path), tamanho, formato)
+    if pixmap is None:
         pixmap = _gerar_placeholder(tamanho, sigla, formato)
-    else:
-        pixmap_disco = QPixmap(str(caminho))
-        if pixmap_disco.isNull():
-            pixmap = _gerar_placeholder(tamanho, sigla, formato)
-        else:
-            pixmap = pixmap_disco.scaled(
-                tamanho,
-                tamanho,
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            if formato == FORMATO_CIRCULO:
-                pixmap = _recortar_em_circulo(pixmap, tamanho)
 
     _cache[chave] = pixmap
     _cache.move_to_end(chave)
@@ -112,10 +119,10 @@ def limpar() -> None:
 
 
 def _descartar_se_o_tema_virou() -> None:
-    """Joga fora os placeholders pintados com a paleta anterior.
+    """Joga fora as miniaturas pintadas com a paleta anterior.
 
-    O placeholder usa `superficie_2`, `borda_card` e `texto_fraquissimo` do
-    tema; a foto de verdade não depende de tema nenhum. Sem esta checagem, o
+    O placeholder usa `superficie_2`, `borda_card` e `texto_fraco` do tema, e a
+    foto em cartão ganhou a borda `borda_card` também. Sem esta checagem, o
     cardápio ficava com os quadrados escuros no meio do tema claro até alguém
     reiniciar o app — o §3.10 registrou isso junto com o bug da chave.
 
@@ -144,25 +151,57 @@ def _sigla(nome_produto: str, formato: str = FORMATO_CARTAO) -> str:
     return (nome_produto or "?").strip()[:letras].upper() or "?"
 
 
-def _recortar_em_circulo(pixmap: QPixmap, tamanho: int) -> QPixmap:
-    """Devolve a foto recortada num círculo, com o resto transparente."""
+def _foto_recortada(caminho: Path | None, tamanho: int, formato: str) -> QPixmap | None:
+    """A foto em disco já no recorte pedido, ou `None` para cair no placeholder.
+
+    Arquivo ilegível vira placeholder calado, como sempre foi: a foto é
+    enfeite da linha, e um JPEG corrompido na pasta não pode custar a lista.
+    """
+    if caminho is None:
+        return None
+    try:
+        quadrada = QPixmap.fromImage(ler_quadrado_central(caminho, tamanho))
+    except ValueError:
+        return None
+
     recortado = QPixmap(tamanho, tamanho)
     recortado.fill(Qt.GlobalColor.transparent)
-
     painter = QPainter(recortado)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    caminho = QPainterPath()
-    caminho.addEllipse(QRectF(0, 0, tamanho, tamanho))
-    painter.setClipPath(caminho)
-    # `KeepAspectRatioByExpanding` pode devolver um lado maior que `tamanho`;
-    # centralizar evita que o recorte pegue só o canto esquerdo da foto.
-    painter.drawPixmap(
-        (tamanho - pixmap.width()) // 2,
-        (tamanho - pixmap.height()) // 2,
-        pixmap,
-    )
+    contorno = QPainterPath()
+    if formato == FORMATO_CIRCULO:
+        contorno.addEllipse(QRectF(0, 0, tamanho, tamanho))
+    else:
+        contorno.addRoundedRect(_retangulo(tamanho), _raio_cartao(tamanho), _raio_cartao(tamanho))
+    painter.setClipPath(contorno)
+    painter.drawPixmap(0, 0, quadrada)
+    if formato == FORMATO_CARTAO:
+        # A borda do placeholder, na foto também: sem ela a foto de fundo
+        # branco era um quadrado cru no tema escuro, sem contorno que dissesse
+        # onde a miniatura acaba. O círculo do modal fica sem, como era.
+        painter.setClipping(False)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(_caneta_da_borda())
+        painter.drawPath(contorno)
     painter.end()
     return recortado
+
+
+def _retangulo(tamanho: int) -> QRectF:
+    """A caixa do recorte em cartão: 1px para dentro, onde a borda assenta."""
+    return QRectF(1.0, 1.0, tamanho - 2.0, tamanho - 2.0)
+
+
+def _raio_cartao(tamanho: int) -> float:
+    return min(RAIO_CARTAO_MAXIMO_PX, tamanho / 4.0)
+
+
+def _caneta_da_borda() -> QPen:
+    # `cor_do_token`, e não `QColor` direto: no tema escuro `borda_card` é
+    # `rgba(255, 255, 255, 0.08)`, grafia que o `QColor` não entende — a borda
+    # saía preta opaca em vez do contorno claro sutil que o token descreve.
+    tokens = ThemeController.instancia().tokens_atuais
+    return QPen(cor_do_token(tokens.get("borda_card", "#242220")), 1)
 
 
 def _gerar_placeholder(tamanho: int, sigla: str, formato: str = FORMATO_CARTAO) -> QPixmap:
@@ -171,6 +210,11 @@ def _gerar_placeholder(tamanho: int, sigla: str, formato: str = FORMATO_CARTAO) 
     Letras iniciais em vez de ícone de prato/garfo desenhado à mão: menos
     código de vetor pra manter e já ajuda a diferenciar produtos na lista mesmo
     sem foto (ex.: "X" de X-Burger, "CO" de Coca-Cola).
+
+    As cores são tokens, e não os hex do pedido cravados: no tema escuro
+    `superficie_2` é #1C1C1A (o pedido dizia #1E1E1C, a 2 pontos de distância) e
+    `texto_fraco` é exatamente o #A1A1AA pedido — mas cravar os hex deixaria um
+    quadrado escuro no meio do tema claro (a armadilha do §3.15).
     """
     tokens = ThemeController.instancia().tokens_atuais
     pixmap = QPixmap(tamanho, tamanho)
@@ -179,19 +223,13 @@ def _gerar_placeholder(tamanho: int, sigla: str, formato: str = FORMATO_CARTAO) 
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-    margem = 1.0
-    retangulo = QRectF(margem, margem, tamanho - 2 * margem, tamanho - 2 * margem)
-
-    # `cor_do_token`, e não `QColor` direto: no tema escuro `borda_card` é
-    # `rgba(255, 255, 255, 0.08)`, grafia que o `QColor` não entende — a borda
-    # saía preta opaca em vez do contorno claro sutil que o token descreve.
+    retangulo = _retangulo(tamanho)
     painter.setBrush(cor_do_token(tokens.get("superficie_2", "#1C1C1A")))
-    painter.setPen(QPen(cor_do_token(tokens.get("borda_card", "#242220")), 1))
+    painter.setPen(_caneta_da_borda())
     if formato == FORMATO_CIRCULO:
         painter.drawEllipse(retangulo)
     else:
-        raio = max(4, tamanho // 8)
-        painter.drawRoundedRect(retangulo, raio, raio)
+        painter.drawRoundedRect(retangulo, _raio_cartao(tamanho), _raio_cartao(tamanho))
 
     fonte = QFont()
     # Duas letras num círculo do mesmo lado precisam de corpo menor que uma
@@ -200,7 +238,7 @@ def _gerar_placeholder(tamanho: int, sigla: str, formato: str = FORMATO_CARTAO) 
     fonte.setPixelSize(max(9, int(tamanho * proporcao)))
     fonte.setBold(True)
     painter.setFont(fonte)
-    painter.setPen(cor_do_token(tokens.get("texto_fraquissimo", "#71717A")))
+    painter.setPen(cor_do_token(tokens.get("texto_fraco", "#A1A1AA")))
     painter.drawText(retangulo, Qt.AlignmentFlag.AlignCenter, sigla)
 
     painter.end()
