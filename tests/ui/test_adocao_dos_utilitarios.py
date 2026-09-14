@@ -42,8 +42,12 @@ ARQUIVO_DO_HELPER = "modais.py"
 # para a que tem produtos dentro, o aviso de bloqueio seguido do cartão de PIN
 # da Senha Master (os dois últimos são sites distintos do mesmo gesto); +2 com a
 # exclusão de CATEGORIA do §9.14, que ganhou os mesmos dois caminhos (eram 3
-# sites novos no lugar do único `QMessageBox` que havia ali).
-SITES_ESPERADOS = 40
+# sites novos no lugar do único `QMessageBox` que havia ali); −2 com o cartão de
+# exclusão do §9.18: saíram os seis sites da subcategoria e da categoria (duas
+# caixas e um PIN cada) e entraram quatro — um cartão por entidade, contando o
+# produto, cujo "Sim/Não" era `QMessageBox.question` e não passava por aqui, e
+# UM PIN só (`_pedir_senha_master`), que os três cartões chamam.
+SITES_ESPERADOS = 38
 
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
 

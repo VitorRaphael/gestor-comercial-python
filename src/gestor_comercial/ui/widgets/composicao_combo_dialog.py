@@ -107,6 +107,7 @@ from gestor_comercial.ui.widgets.cardapio_cartoes import (
     GLIFO_LIXEIRA,
     GLIFO_MAIS,
     GLIFO_VISTO,
+    BotaoComGlifo,
     GlifoSolto,
     RotuloComReticencias,
     desenhar_glifo,
@@ -389,43 +390,6 @@ class LinhaDoCombo(QFrame):
         self._limpo = True
         self._botao_menos.clicked.disconnect(self._passo_clicado)
         self._botao_mais.clicked.disconnect(self._passo_clicado)
-
-
-class BotaoComGlifo(QPushButton):
-    """`QPushButton` com um glifo desenhado à esquerda do texto.
-
-    O QSS reserva o espaço com `padding-left` e esta classe pinta o glifo nele,
-    na cor do token do estado atual — ligado ou desligado. `setIcon` com um
-    pixmap exigiria refazer o ícone a cada troca de tema, e assinar o sinal do
-    `ThemeController` é justamente o que o §3.14 evita.
-    """
-
-    LADO_GLIFO_PX = 13
-    X_GLIFO_PX = 16
-
-    def __init__(
-        self,
-        texto: str,
-        glifo: str,
-        token_ligado: str,
-        token_desligado: str,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(texto, parent)
-        self._glifo = glifo
-        self._token_ligado = token_ligado
-        self._token_desligado = token_desligado
-
-    @nao_deixa_escapar()
-    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
-        super().paintEvent(event)
-        tokens = ThemeController.instancia().tokens_atuais
-        token = self._token_ligado if self.isEnabled() else self._token_desligado
-        lado = float(self.LADO_GLIFO_PX)
-        alvo = QRectF(float(self.X_GLIFO_PX), (self.height() - lado) / 2.0, lado, lado)
-        pintor = QPainter(self)
-        desenhar_glifo(pintor, self._glifo, alvo, cor_do_token(tokens[token]), 2.0)
-        pintor.end()
 
 
 # ---------------------------------------------------------------------------

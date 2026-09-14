@@ -284,6 +284,41 @@ TEMA_ESCURO: dict[str, str] = {
     "composicao_remover_borda": "rgba(239, 68, 68, 0.2)",
     "composicao_remover_hover": "#261517",
     "composicao_remover_texto": "#EF4444",
+    # ---- Confirmação de exclusão (`confirmacao_exclusao_dialog.py`, §9.18) ----
+    # Família PRÓPRIA, pela lição do §9.5, e aqui ela pesa mais que em qualquer
+    # outro cartão: `pin_exclusao_*`, `composicao_remover_*`, `mov_sangria_*` e
+    # `cardapio_excluir_*` coincidem em hex com metade destes, e cada um veste
+    # uma coisa diferente. O cartão que pergunta "tem certeza?" antes de apagar
+    # não pode mudar de cor porque alguém ajustou o botão de remover componente.
+    #
+    # Dois tons de aviso, e é o NÍVEL DE PROTEÇÃO que escolhe, não a entidade:
+    # `_perigo` (coral) é o do que sai num clique — a exclusão permanente e a
+    # bloqueada; `_protegida` (âmbar) é o do que passa pela Senha Master, e que
+    # arquiva o que tem venda em vez de apagar. As três imagens do mockup são
+    # exatamente essa divisão.
+    "exclusao_badge_bg": "#2D1517",
+    "exclusao_badge_borda": "rgba(239, 68, 68, 0.25)",
+    "exclusao_badge_glifo": "#EF4444",
+    "exclusao_secao": "#F87171",
+    # O cartão do item selecionado é REBAIXADO em relação ao cartão, como o
+    # visor de valor (`visor_valor_bg`): é informação, não campo.
+    "exclusao_item_bg": "#111110",
+    "exclusao_item_borda": "rgba(255, 255, 255, 0.06)",
+    "exclusao_perigo_bg": "#211214",
+    "exclusao_perigo_borda": "rgba(239, 68, 68, 0.2)",
+    "exclusao_perigo_glifo": "#EF4444",
+    "exclusao_protegida_bg": "#201911",
+    "exclusao_protegida_borda": "rgba(245, 158, 11, 0.25)",
+    "exclusao_protegida_glifo": "#F59E0B",
+    # O coral do mockup, e não o `#DC2626` chapado do rodapé do Cardápio: o
+    # botão fica sobre o cartão escuro, e o Ferrari ali lê como marrom.
+    "exclusao_acao_bg": "#EF4444",
+    "exclusao_acao_hover": "#F87171",
+    "exclusao_acao_texto": "#FFFFFF",
+    # Bloqueado continua VERMELHO, só apagado (a Foto 3): cinza diria "não há o
+    # que fazer aqui", e o que o cartão diz é "há, mas não por este botão".
+    "exclusao_acao_desligada_bg": "#5A2528",
+    "exclusao_acao_desligada_texto": "rgba(255, 255, 255, 0.45)",
     "campo_erro_texto": "#f43f5e",
     "campo_erro_bg": "#fdecea",
     # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`,
@@ -575,6 +610,27 @@ TEMA_CLARO: dict[str, str] = {
     "composicao_remover_borda": "#FECACA",
     "composicao_remover_hover": "#FEE2E2",
     "composicao_remover_texto": "#DC2626",
+    # ---- Confirmação de exclusão (§9.18) ----
+    # Ver o comentário gêmeo em TEMA_ESCURO. No claro o arranjo é o pastel com
+    # o glifo escuro (o dos badges de gaveta, §9.6), e o botão usa o `#DC2626`:
+    # o coral do escuro sobre branco não tem contraste para texto branco.
+    "exclusao_badge_bg": "#FEE2E2",
+    "exclusao_badge_borda": "#FECACA",
+    "exclusao_badge_glifo": "#DC2626",
+    "exclusao_secao": "#DC2626",
+    "exclusao_item_bg": "#FAF9F5",
+    "exclusao_item_borda": "#E2E1D9",
+    "exclusao_perigo_bg": "#FEF2F2",
+    "exclusao_perigo_borda": "#FECACA",
+    "exclusao_perigo_glifo": "#DC2626",
+    "exclusao_protegida_bg": "#FFFBEB",
+    "exclusao_protegida_borda": "#FDE68A",
+    "exclusao_protegida_glifo": "#B45309",
+    "exclusao_acao_bg": "#DC2626",
+    "exclusao_acao_hover": "#B91C1C",
+    "exclusao_acao_texto": "#FFFFFF",
+    "exclusao_acao_desligada_bg": "#FCA5A5",
+    "exclusao_acao_desligada_texto": "rgba(255, 255, 255, 0.8)",
     "campo_erro_texto": "#DC2626",
     "campo_erro_bg": "#FEE2E2",
     # ---- Modais em cartao (`pin_pad_dialog.py`, `funcionario_dialog.py`,

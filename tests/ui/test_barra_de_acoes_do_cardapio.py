@@ -15,8 +15,10 @@ O que esta suíte cobra:
    de contexto e do atalho de teclado, que é o que impede os caminhos de
    divergirem;
 3. **as barreiras da exclusão** — subdivisão vazia sai com uma confirmação;
-   com produtos dentro é recusada, e só a Senha Master (Nível 3, §9.10) libera
-   a cascata;
+   com produtos dentro, só a Senha Master (Nível 3, §9.10) libera a cascata.
+   Desde o §9.18 as duas saem do MESMO cartão (`ConfirmacaoExclusaoDialog`), o
+   PIN abre por cima dele, e o produto ganhou o mesmo par — apagado num clique
+   sem histórico, arquivado com a Senha Master com histórico;
 4. **o bloco vazio da direita é clicável** — era o único jeito de a subdivisão
    sem produto nenhum entrar no contexto pela direita;
 5. **nada sobra na memória** — o RNF do Celeron, numa tela que fica aberta o
@@ -43,6 +45,8 @@ import gestor_comercial.ui.views.cardapio_view as modulo_da_tela
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.views.cardapio_view import _SUB_TODAS, CardapioView, TipoDeAlvo
 from gestor_comercial.ui.widgets.cardapio_cartoes import TipoDeItem
+from gestor_comercial.ui.widgets.cartao_modal import Backdrop
+from gestor_comercial.ui.widgets.confirmacao_exclusao_dialog import ConfirmacaoExclusaoDialog
 from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
 
 from tests.conftest import PIN_MASTER, PIN_OPERACIONAL
@@ -204,39 +208,57 @@ def _teclar(dialogo: PinPadDialog, texto: str) -> None:
         )
 
 
-def _clicar_no_botao(caixa: QMessageBox, texto: str) -> None:
-    for botao in caixa.buttons():
-        if botao.text().replace("&", "") == texto:
-            botao.click()
-            return
-    raise AssertionError(f"'{texto}' não está em {[b.text() for b in caixa.buttons()]}")
+def _leitura_do_cartao(cartao: ConfirmacaoExclusaoDialog) -> str:
+    """Tudo o que o gerente lê no cartão, numa linha — é contra isto que os
+    testes conferem a frase, o nível e o botão."""
+    return " | ".join(
+        (
+            cartao._secao.text(),
+            cartao._titulo.text(),
+            cartao._nome.text(),
+            cartao._aviso_titulo.text(),
+            cartao._aviso_texto.text(),
+            cartao._botao_confirmar.text(),
+        )
+    )
 
 
 def encenar(qapp, tela: CardapioView, roteiro: list[tuple[str, str]], acao) -> list[str]:
     """Roda `acao` respondendo aos diálogos que ela abrir, na ordem do roteiro.
 
-    Cada passo é `("caixa", "Excluir")` — clicar num botão de `QMessageBox` — ou
-    `("pin", PIN_MASTER)` — digitar e confirmar no cartão de PIN.
+    Cada passo é um de:
+
+    * `("cartao", "confirmar")` / `("cartao", "cancelar")` — clicar no botão
+      vermelho ou no Cancelar do cartão de exclusão (§9.18);
+    * `("pin", PIN_MASTER)` — digitar e confirmar no cartão de PIN;
+    * `("pin", "fechar")` — desistir do PIN pelo ✕.
 
     Um `QTimer` repetindo em intervalo zero, e não um `singleShot`: os diálogos
-    deste fluxo são **encadeados** (o aviso abre o PIN), e cada `exec()` roda o
+    deste fluxo são **encadeados** (o cartão abre o PIN), e cada `exec()` roda o
     próprio laço de eventos — um disparo único responderia ao primeiro e
     deixaria o segundo pendurado, travando a suíte.
 
+    **O clique no cartão é agendado, e não feito dentro do relógio.** Desde o
+    §9.18 o PIN abre POR CIMA do cartão, dentro do clique: clicar de dentro de
+    `proximo` poria o `exec()` do PIN dentro do disparo do relógio, e o Qt não
+    dispara de novo um timer cujo disparo ainda não terminou — o relógio pararia
+    com o PIN aberto. `clique_pendente` segura o relógio até o clique sair.
+
     Devolve a lista do que realmente apareceu. Sem ela, um dia em que uma
     barreira sumisse o teste passaria verde: o roteiro simplesmente não seria
-    consumido, e a exclusão aconteceria assim mesmo.
+    consumido, e a exclusão aconteceria assim mesmo. Um `QMessageBox` também é
+    procurado: se algum voltar a aparecer, é fechado e acusado como INESPERADO.
     """
     vistos: list[str] = []
     pendentes = list(roteiro)
     # Quantas voltas do relógio um diálogo aberto pode ficar sem casar com o
     # passo esperado antes de ser fechado à força. Sem este teto o helper
-    # TRAVA — e travou: uma mutação que tirava o aviso de bloqueio fazia o
-    # cartão de PIN abrir onde o roteiro esperava um `QMessageBox`, os dois
-    # ramos abaixo não casavam, e o relógio girava para sempre dentro do
-    # `exec()`. Um teste que pendura a suíte é pior que um teste que falha.
+    # TRAVA — e travou (§9.14): uma mutação que tirava o aviso fazia o PIN abrir
+    # onde o roteiro esperava outro diálogo, e o relógio girava para sempre
+    # dentro do `exec()`. Um teste que pendura a suíte é pior que um que falha.
     TETO_DE_ESPERA = 200
     parado = 0
+    clique_pendente = False
 
     def visivel(tipo) -> list:
         return [d for d in tela.findChildren(tipo) if d.isVisible()]
@@ -245,33 +267,52 @@ def encenar(qapp, tela: CardapioView, roteiro: list[tuple[str, str]], acao) -> l
         vistos.append("INESPERADO")
         dialogo.reject()
 
+    def agendar(botao) -> None:
+        nonlocal clique_pendente
+        clique_pendente = True
+
+        def clicar() -> None:
+            nonlocal clique_pendente
+            clique_pendente = False
+            botao.click()
+
+        QTimer.singleShot(0, clicar)
+
     def proximo() -> None:
         nonlocal parado
-        caixas, pins = visivel(QMessageBox), visivel(PinPadDialog)
-        abertos = caixas + pins
+        if clique_pendente:
+            return
+        caixas = visivel(QMessageBox)
+        cartoes, pins = visivel(ConfirmacaoExclusaoDialog), visivel(PinPadDialog)
+        # O PIN por último: aberto por cima do cartão, é ele que está na frente.
+        abertos = caixas + cartoes + pins
         if not abertos:
             parado = 0
             return
-        if not pendentes:
+        if caixas or not pendentes:
             # Diálogo que o roteiro não previu: fecha e deixa o rastro na lista,
             # para a asserção do teste acusar.
-            soltar(abertos[-1])
+            soltar(abertos[-1] if not caixas else caixas[-1])
             return
         tipo, valor = pendentes[0]
-        if tipo == "caixa" and caixas:
-            parado = 0
-            pendentes.pop(0)
-            vistos.append(caixas[-1].text())
-            _clicar_no_botao(caixas[-1], valor)
-        elif tipo == "pin" and pins:
+        if tipo == "pin" and pins:
             parado = 0
             pendentes.pop(0)
             pin = pins[-1]
             vistos.append(pin.windowTitle())
+            if valor == "fechar":
+                pin._botao_fechar.click()
+                return
             _teclar(pin, valor)
             pin._confirmar()
             if pin.result() != QDialog.DialogCode.Accepted:
                 pin.reject()  # PIN recusado: o teste não pode ficar preso no exec()
+        elif tipo == "cartao" and cartoes and not pins:
+            parado = 0
+            pendentes.pop(0)
+            cartao = cartoes[-1]
+            vistos.append(_leitura_do_cartao(cartao))
+            agendar(cartao._botao_confirmar if valor == "confirmar" else cartao._botao_cancelar)
         else:
             # Há diálogo na tela, mas de um tipo que o roteiro não esperava
             # agora. Espera um pouco (ele pode estar nascendo) e desiste.
@@ -617,10 +658,14 @@ def test_excluir_subcategoria_vazia_pede_uma_confirmacao_e_apaga(
     _escolher_subdivisao(tela, "Lanches", "Combo pastel")
 
     vistos = encenar(
-        qapp, tela, [("caixa", "Excluir")], tela._painel_produtos._botao_excluir.click
+        qapp, tela, [("cartao", "confirmar")], tela._painel_produtos._botao_excluir.click
     )
 
-    assert "Deseja excluir a subcategoria 'Combo pastel'?" in vistos[0]
+    assert vistos[0] == (
+        "AÇÃO PERMANENTE | Excluir subcategoria | Combo pastel | "
+        "Deseja excluir esta subcategoria? | "
+        "Ela não tem nenhum produto dentro — nada mais é afetado. | Excluir subcategoria"
+    )
     assert [s.nome for s in cardapio.listar_subcategorias(cardapio_montado["lanches"].id)] == [
         "Podrão"
     ]
@@ -629,35 +674,38 @@ def test_excluir_subcategoria_vazia_pede_uma_confirmacao_e_apaga(
 def test_cancelar_a_confirmacao_nao_apaga_nada(qapp, tela, cardapio, cardapio_montado):
     _escolher_subdivisao(tela, "Lanches", "Combo pastel")
 
-    encenar(qapp, tela, [("caixa", "Cancelar")], tela._painel_produtos._botao_excluir.click)
+    encenar(qapp, tela, [("cartao", "cancelar")], tela._painel_produtos._botao_excluir.click)
 
     assert len(cardapio.listar_subcategorias(cardapio_montado["lanches"].id)) == 2
 
 
 def test_depois_de_excluir_a_arvore_volta_para_todas_da_mesma_categoria(qapp, tela):
     """E não para a primeira categoria da lista: o gerente continua organizando
-    a categoria em que estava."""
+    a categoria em que estava (o "preservar o nó pai" do pedido do §9.18)."""
     _escolher_subdivisao(tela, "Lanches", "Combo pastel")
 
-    encenar(qapp, tela, [("caixa", "Excluir")], tela._painel_produtos._botao_excluir.click)
+    encenar(qapp, tela, [("cartao", "confirmar")], tela._painel_produtos._botao_excluir.click)
 
     selecao = tela._painel_categorias.selecao_atual()
     assert (selecao.categoria.nome, selecao.chave) == ("Lanches", _SUB_TODAS)
 
 
-def test_excluir_subcategoria_com_produtos_e_bloqueada_com_o_numero(
+def test_subcategoria_com_produtos_diz_o_numero_e_oferece_a_senha_master(
     qapp, tela, cardapio, cardapio_montado
 ):
-    """A recusa diz quantos são: é o número que dimensiona o trabalho de quem
-    vai ter que mover os produtos antes."""
+    """O número dimensiona o que vai sair, e o botão diz o que ele pede.
+
+    É a regra do §9.13, reafirmada pelo Vitor no §9.18 contra o bloqueio rígido
+    da Foto 3: a subdivisão cheia NÃO fica com o botão apagado."""
     _escolher_subdivisao(tela, "Lanches", "Podrão")
 
     vistos = encenar(
-        qapp, tela, [("caixa", "Cancelar")], tela._painel_produtos._botao_excluir.click
+        qapp, tela, [("cartao", "cancelar")], tela._painel_produtos._botao_excluir.click
     )
 
-    assert "existem 2 produtos vinculados a ela" in vistos[0]
-    assert "Mova ou exclua os produtos primeiro" in vistos[0]
+    assert vistos[0].startswith("EXCLUSÃO PROTEGIDA | Excluir subcategoria | Podrão | ")
+    assert "Esta subcategoria contém 2 produtos." in vistos[0]
+    assert vistos[0].endswith("| Excluir com Senha Master")
     assert len(cardapio.listar_subcategorias(cardapio_montado["lanches"].id)) == 2
 
 
@@ -670,7 +718,7 @@ def test_a_cascata_exige_a_senha_master(qapp, tela, cardapio, cardapio_montado):
     vistos = encenar(
         qapp,
         tela,
-        [("caixa", "Excluir com Senha Master"), ("pin", PIN_MASTER)],
+        [("cartao", "confirmar"), ("pin", PIN_MASTER)],
         tela._painel_produtos._botao_excluir.click,
     )
 
@@ -681,42 +729,213 @@ def test_a_cascata_exige_a_senha_master(qapp, tela, cardapio, cardapio_montado):
     assert [p.nome for p in cardapio.listar_produtos()] == ["Coca Lata", "X Egg"]
 
 
-def test_a_senha_operacional_nao_libera_a_cascata(qapp, tela, cardapio, cardapio_montado):
-    """Nível 3 não herda de baixo para cima."""
+def test_a_senha_operacional_nao_libera_a_cascata_e_devolve_ao_cartao(
+    qapp, tela, cardapio, cardapio_montado
+):
+    """Nível 3 não herda de baixo para cima — e a recusa não fecha o cartão: o
+    PIN abriu POR CIMA dele (§9.18), e o gerente volta a ver o que ia sair."""
     _escolher_subdivisao(tela, "Lanches", "Podrão")
 
-    encenar(
+    vistos = encenar(
         qapp,
         tela,
-        [("caixa", "Excluir com Senha Master"), ("pin", PIN_OPERACIONAL)],
+        [("cartao", "confirmar"), ("pin", PIN_OPERACIONAL), ("cartao", "cancelar")],
         tela._painel_produtos._botao_excluir.click,
     )
 
+    assert vistos[2] == vistos[0], "o cartão que volta é o mesmo, com o mesmo aviso"
     assert len(cardapio.listar_subcategorias(cardapio_montado["lanches"].id)) == 2
     assert len(cardapio.listar_produtos()) == 4
 
 
-def test_cancelar_o_aviso_nem_chega_a_pedir_o_pin(qapp, tela):
+def test_desistir_do_pin_e_tentar_de_novo_no_mesmo_cartao(
+    qapp, tela, cardapio, cardapio_montado
+):
+    """O ganho de o PIN abrir sobre o cartão: errar ou fechar o PIN não custa o
+    gesto inteiro. Com os `QMessageBox` de antes, fechar o PIN encerrava tudo e
+    o gerente recomeçava do botão Excluir."""
+    _escolher_subdivisao(tela, "Lanches", "Podrão")
+
+    vistos = encenar(
+        qapp,
+        tela,
+        [("cartao", "confirmar"), ("pin", "fechar"), ("cartao", "confirmar"), ("pin", PIN_MASTER)],
+        tela._painel_produtos._botao_excluir.click,
+    )
+
+    assert vistos[1] == vistos[3] == "Confirmar Exclusão"
+    assert [s.nome for s in cardapio.listar_subcategorias(cardapio_montado["lanches"].id)] == [
+        "Combo pastel"
+    ]
+
+
+def test_o_pin_da_tela_nasce_filho_do_cartao(qapp, tela, cardapio):
+    """É o parent que põe o escurecedor do PIN sobre o CARTÃO e o centraliza
+    nele. Filho da tela, o PIN escureceria a janela inteira por trás de um
+    cartão aceso — dois modais disputando a frente. Achado por mutação: a
+    suíte do cartão testa com uma barreira de mentira, e nada prendia a da
+    view."""
+    cartao = ConfirmacaoExclusaoDialog.para_categoria("Lanches", 1, 0, lambda _c: True, tela)
+    pais: list = []
+
+    def olhar_e_fechar() -> None:
+        pin = next(p for p in tela.findChildren(PinPadDialog) if p.isVisible())
+        pais.append(pin.parentWidget())
+        pin.reject()
+
+    QTimer.singleShot(0, olhar_e_fechar)
+    passou = modulo_da_tela._pedir_senha_master(cardapio.auth, "a categoria 'Lanches'", cartao)
+
+    assert passou is False
+    assert pais == [cartao]
+    cartao.deleteLater()
+
+
+def test_cancelar_o_cartao_nem_chega_a_pedir_o_pin(qapp, tela):
     """O roteiro não consumido é o que prova: com "Cancelar", o cartão de PIN
     não chega a existir."""
     _escolher_subdivisao(tela, "Lanches", "Podrão")
 
     vistos = encenar(
-        qapp, tela, [("caixa", "Cancelar")], tela._painel_produtos._botao_excluir.click
+        qapp, tela, [("cartao", "cancelar")], tela._painel_produtos._botao_excluir.click
     )
 
     assert len(vistos) == 1
     assert tela.findChildren(PinPadDialog) == []
 
 
-def test_excluir_produto_continua_pedindo_so_o_sim_ou_nao(qapp, tela, cardapio):
-    """Não-regressão: a barreira nova é da subcategoria, não do produto."""
+# ---------------------------------------------------------------------------
+# 4b. Excluir o PRODUTO — apagado num clique, ou arquivado com a Senha Master
+# ---------------------------------------------------------------------------
+
+
+def _vender(uow, gerente, caixa_aberto, produto_id: int) -> None:
+    from datetime import datetime
+
+    from gestor_comercial.domain.comanda import Comanda
+    from gestor_comercial.domain.item_comanda import ItemComanda
+
+    comanda = uow.comandas.salvar(
+        Comanda(
+            aberta_em=datetime(2026, 9, 14, 12, 0),
+            usuario_id=gerente.id,
+            caixa_id=caixa_aberto.id,
+        )
+    )
+    uow.itens.salvar(
+        ItemComanda(
+            quantidade=1,
+            preco_unit_congelado=Decimal("16.00"),
+            comanda_id=comanda.id,
+            produto_id=produto_id,
+        )
+    )
+
+
+def _id_do_produto(cardapio, nome: str) -> int:
+    return next(p.id for p in cardapio.listar_produtos() if p.nome == nome)
+
+
+def test_produto_sem_historico_sai_com_a_confirmacao_simples(qapp, tela, cardapio, uow):
+    """A Foto 2: sem venda e sem combo, um clique no cartão e a linha sai do
+    banco — o DELETE físico, pelo `excluir_produto` de sempre."""
+    produto_id = _id_do_produto(cardapio, "X Tudo")
     _escolher_subdivisao(tela, "Lanches", "Podrão")
     _selecionar_produto(tela, "X Tudo")
 
-    encenar(qapp, tela, [("caixa", "Yes")], tela._painel_produtos._botao_excluir.click)
+    vistos = encenar(
+        qapp, tela, [("cartao", "confirmar")], tela._painel_produtos._botao_excluir.click
+    )
 
+    assert vistos == [
+        "AÇÃO PERMANENTE | Excluir produto | X Tudo | "
+        "Deseja excluir este produto permanentemente? | "
+        "Esta ação não pode ser desfeita. | Excluir produto"
+    ]
+    assert uow.produtos.buscar_por_id(produto_id) is None
+
+
+def test_produto_vendido_pede_a_senha_master_e_e_arquivado(
+    qapp, tela, cardapio, uow, gerente, caixa_aberto
+):
+    """Até o §9.17 este gesto terminava num "Desative-o" DEPOIS do "Sim". Agora
+    o cartão sabe antes, e a linha fica no banco para a venda passada."""
+    produto_id = _id_do_produto(cardapio, "X Tudo")
+    _vender(uow, gerente, caixa_aberto, produto_id)
+    _escolher_subdivisao(tela, "Lanches", "Podrão")
+    _selecionar_produto(tela, "X Tudo")
+
+    vistos = encenar(
+        qapp,
+        tela,
+        [("cartao", "confirmar"), ("pin", PIN_MASTER)],
+        tela._painel_produtos._botao_excluir.click,
+    )
+
+    assert vistos[0].startswith("EXCLUSÃO PROTEGIDA | Excluir produto | X Tudo | ")
+    assert "Este produto tem vendas registradas." in vistos[0]
+    assert vistos[1] == "Confirmar Exclusão"
+    guardado = uow.produtos.buscar_por_id(produto_id)
+    assert (guardado.arquivado, guardado.ativo) == (True, False)
     assert "X Tudo" not in [p.nome for p in cardapio.listar_produtos()]
+    # Nenhuma recusa do service chegou à linha vermelha da tela.
+    assert tela._label_erro.text() == ""
+
+
+def test_produto_vendido_com_a_senha_operacional_fica_onde_esta(
+    qapp, tela, cardapio, uow, gerente, caixa_aberto
+):
+    produto_id = _id_do_produto(cardapio, "X Tudo")
+    _vender(uow, gerente, caixa_aberto, produto_id)
+    _escolher_subdivisao(tela, "Lanches", "Podrão")
+    _selecionar_produto(tela, "X Tudo")
+
+    encenar(
+        qapp,
+        tela,
+        [("cartao", "confirmar"), ("pin", PIN_OPERACIONAL), ("cartao", "cancelar")],
+        tela._painel_produtos._botao_excluir.click,
+    )
+
+    assert uow.produtos.buscar_por_id(produto_id).arquivado is False
+    assert "X Tudo" in [p.nome for p in cardapio.listar_produtos()]
+
+
+def test_componente_de_combo_avisa_e_sai_da_composicao(qapp, tela, cardapio, uow):
+    """Arquivar um componente mexe num combo que ninguém mandou excluir — e o
+    cartão diz isso antes de a Senha Master ser digitada."""
+    lanches = next(c for c in cardapio.listar_categorias() if c.nome == "Lanches")
+    combo = cardapio.criar_produto("Combo X", Decimal("25.00"), lanches.id)
+    x_tudo_id = _id_do_produto(cardapio, "X Tudo")
+    cardapio.associar_componente(combo.id, x_tudo_id, 1)
+    tela.atualizar()
+    _escolher_subdivisao(tela, "Lanches", "Podrão")
+    _selecionar_produto(tela, "X Tudo")
+
+    vistos = encenar(
+        qapp,
+        tela,
+        [("cartao", "confirmar"), ("pin", PIN_MASTER)],
+        tela._painel_produtos._botao_excluir.click,
+    )
+
+    assert "Este produto faz parte de 1 combo." in vistos[0]
+    assert "Ele sai da composição de 1 combo." in vistos[0]
+    assert cardapio.listar_componentes(combo.id) == []
+    assert uow.produtos.buscar_por_id(x_tudo_id).arquivado is True
+
+
+def test_a_selecao_volta_para_a_subdivisao_do_produto_excluido(qapp, tela, cardapio):
+    """O nó pai fica: excluir um produto não leva o gerente para outra
+    categoria nem para outra subdivisão."""
+    _escolher_subdivisao(tela, "Lanches", "Podrão")
+    _selecionar_produto(tela, "X Tudo")
+
+    encenar(qapp, tela, [("cartao", "confirmar")], tela._painel_produtos._botao_excluir.click)
+
+    selecao = tela._painel_categorias.selecao_atual()
+    assert (selecao.categoria.nome, selecao.chave) == ("Lanches", "Podrão")
+    assert _rodape(tela)["rotulo"] == "SUBCATEGORIA: PODRÃO"
 
 
 # ---------------------------------------------------------------------------
@@ -859,23 +1078,25 @@ def test_categoria_vazia_sai_com_uma_confirmacao(qapp, tela, cardapio):
     _abrir(tela, "Sobremesas")
 
     vistos = encenar(
-        qapp, tela, [("caixa", "Excluir")], tela._painel_produtos._botao_excluir.click
+        qapp, tela, [("cartao", "confirmar")], tela._painel_produtos._botao_excluir.click
     )
 
-    assert "Deseja excluir a categoria 'Sobremesas'?" in vistos[0]
+    assert vistos[0].startswith("AÇÃO PERMANENTE | Excluir categoria | Sobremesas | ")
+    assert "Deseja excluir esta categoria?" in vistos[0]
     assert vazia.nome not in [c.nome for c in cardapio.listar_categorias()]
 
 
 def test_categoria_com_conteudo_avisa_e_exige_a_senha_master(qapp, tela, cardapio):
-    """A recusa soma as duas parcelas: é o tamanho do trabalho de esvaziar."""
+    """O aviso soma as duas parcelas: é o tamanho do que vai sair."""
     _abrir(tela, "Lanches")
 
     vistos = encenar(
-        qapp, tela, [("caixa", "Cancelar")], tela._painel_produtos._botao_excluir.click
+        qapp, tela, [("cartao", "cancelar")], tela._painel_produtos._botao_excluir.click
     )
 
-    assert "ela tem 3 produtos e 2 subcategorias" in vistos[0]
-    assert "SENHA MASTER" in vistos[0]
+    assert vistos[0].startswith("EXCLUSÃO PROTEGIDA | Excluir categoria | Lanches | ")
+    assert "Esta categoria contém 3 produtos e 2 subcategorias." in vistos[0]
+    assert vistos[0].endswith("| Excluir com Senha Master")
     assert [c.nome for c in cardapio.listar_categorias()] == ["Bebidas", "Lanches"]
 
 
@@ -886,7 +1107,7 @@ def test_a_senha_master_apaga_a_categoria_inteira(qapp, tela, cardapio):
     vistos = encenar(
         qapp,
         tela,
-        [("caixa", "Excluir com Senha Master"), ("pin", PIN_MASTER)],
+        [("cartao", "confirmar"), ("pin", PIN_MASTER)],
         tela._painel_produtos._botao_excluir.click,
     )
 
@@ -902,7 +1123,7 @@ def test_a_senha_operacional_nao_apaga_a_categoria(qapp, tela, cardapio):
     encenar(
         qapp,
         tela,
-        [("caixa", "Excluir com Senha Master"), ("pin", PIN_OPERACIONAL)],
+        [("cartao", "confirmar"), ("pin", PIN_OPERACIONAL), ("cartao", "cancelar")],
         tela._painel_produtos._botao_excluir.click,
     )
 
@@ -917,7 +1138,7 @@ def test_depois_de_excluir_a_categoria_a_arvore_recomeca(qapp, tela, cardapio):
     encenar(
         qapp,
         tela,
-        [("caixa", "Excluir com Senha Master"), ("pin", PIN_MASTER)],
+        [("cartao", "confirmar"), ("pin", PIN_MASTER)],
         tela._painel_produtos._botao_excluir.click,
     )
 
@@ -955,7 +1176,7 @@ def test_a_categoria_guardada_some_da_arvore(qapp, tela, cardapio, uow, gerente,
     encenar(
         qapp,
         tela,
-        [("caixa", "Excluir com Senha Master"), ("pin", PIN_MASTER)],
+        [("cartao", "confirmar"), ("pin", PIN_MASTER)],
         tela._painel_produtos._botao_excluir.click,
     )
 
@@ -988,11 +1209,47 @@ def test_edicoes_e_exclusoes_sucessivas_nao_acumulam_widgets(
         modal_de_organizacao.nome_a_devolver = f"{nome} editado"
         tela._painel_produtos._botao_editar.click()
         _escolher_subdivisao(tela, "Lanches", f"{nome} editado")
-        encenar(qapp, tela, [("caixa", "Excluir")], tela._painel_produtos._botao_excluir.click)
+        encenar(qapp, tela, [("cartao", "confirmar")], tela._painel_produtos._botao_excluir.click)
 
     assentar()
     assert [s.nome for s in cardapio.listar_subcategorias(lanches.id)] == [
         "Combo pastel",
         "Podrão",
     ]
+    assert len(tela.findChildren(QWidget)) == antes
+
+
+def test_cartao_e_pin_nao_ficam_presos_a_tela_nem_escurecem_a_janela(
+    qapp, tela, cardapio, cardapio_montado, assentar
+):
+    """Os caminhos que mais criam diálogo: o cartão com o PIN por cima, o PIN
+    recusado que devolve ao cartão, e o cancelamento. Nada disso pode sobrar —
+    nem diálogo pendurado na view, nem escurecedor pendurado na janela, que
+    vive o turno inteiro."""
+    tela.show()
+    _abrir(tela, "Lanches")
+    assentar()
+    antes = len(tela.findChildren(QWidget))
+    lanches = cardapio_montado["lanches"]
+
+    for numero in range(4):
+        vazia = cardapio.criar_subcategoria(lanches.id, f"Vazia {numero}")
+        cheia = cardapio.criar_subcategoria(lanches.id, f"Cheia {numero}")
+        cardapio.criar_produto(f"Item {numero}", Decimal("5.00"), lanches.id, subcategoria_id=cheia.id)
+        tela.atualizar()
+        _escolher_subdivisao(tela, "Lanches", vazia.nome)
+        encenar(qapp, tela, [("cartao", "cancelar")], tela._painel_produtos._botao_excluir.click)
+        encenar(qapp, tela, [("cartao", "confirmar")], tela._painel_produtos._botao_excluir.click)
+        _escolher_subdivisao(tela, "Lanches", cheia.nome)
+        encenar(
+            qapp,
+            tela,
+            [("cartao", "confirmar"), ("pin", PIN_OPERACIONAL), ("cartao", "confirmar"), ("pin", PIN_MASTER)],
+            tela._painel_produtos._botao_excluir.click,
+        )
+
+    assentar()
+    assert [s.nome for s in cardapio.listar_subcategorias(lanches.id)] == ["Combo pastel", "Podrão"]
+    assert tela.findChildren(QDialog) == []
+    assert tela.window().findChildren(Backdrop) == []
     assert len(tela.findChildren(QWidget)) == antes

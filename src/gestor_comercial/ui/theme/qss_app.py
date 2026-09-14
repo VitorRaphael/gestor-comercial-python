@@ -1128,6 +1128,110 @@ def construir_qss_app(t: dict[str, str]) -> str:
       color: {t['pilula_disabled_texto']};
     }}
 
+    /* ---------- Cartao de confirmacao de exclusao
+       (`widgets/confirmacao_exclusao_dialog.py`, §9.18)
+       Decimo modal em cartao, e UM so para as tres entidades do Cardapio
+       (categoria, subcategoria, produto) e os tres niveis de protecao. O que
+       muda entre eles chega aqui por UMA propriedade, `tom`, no cartao de aviso:
+       "perigo" (coral) ou "protegido" (ambar). O ✕ e o Cancelar entram nas
+       familias compartilhadas mais abaixo. */
+
+    QDialog#exclusaoDialog {{ background: transparent; }}
+    QFrame#exclusaoDialogCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+    QWidget#exclusaoDialogCabecalho, QWidget#exclusaoDialogRodape {{ background: transparent; }}
+    QFrame#exclusaoDialogCorpo {{ background: transparent; border: none; }}
+    QFrame#exclusaoDialogDivisor {{
+      background: {t['cardapio_bloco_divisor']};
+      border: none;
+    }}
+    QFrame#exclusaoDialogBadge {{
+      background: {t['exclusao_badge_bg']};
+      border: 1px solid {t['exclusao_badge_borda']};
+      border-radius: 13px;
+    }}
+    QLabel#exclusaoDialogSecao {{
+      color: {t['exclusao_secao']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.6px;
+      background: transparent;
+    }}
+    QLabel#exclusaoDialogTitulo {{
+      color: {t['texto']};
+      font-size: 18px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QFrame#exclusaoDialogItem {{
+      background: {t['exclusao_item_bg']};
+      border: 1px solid {t['exclusao_item_borda']};
+      border-radius: 12px;
+    }}
+    QFrame#exclusaoDialogItemIcone {{
+      background: {t['cardapio_icone_tinta']};
+      border: 1px solid {t['cardapio_icone_borda']};
+      border-radius: 11px;
+    }}
+    QLabel#exclusaoDialogRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      background: transparent;
+    }}
+    QLabel#exclusaoDialogNome {{
+      color: {t['texto']};
+      font-size: 16px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QFrame#exclusaoDialogAviso[tom="perigo"] {{
+      background: {t['exclusao_perigo_bg']};
+      border: 1px solid {t['exclusao_perigo_borda']};
+      border-radius: 12px;
+    }}
+    QFrame#exclusaoDialogAviso[tom="protegido"] {{
+      background: {t['exclusao_protegida_bg']};
+      border: 1px solid {t['exclusao_protegida_borda']};
+      border-radius: 12px;
+    }}
+    QLabel#exclusaoDialogAvisoTitulo {{
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#exclusaoDialogAvisoTexto {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    /* O `padding-left` de 38px e o espaco da lixeira que `BotaoComGlifo` pinta
+       (x=16, 13px de lado). Raio de 18px, metade da altura: acima disso o Qt
+       desenha o canto reto (§9.15). */
+    QPushButton#exclusaoDialogConfirmar {{
+      padding: 9px 20px 9px 38px;
+      background: {t['exclusao_acao_bg']};
+      border: 1px solid {t['exclusao_acao_bg']};
+      border-radius: 18px;
+      color: {t['exclusao_acao_texto']};
+      font-size: 12px;
+      font-weight: 800;
+    }}
+    QPushButton#exclusaoDialogConfirmar:hover {{
+      background: {t['exclusao_acao_hover']};
+      border-color: {t['exclusao_acao_hover']};
+    }}
+    QPushButton#exclusaoDialogConfirmar:disabled {{
+      background: {t['exclusao_acao_desligada_bg']};
+      border-color: {t['exclusao_acao_desligada_bg']};
+      color: {t['exclusao_acao_desligada_texto']};
+    }}
+
     /* ---- Modal "Confirmar identidade" (`cpf_dono_dialog.py`) e o olho de
        "Senhas e Acesso" (`icone_olho.py`) ----
        Oitavo modal em cartao. Cabecalho, cartao e rodape seguem o mesmo
@@ -1591,7 +1695,8 @@ def construir_qss_app(t: dict[str, str]) -> str:
        fechar e para os dois passos de quantidade. */
     QPushButton#addItemFechar, QPushButton#addItemPasso, QPushButton#funcDialogFechar,
     QPushButton#movCaixaFechar, QPushButton#turnoFechar, QPushButton#orgDialogFechar,
-    QPushButton#cpfDialogFechar, QPushButton#comboDialogFechar {{
+    QPushButton#cpfDialogFechar, QPushButton#comboDialogFechar,
+    QPushButton#exclusaoDialogFechar {{
       padding: 0;
       background: {t['botao_circular_bg']};
       border: 1px solid {t['botao_circular_borda']};
@@ -1601,12 +1706,14 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QPushButton#addItemFechar, QPushButton#funcDialogFechar,
     QPushButton#movCaixaFechar, QPushButton#turnoFechar,
     QPushButton#orgDialogFechar, QPushButton#cpfDialogFechar,
-    QPushButton#comboDialogFechar {{ border-radius: 16px; font-size: 13px; }}
+    QPushButton#comboDialogFechar,
+    QPushButton#exclusaoDialogFechar {{ border-radius: 16px; font-size: 13px; }}
     QPushButton#addItemPasso {{ border-radius: 17px; font-size: 18px; }}
     QPushButton#addItemFechar:hover, QPushButton#addItemPasso:hover,
     QPushButton#funcDialogFechar:hover, QPushButton#movCaixaFechar:hover,
     QPushButton#turnoFechar:hover, QPushButton#orgDialogFechar:hover,
-    QPushButton#cpfDialogFechar:hover, QPushButton#comboDialogFechar:hover {{
+    QPushButton#cpfDialogFechar:hover, QPushButton#comboDialogFechar:hover,
+    QPushButton#exclusaoDialogFechar:hover {{
       background: {t['botao_circular_hover']};
       color: {t['texto']};
     }}
@@ -1748,7 +1855,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QLabel#addItemAviso[estado="sucesso"] {{ color: {t['sucesso']}; }}
 
     QPushButton#orgDialogCancelar,
-    QPushButton#cpfDialogCancelar,
+    QPushButton#cpfDialogCancelar, QPushButton#exclusaoDialogCancelar,
     QPushButton#addItemCancelar, QPushButton#funcDialogCancelar,
     QPushButton#movCaixaCancelar, QPushButton#turnoCancelar {{
       padding: 9px 20px;
@@ -1760,7 +1867,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-weight: 700;
     }}
     QPushButton#orgDialogCancelar:hover,
-    QPushButton#cpfDialogCancelar:hover,
+    QPushButton#cpfDialogCancelar:hover, QPushButton#exclusaoDialogCancelar:hover,
     QPushButton#addItemCancelar:hover, QPushButton#funcDialogCancelar:hover,
     QPushButton#movCaixaCancelar:hover,
     QPushButton#turnoCancelar:hover {{ background: {t['botao_circular_hover']}; }}

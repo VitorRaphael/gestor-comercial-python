@@ -1,4 +1,4 @@
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import selectinload
 
 from gestor_comercial.domain.combo_item import ComboItem
@@ -22,6 +22,19 @@ class ComboItemRepository(Repository[ComboItem]):
             .where(ComboItem.combo_id == combo_id)
             .options(selectinload(ComboItem.produto).selectinload(Produto.categoria))
             .order_by(ComboItem.id)
+        )
+        return list(self.session.scalars(stmt))
+
+    def listar_vinculos_do_produto(self, produto_id: int) -> list[ComboItem]:
+        """Toda linha de combo que toca o produto, dos dois lados: as da
+        composição dele (ele é o combo) e as dos combos em que ele entra.
+
+        Uma consulta só para as duas perguntas da exclusão (§9.18): quantos
+        combos o contêm e quantos componentes ele tem — e, no arquivamento,
+        quais linhas saem.
+        """
+        stmt = select(ComboItem).where(
+            or_(ComboItem.combo_id == produto_id, ComboItem.produto_id == produto_id)
         )
         return list(self.session.scalars(stmt))
 

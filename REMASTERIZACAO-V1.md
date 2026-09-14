@@ -3973,6 +3973,210 @@ fechava, e as subdivisões ficavam na tela para sempre.
   do delegado desde o §9.11). Com o mouse fora dela, é o único sinal de onde a
   seleção está; não foi pedido.
 
+### 9.18 A exclusão do Cardápio num cartão só, e o produto vendido arquivado ✅ CONCLUÍDO — 2026-09-14
+
+Pedido do Vitor, com três mockups (categoria com produtos, produto sem venda,
+subcategoria bloqueada): trocar as caixas de mensagem do sistema da exclusão de
+categoria, subcategoria e produto por cartões no desenho do app — e, escrito em
+destaque, **um diálogo base só**, parametrizado pela entidade, pela quantidade de
+itens vinculados e pelo nível de proteção.
+
+#### As duas decisões do Vitor, perguntadas antes de começar
+
+O pedido e o que já estava decidido não batiam em dois pontos, e os dois são
+regra de negócio:
+
+1. **Subcategoria com produtos.** A Foto 3 desenha o botão apagado ("Mova ou
+   exclua os produtos antes de continuar"); o §9.13 tinha decidido que a Senha
+   Master libera a cascata. **Decisão: fica a cascata do §9.13.** O cartão avisa
+   quantos produtos são e o botão "Excluir com Senha Master" fica ligado. O
+   bloqueio rígido existe no diálogo (`para_subcategoria(..., cascata=False)`)
+   porque o mockup o desenha, mas nenhuma tela o usa hoje.
+2. **Produto já vendido, ou preso a um combo.** Até aqui `excluir_produto` só
+   RECUSAVA ("Desative-o"), e isso depois de o gerente já ter clicado "Sim".
+   **Decisão: arquivar com a Senha Master**, com a amarração de combo desfeita
+   antes, "para não deixar referências ativas quebradas". Sem histórico nenhum,
+   continua o DELETE físico depois da confirmação simples da Foto 2.
+
+#### O desenho: dois eixos, duas tabelas, uma classe
+
+`src/gestor_comercial/ui/widgets/confirmacao_exclusao_dialog.py`, o décimo modal
+em cartão. As três imagens são o mesmo cartão com outras palavras, e o que muda
+entre elas se divide em dois eixos que não se misturam:
+
+| eixo | tabela | o que decide |
+|---|---|---|
+| a entidade | `ENTIDADES` | glifo do item (pasta, etiqueta, caixa), rótulo ("PRODUTO SELECIONADO"), título e a palavra do botão |
+| o nível de proteção | `NIVEIS` | a tarja de cima, o tom do aviso (coral ou âmbar) e o que o botão faz: confirma, pede a Senha Master ou nem liga |
+
+É a forma do §9.6 e do §9.12 (uma classe e uma tabela por papel), e não a de
+base + subclasses do §9.7: as três entidades não têm nenhuma coluna própria, só
+palavras.
+
+**Quem transforma contagem em nível são os construtores nomeados**
+(`para_categoria`, `para_subcategoria`, `para_produto`), e só eles. A view lê
+`modal.protecao` depois do `exec()` para escolher o método do service, então a
+regra que escolhe o cartão e a que escolhe o service são a mesma linha. Antes
+eram dois `if` sobre a mesma contagem, um na view e outro implícito na caixa de
+mensagem escolhida.
+
+**A tarja é do NÍVEL, e não da entidade**, ao contrário de como o pedido escrito
+a distribuía (A = categoria, B = produto, C = subcategoria). As três imagens
+fecham com as duas leituras: "EXCLUSÃO PROTEGIDA" é Senha Master, "AÇÃO
+PERMANENTE" é a confirmação simples e "CONFIRMAR EXCLUSÃO" é o bloqueio. Só a
+leitura por nível impede o cartão de chamar de "ação permanente" um produto que
+vai ser arquivado, ou de "exclusão protegida" uma categoria vazia.
+
+#### A Senha Master abre POR CIMA do cartão
+
+O botão "Excluir com Senha Master" não fecha o cartão. Ele chama `autorizar`,
+que a view entrega pronto: `_pedir_senha_master` com `partial`, que é o
+`PinPadDialog.para_exclusao` (Nível 3, §9.10) nascido **filho do cartão**. O
+escurecedor do PIN cobre o cartão com os cantos de 16px (a mesma solução do
+§9.15). Se o PIN for recusado ou fechado, o gerente volta ao cartão, que continua
+dizendo o que ia sair. Com os `QMessageBox` de antes, fechar o PIN encerrava o
+gesto inteiro.
+
+O diálogo não conhece `AuthService`: recebe uma função que diz se passou. E
+recusa nascer com `Protecao.SENHA_MASTER` sem ela (`ValueError` na construção),
+porque um cartão que promete a Senha Master e confirma sem ela é o pior defeito
+possível desta tela, e ele só apareceria na hora de apagar algo.
+
+Os sites de modal da UI foram de **40 para 38**. Saíram seis (duas caixas e um PIN
+para cada uma das duas entidades de estrutura) e entraram quatro: um cartão por
+entidade, contando o produto, cujo `QMessageBox.question` nem passava pelo
+`executar_modal`, e **um PIN só** para as três.
+
+#### O produto com histórico: `arquivar_produto`
+
+Três peças novas no service, e nenhuma migração, porque `produtos.arquivado`
+existe desde o §9.13:
+
+- **`VinculosDoProduto`** (`vendido`, `combos_que_o_contem`, `componentes`) e
+  `vinculos_do_produto()`: a pergunta que a tela faz antes, em números. O cartão
+  precisa DIZER "ele sai da composição de 2 combos", e um `bool` só diria que
+  algo vai acontecer. `_tem_historico` (o critério das cascatas) passou a ler o
+  mesmo `_vinculos`, então a tela e a cascata usam uma definição só de
+  histórico.
+- **`arquivar_produto()`**: remove as linhas de `combo_itens` dos dois lados (ele
+  como componente de outros combos e, se ele próprio for combo, a composição
+  dele), devolve a produto comum todo combo que ficou sem componente e marca
+  `arquivado` + `ativo=False`, **num commit só**. O "combo sem componente vira
+  produto" saiu de dentro de `remover_componente` para
+  `_desfazer_combo_sem_componentes`, que os dois chamam. `combo_itens` não é
+  histórico na V1 (impressão e estoque não o leem, §9.15), então desfazer a
+  composição não reescreve nada que já saiu na bobina.
+- **`quantidades_do_conteudo()`** e **`contagem()`**: "3 produtos e 2
+  subcategorias" saiu de dentro de `conteudo_da_categoria`, porque o cartão diz a
+  mesma contagem com outro começo ("Esta categoria contém…").
+
+**Uma escolha feita aqui, com o porquê.** O caminho da Senha Master **sempre
+arquiva**, inclusive o produto cujo único vínculo era um combo, que depois de
+desamarrado poderia ter saído do banco. Foi a instrução literal do Vitor ("após
+autenticar, aplique o arquivamento"), e é também a regra das cascatas ("quem tem
+vínculo fica marcado"). A diferença para o gerente é nenhuma: nos dois casos o
+produto some de todas as telas.
+
+#### O que o pedido escrito dizia e não foi seguido ao pé da letra
+
+- **`destroy()`, `unbind()` e `after_cancel()`** são de Tkinter. Os equivalentes
+  estão no cabeçalho do módulo: `executar_modal` destrói, as três ligações saem
+  nominalmente em `_soltar_recursos()` com a trava `_limpo`, o escurecedor é
+  solto da janela em `done()`, e não há timer nenhum.
+- **"Exclusão lógica (`ativo = 0`)"** virou `arquivado = True` **e**
+  `ativo = False`. `ativo=False` sozinho deixaria o produto no Cardápio com o selo
+  DESATIVADO, podendo ser reativado, o contrário de excluir. A diferença entre as
+  duas marcas está no §9.13.
+- **"PRODUTO SELECIONADA"** (Foto 2) virou "PRODUTO SELECIONADO". A imagem foi
+  montada a partir da de categoria, e a concordância ficou para trás.
+- **O Enter confirma**, como o pedido manda, e isso inverte os `QMessageBox`
+  substituídos, cujo botão padrão era o Cancelar. O risco continua coberto por
+  dois lados: chegar ao cartão já exige um gesto (Excluir ou Delete), e o que tem
+  histórico ainda pede a Senha Master depois do Enter.
+- **⚠ e 🗑 são desenhados** (`GLIFO_ALERTA`, `GLIFO_LIXEIRA`), pela armadilha de
+  sempre (§9.4, §9.10): na fonte da marca eles não existem, e o Segoe UI Emoji os
+  pintaria chapados e da mesma cor nos dois tons de aviso. O `BotaoComGlifo` do
+  §9.15 saiu de `composicao_combo_dialog.py` para `cardapio_cartoes.py`, que é
+  onde os glifos moram, agora que dois cartões o usam.
+- **A largura ficou em 500px, dentro dos "460 a 500" pedidos.** Aqui fecha, ao
+  contrário do §9.12 e do §9.15, porque o rodapé não tem a faixa de atalhos. O
+  preço da fonte da marca, ~20% mais larga que a do desenho, é o título "Deseja
+  excluir este produto permanentemente?" quebrar em duas linhas. Nada é cortado:
+  o nome do item, o título e o texto do aviso quebram linha em vez de ganhar
+  reticências, porque confirmação destrutiva com "Cachorro Quente Lin…" pede
+  para o gerente confirmar o que não leu inteiro.
+- **O botão vermelho é o coral `#EF4444` do mockup**, e não o `#DC2626` do
+  rodapé do Cardápio: sobre o cartão escuro, o Ferrari lê como marrom. No tema
+  claro volta ao `#DC2626`. Os tokens são uma família própria, `exclusao_*`, nos
+  dois temas, pela lição do §9.5: metade dos hex coincide com `pin_exclusao_*`,
+  `composicao_remover_*` e `cardapio_excluir_*`, e cada um veste outra coisa.
+- **"Dispare o callback de sucesso e atualize a árvore preservando o nó pai"**:
+  a view já fazia isso desde o §9.13. Excluir subcategoria volta ao "Todas" da
+  mesma categoria; excluir produto mantém a categoria e a subdivisão; excluir
+  categoria recomeça a árvore, porque não há mais pai para onde voltar. Os três
+  estão trancados em teste.
+- **"~90 MB"**: o cartão não move esse número, nem para cima nem para baixo (ver
+  a medição abaixo; o processo já passa disso antes do Cardápio, §9.11).
+
+#### Achados no caminho
+
+- **O cartão do §9.12 fica mudo se reaberto depois de um erro do service.**
+  Uma sonda confirmou: `done()` desconecta os três botões, e o
+  `while modal.exec()` da view reabre a MESMA instância. Na segunda abertura só
+  Enter e Esc funcionam. O defeito é anterior a este item e ficou registrado como
+  tarefa separada. O cartão de exclusão não o herda porque é de uma abertura só
+  (`executar_modal`), e o cabeçalho do módulo diz isso.
+- **O helper `encenar()` da suíte do rodapé travaria diante do cartão novo.**
+  Com o PIN aberto dentro do clique, clicar de dentro do relógio de teste poria o
+  `exec()` do PIN dentro do disparo do timer, e o Qt não dispara de novo um timer
+  cujo disparo não terminou. O clique passou a ser agendado.
+- **Uma mutação sobreviveu na primeira passada**: criar o PIN como filho da tela,
+  e não do cartão. A suíte do cartão testava com uma barreira de mentira, e nada
+  prendia a da view. Virou `test_o_pin_da_tela_nasce_filho_do_cartao`.
+
+#### Conferência
+
+- suíte **1893** (de 1794), 0 falhas, **99 testes a mais**:
+  `tests/ui/test_confirmacao_exclusao_dialog.py` (as três imagens frase por
+  frase, a contagem virando nível, as nove combinações entidade × nível, o PIN de
+  verdade por cima do cartão, teclado, nada espremido nas seis variantes × dois
+  temas com a fonte da marca, ciclo de vida), `tests/unit/test_produto_arquivado.py`
+  (vínculos, arquivamento, os dois lados do combo, transação única, e o teste que
+  diz em voz alta que as cascatas continuam SEM desamarrar) e a seção de exclusão
+  de `test_barra_de_acoes_do_cardapio.py`, reescrita para o cartão com o fluxo
+  real (`exec()`, PIN digitado, banco respondendo);
+- **30 mutações, as 30 reprovam**. Na primeira passada 29 reprovaram; a
+  sobrevivente virou teste (ver acima);
+- memória sobre o cardápio do seed, `CardapioView` a 1366x738 com QSS e fonte:
+  **300 ciclos** de cartão → PIN → cartão → cancelar, com widgets **73→73**,
+  `QObject`s da tela **117→117** e **0 diálogos vivos**; RSS +0,69 MB no primeiro
+  bloco de 60 e +0,04 a +0,13 MB nos quatro seguintes;
+- tempo para montar e pintar o cartão: **~43 ms** nesta máquina, contra 4,4 ms do
+  `QMessageBox` substituído e ~100 ms do cartão de organização do §9.12;
+- renderização das nove variantes nos dois temas: 500px de largura, de 351px
+  (bloqueada) a 419px (produto vendido em combo, com nome de duas linhas) de
+  altura, bem abaixo dos 728px úteis;
+- bancada visual a 1366x738 contra `b3e851f`: **24 telas idênticas byte a byte**
+  (o item vive em diálogos); bancada de cupons: **2 idênticos** linha a linha.
+
+#### Ficou de fora, de propósito
+
+- **As cascatas continuam SEM desamarrar combo.** `excluir_categoria_em_cascata`
+  e `excluir_subcategoria_em_cascata` arquivam o componente e deixam a linha de
+  `combo_itens` de pé, que é exatamente a "referência ativa quebrada" que o Vitor
+  mandou evitar na exclusão do produto. O pedido era sobre o produto, e estender
+  a regra às cascatas é outra decisão dele. Está trancada em teste
+  (`test_a_cascata_continua_sem_desamarrar`), para mudar só de propósito.
+- **O erro do service depois de fechado o cartão** continua na linha vermelha da
+  tela, como antes. O cartão é de uma abertura só, pelo achado acima.
+- **A recusa de `excluir_produto`** ainda diz "Desative-o". A tela não chega mais
+  a ela (o cartão sabe antes), só um instantâneo velho chegaria, e desativar
+  continua sendo uma saída verdadeira.
+- **Os `QMessageBox` que sobraram no app**: o "Produto já existe" do cadastro de
+  produto (é aviso de duplicidade, não de exclusão), um da comanda e o erro de
+  exportação do comprovante.
+- **Desarquivar pela tela** — não existe lixeira (§9.13).
+
 ---
 
 ## 10. As melhores mudanças que o programa teve — em português de balcão

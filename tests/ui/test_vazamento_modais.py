@@ -45,6 +45,7 @@ from gestor_comercial.domain.enums import TipoMovimento
 
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 from gestor_comercial.ui.widgets.abertura_caixa_dialog import AberturaCaixaDialog
+from gestor_comercial.ui.widgets.confirmacao_exclusao_dialog import ConfirmacaoExclusaoDialog
 from gestor_comercial.ui.widgets.adicionar_item_dialog import AdicionarItemDialog
 from gestor_comercial.ui.widgets.cpf_dono_dialog import CpfDonoDialog
 from gestor_comercial.ui.widgets.fechamento_caixa_dialog import FechamentoCaixaDialog
@@ -201,10 +202,15 @@ def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, assentar, auth):
     _abrir_e_fechar(
         lambda p: CpfDonoDialog("Senha Master (Dono)", lambda _cpf: "050727", p), pai, vezes=10
     )
+    _abrir_e_fechar(
+        lambda p: ConfirmacaoExclusaoDialog.para_categoria("Lanches", 3, 1, lambda _c: True, p),
+        pai,
+        vezes=10,
+    )
     assentar()
 
     vivos = pai.findChildren(QDialog)
-    assert vivos == [], f"{len(vivos)} diálogos de 90 aberturas continuam na memória"
+    assert vivos == [], f"{len(vivos)} diálogos de 100 aberturas continuam na memória"
 
 
 def test_construir_sem_abrir_deixa_o_dialogo_preso_a_view(qapp, assentar):

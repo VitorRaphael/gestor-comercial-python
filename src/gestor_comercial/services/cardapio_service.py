@@ -99,6 +99,28 @@ class ResumoCardapio:
     margem_media: float
 
 
+def contagem(total: int, singular: str) -> str:
+    """"1 produto" / "3 produtos" — o plural regular, que é o de toda palavra
+    que estas frases contam (produto, subcategoria, combo, componente)."""
+    return f"{total} {singular}" + ("" if total == 1 else "s")
+
+
+def quantidades_do_conteudo(produtos: int, subcategorias: int) -> str:
+    """"3 produtos e 2 subcategorias" — as parcelas que existirem, e só elas.
+
+    Saiu de dentro de `conteudo_da_categoria` quando o cartão de exclusão
+    (§9.18) passou a dizer a MESMA contagem com outro começo ("Esta categoria
+    contém 3 produtos e 2 subcategorias."). Duas montagens da mesma contagem
+    divergiriam no primeiro "1 produtos".
+    """
+    partes = []
+    if produtos:
+        partes.append(contagem(produtos, "produto"))
+    if subcategorias:
+        partes.append(contagem(subcategorias, "subcategoria"))
+    return " e ".join(partes)
+
+
 def conteudo_da_categoria(produtos: int, subcategorias: int) -> str:
     """"ela tem 3 produtos e 2 subcategorias" — o que barra a exclusão simples.
 
@@ -107,12 +129,7 @@ def conteudo_da_categoria(produtos: int, subcategorias: int) -> str:
     insistir e for barrado tem que ler a mesma coisa que leu no aviso, senão
     parecem dois problemas diferentes.
     """
-    partes = []
-    if produtos:
-        partes.append(f"{produtos} produto" + ("" if produtos == 1 else "s"))
-    if subcategorias:
-        partes.append(f"{subcategorias} subcategoria" + ("" if subcategorias == 1 else "s"))
-    return "ela tem " + " e ".join(partes)
+    return "ela tem " + quantidades_do_conteudo(produtos, subcategorias)
 
 
 def produtos_vinculados(total: int) -> str:
@@ -144,6 +161,29 @@ class ResultadoCascata:
     # Sempre `False` na cascata de subcategoria, que nunca precisa disso: a FK
     # do produto para a subdivisão é anulável, a da categoria não é.
     grupo_arquivado: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class VinculosDoProduto:
+    """O que prende um produto ao banco — a pergunta que a tela faz ANTES de
+    oferecer a exclusão (§9.18).
+
+    São as mesmas três perguntas de `_tem_historico`, com a resposta em números
+    em vez de um sim/não: o cartão de exclusão precisa DIZER o que vai
+    acontecer ("ele também sai da composição de 2 combos"), e um `bool` só
+    diria que alguma coisa vai acontecer.
+    """
+
+    vendido: bool
+    # Em quantos combos ele entra como componente. Cada par (combo, componente)
+    # é único (`associar_componente` recusa o repetido), então linhas = combos.
+    combos_que_o_contem: int
+    # Quantos componentes ele tem, se ele mesmo for um combo.
+    componentes: int
+
+    @property
+    def tem_historico(self) -> bool:
+        return self.vendido or bool(self.combos_que_o_contem) or bool(self.componentes)
 
 
 @transacional
@@ -552,11 +592,22 @@ class CardapioService:
         viram mensagem de recusa, aqui viram a escolha entre apagar e arquivar.
         Duas cópias divergiriam, e a divergência apareceria como
         "FOREIGN KEY constraint failed" no meio de uma cascata.
+
+        Desde o §9.18 a resposta sai de `_vinculos`, que o cartão de exclusão
+        do produto também lê: a tela que decide entre "Excluir produto" e
+        "Excluir com Senha Master" e a cascata que decide entre apagar e
+        arquivar olham para a MESMA definição de histórico.
         """
-        return (
-            self.uow.itens.existe_com_produto(produto.id)
-            or self.uow.combo_itens.existe_como_combo(produto.id)
-            or self.uow.combo_itens.existe_como_componente(produto.id)
+        return self._vinculos(produto.id).tem_historico
+
+    def _vinculos(self, produto_id: int) -> VinculosDoProduto:
+        """Duas consultas: a venda (um EXISTS) e as linhas de combo do produto,
+        contadas pelos dois lados de uma vez."""
+        linhas = self.uow.combo_itens.listar_vinculos_do_produto(produto_id)
+        return VinculosDoProduto(
+            vendido=self.uow.itens.existe_com_produto(produto_id),
+            combos_que_o_contem=sum(1 for linha in linhas if linha.produto_id == produto_id),
+            componentes=sum(1 for linha in linhas if linha.combo_id == produto_id),
         )
 
 
@@ -764,6 +815,66 @@ class CardapioService:
         self.uow.produtos.remover(produto)
         self.uow.commit()
 
+    def vinculos_do_produto(self, produto_id: int) -> VinculosDoProduto:
+        """O que a tela precisa saber ANTES de oferecer a exclusão (§9.18).
+
+        Sem vínculo nenhum, o cartão é o da confirmação simples e o botão chama
+        `excluir_produto`; com qualquer um, o cartão pede a Senha Master e o
+        botão chama `arquivar_produto`. É o mesmo par do `contar_*` da categoria
+        e da subcategoria.
+        """
+        produto = self.buscar_produto(produto_id)
+        return self._vinculos(produto.id)
+
+    def arquivar_produto(self, produto_id: int) -> Produto:
+        """Exclui o produto que tem histórico — o caminho da Senha Master (§9.18).
+
+        Até o §9.17 a exclusão de um produto já vendido era só RECUSADA
+        ("Desative-o"), e a desativação deixava o item no Cardápio para sempre,
+        com selo. Decisão do Vitor: com a Senha Master do dono, conferida pela
+        TELA na hora (`PinPadDialog.para_exclusao`, a convenção do §9.10), ele
+        sai de verdade da operação:
+
+        * **arquivado**, e não apagado — a venda passada aponta para esta linha
+          (`itens_comanda.produto_id`), e apagá-la arrancaria o item da
+          comanda, o total do turno e o cupom que já saiu na bobina. É a mesma
+          marca das cascatas do §9.13/§9.14, e pelo mesmo motivo `ativo` desce
+          junto: `lancar_item` confere os dois, e `arquivado` sozinho o
+          deixaria lançável por um instantâneo de tela antigo;
+        * **desamarrado dos combos antes**, e é aqui que ele difere das
+          cascatas. Pedido explícito do Vitor: um arquivado continuando dentro
+          da composição de um combo vivo seria uma referência ativa para um
+          item que não existe mais na operação. Saem as linhas dos dois lados —
+          ele como componente de outros combos e, se ele mesmo é combo, a
+          composição dele — e todo combo que ficar sem componente volta a ser
+          produto comum, a regra de `remover_componente`.
+
+        `combo_itens` não é histórico na V1: impressão e estoque não o leem (a
+        baixa de estoque é backlog da V2, §9.15), e a venda de um combo grava o
+        próprio combo na comanda. Desfazer a composição não reescreve nada que
+        já saiu.
+
+        Tudo num commit só: o produto desamarrado e ainda no cardápio é um
+        estado que ninguém pediu.
+        """
+        self.auth.exigir_gerente()
+        produto = self.buscar_produto(produto_id)
+        if produto.arquivado:
+            raise RegraDeNegocioError(f"O produto '{produto.nome}' já foi excluído do cardápio.")
+
+        combos_afetados: set[int] = set()
+        for linha in self.uow.combo_itens.listar_vinculos_do_produto(produto.id):
+            combos_afetados.add(linha.combo_id)
+            self.uow.combo_itens.remover(linha)
+        for combo_id in combos_afetados:
+            self._desfazer_combo_sem_componentes(combo_id)
+
+        produto.arquivado = True
+        produto.ativo = False
+        self.uow.produtos.salvar(produto)
+        self.uow.commit()
+        return produto
+
     # ------------------------------------------------------------------
     # Combos (porte de ComboItemService.java, §3.3)
     # ------------------------------------------------------------------
@@ -814,19 +925,27 @@ class CardapioService:
 
         combo_id = item.combo_id
         self.uow.combo_itens.remover(item)
-        # Combo sem nenhum componente é só um produto comum: volta a ser um, e
-        # com isso pode inclusive virar componente de outro combo.
-        #
-        # `existe_como_combo` (um EXISTS) e não `listar_por_combo`: a pergunta é
-        # só "sobrou alguém?", e a listagem carrega produto e categoria de cada
-        # componente para a tela de composição (§9.15) — pagaria duas consultas
-        # para responder um sim/não.
-        if not self.uow.combo_itens.existe_como_combo(combo_id):
-            combo = self.uow.produtos.buscar_por_id(combo_id)
-            if combo is not None:
-                combo.is_combo = False
-                self.uow.produtos.salvar(combo)
+        self._desfazer_combo_sem_componentes(combo_id)
         self.uow.commit()
+
+    def _desfazer_combo_sem_componentes(self, combo_id: int) -> None:
+        """Combo sem nenhum componente é só um produto comum: volta a ser um, e
+        com isso pode inclusive virar componente de outro combo.
+
+        `existe_como_combo` (um EXISTS) e não `listar_por_combo`: a pergunta é
+        só "sobrou alguém?", e a listagem carrega produto e categoria de cada
+        componente para a tela de composição (§9.15) — pagaria duas consultas
+        para responder um sim/não.
+
+        Não faz commit: é passo de quem chama (`remover_componente` e
+        `arquivar_produto`), e cada um fecha a própria transação.
+        """
+        if self.uow.combo_itens.existe_como_combo(combo_id):
+            return
+        combo = self.uow.produtos.buscar_por_id(combo_id)
+        if combo is not None:
+            combo.is_combo = False
+            self.uow.produtos.salvar(combo)
 
     def alterar_quantidade_componente(self, combo_item_id: int, quantidade: int) -> ComboItem:
         """Troca quantas unidades do componente o combo entrega (§9.15).

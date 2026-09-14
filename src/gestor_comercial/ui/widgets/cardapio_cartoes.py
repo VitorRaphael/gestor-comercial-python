@@ -65,6 +65,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPushButton,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
@@ -104,6 +105,11 @@ GLIFO_SETA_BAIXO = "seta_baixo"
 GLIFO_VISTO = "visto"
 GLIFO_LIXEIRA = "lixeira"
 GLIFO_MAIS = "mais"
+# O triângulo de alerta do cartão de exclusão (§9.18). O `⚠` do mockup mora no
+# bloco de símbolos: na fonte da marca ele não existe, e o Windows o busca no
+# Segoe UI Emoji — sai amarelo chapado nos dois avisos, que pedem cores
+# diferentes (âmbar no protegido, coral no permanente).
+GLIFO_ALERTA = "alerta"
 
 # Os glifos são traçados numa grade de 24x24 e escalados para o tamanho pedido,
 # então um desenho só serve a insígnia de 40px e a seta de 12px.
@@ -261,6 +267,21 @@ def _caminho_do_glifo(nome: str) -> QPainterPath:
         p.lineTo(12.0, 19.0)
         p.moveTo(5.0, 12.0)
         p.lineTo(19.0, 12.0)
+    elif nome == GLIFO_ALERTA:
+        # Triângulo de cantos arredondados, a haste e o ponto. O ponto é um
+        # traço de comprimento quase zero: com a ponta redonda da caneta ele
+        # sai como um círculo da mesma espessura da haste.
+        p.moveTo(10.3, 4.4)
+        p.quadTo(12.0, 1.6, 13.7, 4.4)
+        p.lineTo(21.2, 17.6)
+        p.quadTo(22.8, 20.5, 19.5, 20.5)
+        p.lineTo(4.5, 20.5)
+        p.quadTo(1.2, 20.5, 2.8, 17.6)
+        p.closeSubpath()
+        p.moveTo(12.0, 9.0)
+        p.lineTo(12.0, 13.4)
+        p.moveTo(12.0, 16.8)
+        p.lineTo(12.0, 16.9)
     return p
 
 
@@ -398,6 +419,48 @@ class InsigniaCardapio(QWidget):
         desenhar_insignia(
             pintor, QRectF(self.rect()), self._glifo, ThemeController.instancia().tokens_atuais
         )
+        pintor.end()
+
+
+class BotaoComGlifo(QPushButton):
+    """`QPushButton` com um glifo desenhado à esquerda do texto.
+
+    O QSS reserva o espaço com `padding-left` e esta classe pinta o glifo nele,
+    na cor do token do estado atual — ligado ou desligado. `setIcon` com um
+    pixmap exigiria refazer o ícone a cada troca de tema, e assinar o sinal do
+    `ThemeController` é justamente o que o §3.14 evita.
+
+    Nasceu dentro de `composicao_combo_dialog.py` (§9.15, o "Remover" e o
+    "Adicionar componente") e saiu para cá quando o cartão de exclusão (§9.18)
+    precisou da lixeira no botão vermelho: é peça de glifo, e os glifos moram
+    aqui.
+    """
+
+    LADO_GLIFO_PX = 13
+    X_GLIFO_PX = 16
+
+    def __init__(
+        self,
+        texto: str,
+        glifo: str,
+        token_ligado: str,
+        token_desligado: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(texto, parent)
+        self._glifo = glifo
+        self._token_ligado = token_ligado
+        self._token_desligado = token_desligado
+
+    @nao_deixa_escapar()
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
+        super().paintEvent(event)
+        tokens = ThemeController.instancia().tokens_atuais
+        token = self._token_ligado if self.isEnabled() else self._token_desligado
+        lado = float(self.LADO_GLIFO_PX)
+        alvo = QRectF(float(self.X_GLIFO_PX), (self.height() - lado) / 2.0, lado, lado)
+        pintor = QPainter(self)
+        desenhar_glifo(pintor, self._glifo, alvo, cor_do_token(tokens[token]), 2.0)
         pintor.end()
 
 

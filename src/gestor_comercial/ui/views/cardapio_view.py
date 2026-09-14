@@ -43,6 +43,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
+from functools import partial
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -71,12 +72,11 @@ from PySide6.QtWidgets import (
 from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.domain.categoria import Categoria
 from gestor_comercial.domain.produto import Produto
+from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.cardapio_service import (
     CardapioService,
     ResumoCardapio,
-    conteudo_da_categoria,
     margem_percentual,
-    produtos_vinculados,
 )
 from gestor_comercial.services.dinheiro import ZERO
 from gestor_comercial.services.exceptions import (
@@ -117,6 +117,10 @@ from gestor_comercial.ui.widgets.cardapio_cartoes import (
     montar_itens,
 )
 from gestor_comercial.ui.widgets.composicao_combo_dialog import ComposicaoComboDialog
+from gestor_comercial.ui.widgets.confirmacao_exclusao_dialog import (
+    ConfirmacaoExclusaoDialog,
+    Protecao,
+)
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 from gestor_comercial.ui.widgets.modais import descartar_modal, executar_modal
 from gestor_comercial.ui.widgets.organizacao_cardapio_dialog import OrganizacaoCardapioDialog
@@ -300,6 +304,23 @@ def _fotografar(produto: Produto, nome_da_subcategoria: str | None) -> FotoProdu
         # produto sumiu.
         busca=chave_de_agrupamento(f"{produto.nome} {nome_da_subcategoria or ''}"),
     )
+
+
+def _pedir_senha_master(auth: AuthService, registro: str, cartao: QWidget) -> bool:
+    """A barreira do §9.10, aberta SOBRE o cartão de confirmação (§9.18).
+
+    É a função que os três "Excluir" do Cardápio entregam ao
+    `ConfirmacaoExclusaoDialog` (com `partial`, que amarra a credencial e o que
+    vai ser apagado): o cartão a chama quando o gerente aperta "Excluir com
+    Senha Master", e o PIN nasce filho do CARTÃO — o escurecedor dele cobre o
+    cartão, e desistir do PIN devolve o gerente ao cartão em vez de à tela.
+
+    Nível 3, a Senha Master, e não `exigir_gerente()`: gerente é satisfeito pela
+    SESSÃO, e quem abriu o turno de manhã autorizaria a exclusão clicada à
+    tarde. Uma função só, e um site de modal só, para as três entidades.
+    """
+    pin = PinPadDialog.para_exclusao(auth, registro, cartao)
+    return executar_modal(pin) == QDialog.DialogCode.Accepted
 
 
 def _legenda_das_categorias(resumo: ResumoCardapio) -> str:
@@ -1261,12 +1282,16 @@ class _CategoriasPainel(PainelPontilhado):
         * **vazia** é a subdivisão recém-criada, ou aquela cujos itens já foram
           movidos. Não há o que perder, e a confirmação existe só contra o
           clique errado;
-        * **com produtos**, a exclusão é RECUSADA pelo service, e a tela diz
-          quantos são e o que fazer. O caminho de força bruta existe atrás da
-          Senha Master do dono, e ele é destrutivo de verdade: os produtos que
-          nunca foram vendidos saem do banco, e os que já têm venda registrada
-          são arquivados (somem do cardápio e do lançamento, e o relatório do
-          mês passado continua fechando).
+        * **com produtos**, o caminho existe atrás da Senha Master do dono, e
+          ele é destrutivo de verdade: os produtos que nunca foram vendidos saem
+          do banco, e os que já têm venda registrada são arquivados (somem do
+          cardápio e do lançamento, e o relatório do mês passado continua
+          fechando). Reafirmado pelo Vitor no §9.18, contra o bloqueio rígido
+          que a Foto 3 do mockup desenha.
+
+        Os dois caminhos saem do MESMO cartão (§9.18): quem escolhe entre eles
+        é `ConfirmacaoExclusaoDialog.para_subcategoria`, pela contagem, e esta
+        função só lê `protecao` depois para chamar o método certo do service.
 
         A Senha Master, e não `exigir_gerente()`: é a mesma decisão do §9.10 —
         gerente é satisfeito pela SESSÃO, e quem abriu o turno de manhã
@@ -1279,73 +1304,21 @@ class _CategoriasPainel(PainelPontilhado):
         subcategoria = self.subcategoria_atual()
         if subcategoria is None:
             return
-
-        vinculados = self._service.contar_produtos_da_subcategoria(subcategoria.id)
-        if vinculados == 0:
-            if not self._confirmar_exclusao_vazia(subcategoria.nome):
-                return
-            self._aplicar_exclusao_de_subcategoria(subcategoria.id, cascata=False)
+        modal = ConfirmacaoExclusaoDialog.para_subcategoria(
+            subcategoria.nome,
+            self._service.contar_produtos_da_subcategoria(subcategoria.id),
+            partial(
+                _pedir_senha_master,
+                self._service.auth,
+                f"a subcategoria '{subcategoria.nome}' e os produtos dela",
+            ),
+            self,
+        )
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-
-        if not self._confirmar_cascata(subcategoria.nome, vinculados):
-            return
-        # `executar_modal` já descarta a instância no `finally` dele: o
-        # `descartar_modal` explícito é só de quem reaproveita o mesmo diálogo
-        # num `while`, que não é o caso aqui.
-        pin = PinPadDialog.para_exclusao(
-            self._service.auth, f"a subcategoria '{subcategoria.nome}' e os produtos dela", self
+        self._aplicar_exclusao_de_subcategoria(
+            subcategoria.id, cascata=modal.protecao is Protecao.SENHA_MASTER
         )
-        if executar_modal(pin) != QDialog.DialogCode.Accepted:
-            return
-        self._aplicar_exclusao_de_subcategoria(subcategoria.id, cascata=True)
-
-    def _confirmar_exclusao_vazia(self, nome: str) -> bool:
-        caixa = QMessageBox(self)
-        caixa.setWindowTitle("Excluir subcategoria")
-        caixa.setIcon(QMessageBox.Icon.Warning)
-        caixa.setText(
-            f"Deseja excluir a subcategoria '{nome}'?\n\n"
-            "Ela não tem nenhum produto dentro — nada mais é afetado."
-        )
-        botao_cancelar = caixa.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
-        botao_confirmar = caixa.addButton("Excluir", QMessageBox.ButtonRole.DestructiveRole)
-        botao_confirmar.setProperty("variante", "perigo")
-        caixa.setDefaultButton(botao_cancelar)
-        caixa.setEscapeButton(botao_cancelar)
-        executar_modal(caixa)
-        return caixa.clickedButton() is botao_confirmar
-
-    def _confirmar_cascata(self, nome: str, vinculados: int) -> bool:
-        """O aviso de bloqueio — e a saída de emergência, dita por inteiro.
-
-        A frase do bloqueio é a MESMA do service (`produtos_vinculados`): o
-        gerente que insistir e for barrado tem que ler a mesma coisa que leu
-        aqui, senão parecem dois problemas diferentes.
-
-        O botão da cascata não é o padrão, e o Esc cancela: é a operação mais
-        destrutiva da tela, e ela não pode acontecer por tecla apertada sem ler.
-        """
-        caixa = QMessageBox(self)
-        caixa.setWindowTitle("Excluir subcategoria")
-        caixa.setIcon(QMessageBox.Icon.Warning)
-        caixa.setText(
-            f"Não é possível excluir a subcategoria '{nome}': "
-            f"{produtos_vinculados(vinculados)}.\n\n"
-            "Mova ou exclua os produtos primeiro.\n\n"
-            "Com a SENHA MASTER do dono é possível excluir tudo de uma vez: os "
-            "produtos que nunca foram vendidos saem do cadastro, e os que já "
-            "têm venda registrada são arquivados — somem do cardápio e do "
-            "lançamento, e os relatórios e cupons passados continuam intactos."
-        )
-        botao_cancelar = caixa.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
-        botao_cascata = caixa.addButton(
-            "Excluir com Senha Master", QMessageBox.ButtonRole.DestructiveRole
-        )
-        botao_cascata.setProperty("variante", "perigo")
-        caixa.setDefaultButton(botao_cancelar)
-        caixa.setEscapeButton(botao_cancelar)
-        executar_modal(caixa)
-        return caixa.clickedButton() is botao_cascata
 
     def _aplicar_exclusao_de_subcategoria(
         self, subcategoria_id: int, *, cascata: bool
@@ -1434,75 +1407,22 @@ class _CategoriasPainel(PainelPontilhado):
         if categoria is None:
             return
         produtos, subcategorias = self._service.contar_conteudo_da_categoria(categoria.id)
-        if not produtos and not subcategorias:
-            if not self._confirmar_categoria_vazia(categoria.nome):
-                return
-            self._aplicar_exclusao_de_categoria(categoria.id, cascata=False)
-            return
-
-        if not self._confirmar_cascata_de_categoria(categoria.nome, produtos, subcategorias):
-            return
-        pin = PinPadDialog.para_exclusao(
-            self._service.auth,
-            f"a categoria '{categoria.nome}' e tudo o que está dentro dela",
+        modal = ConfirmacaoExclusaoDialog.para_categoria(
+            categoria.nome,
+            produtos,
+            subcategorias,
+            partial(
+                _pedir_senha_master,
+                self._service.auth,
+                f"a categoria '{categoria.nome}' e tudo o que está dentro dela",
+            ),
             self,
         )
-        if executar_modal(pin) != QDialog.DialogCode.Accepted:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-        self._aplicar_exclusao_de_categoria(categoria.id, cascata=True)
-
-    def _confirmar_categoria_vazia(self, nome: str) -> bool:
-        caixa = QMessageBox(self)
-        caixa.setWindowTitle("Excluir categoria")
-        caixa.setIcon(QMessageBox.Icon.Warning)
-        caixa.setText(
-            f"Deseja excluir a categoria '{nome}'?\n\n"
-            "Ela está vazia — sem produtos e sem subcategorias. Nada mais é afetado."
+        self._aplicar_exclusao_de_categoria(
+            categoria.id, cascata=modal.protecao is Protecao.SENHA_MASTER
         )
-        botao_cancelar = caixa.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
-        botao_confirmar = caixa.addButton("Excluir", QMessageBox.ButtonRole.DestructiveRole)
-        botao_confirmar.setProperty("variante", "perigo")
-        caixa.setDefaultButton(botao_cancelar)
-        caixa.setEscapeButton(botao_cancelar)
-        executar_modal(caixa)
-        return caixa.clickedButton() is botao_confirmar
-
-    def _confirmar_cascata_de_categoria(self, nome: str, produtos: int, subcategorias: int) -> bool:
-        """O aviso de bloqueio da categoria — e o que a Senha Master libera.
-
-        A frase do bloqueio é a MESMA do service (`conteudo_da_categoria`), pela
-        razão do §9.13: quem insistir e for barrado tem que ler a mesma coisa
-        que leu aqui.
-
-        O texto diz **a coisa mais fácil de sair errado**: um item já vendido
-        não pode sair do banco, então a categoria dele também não pode. Quem
-        clica precisa saber que "excluir tudo" pode terminar com a categoria
-        guardada, invisível, em vez de apagada.
-        """
-        caixa = QMessageBox(self)
-        caixa.setWindowTitle("Excluir categoria")
-        caixa.setIcon(QMessageBox.Icon.Warning)
-        caixa.setText(
-            f"Não é possível excluir a categoria '{nome}': "
-            f"{conteudo_da_categoria(produtos, subcategorias)}.\n\n"
-            "Mova ou exclua o que está dentro primeiro.\n\n"
-            "Com a SENHA MASTER do dono é possível excluir tudo de uma vez: as "
-            "subcategorias saem, os produtos que nunca foram vendidos saem do "
-            "cadastro, e os que já têm venda registrada são arquivados — somem "
-            "do cardápio e do lançamento, e os relatórios e cupons passados "
-            "continuam intactos. Se sobrar algum item arquivado, a própria "
-            "categoria fica guardada com ele, fora de todas as telas: é a linha "
-            "dela que sustenta a venda antiga."
-        )
-        botao_cancelar = caixa.addButton("Cancelar", QMessageBox.ButtonRole.RejectRole)
-        botao_cascata = caixa.addButton(
-            "Excluir com Senha Master", QMessageBox.ButtonRole.DestructiveRole
-        )
-        botao_cascata.setProperty("variante", "perigo")
-        caixa.setDefaultButton(botao_cancelar)
-        caixa.setEscapeButton(botao_cancelar)
-        executar_modal(caixa)
-        return caixa.clickedButton() is botao_cascata
 
     def _aplicar_exclusao_de_categoria(self, categoria_id: int, *, cascata: bool) -> None:
         """Roda a exclusão e recarrega a árvore do zero.
@@ -2121,24 +2041,39 @@ class _ProdutosPainel(PainelPontilhado):
         self.alterado.emit()
 
     def excluir(self) -> None:
+        """Exclui o produto escolhido — apagado num clique, ou arquivado com a
+        Senha Master se ele tiver histórico (§9.18).
+
+        Até o §9.17 o produto vendido (ou preso a um combo) era só recusado,
+        com "Desative-o", depois de o gerente já ter confirmado um "Sim". Agora
+        o cartão sabe ANTES, pelos vínculos, e oferece o caminho que existe:
+        `excluir_produto` para o que nunca existiu na prática, `arquivar_produto`
+        para o resto — o service desamarra os combos e guarda a linha para as
+        vendas passadas.
+        """
         if self.alvo_atual().tipo is not TipoDeAlvo.PRODUTO:
             self.excluir_estrutura_pedida.emit()
             return
         produto = self.produto_atual()
         if produto is None:
             return
-        resposta = QMessageBox.question(
+        # O id lido agora: depois do commit a instância expira, e a arquivada
+        # ou apagada não deve ser relida só para saber quem era.
+        produto_id, nome = produto.id, produto.nome
+        modal = ConfirmacaoExclusaoDialog.para_produto(
+            nome,
+            self._service.vinculos_do_produto(produto_id),
+            partial(_pedir_senha_master, self._service.auth, f"o produto '{nome}'"),
             self,
-            "Excluir produto",
-            f"Excluir o produto '{produto.nome}' permanentemente? Esta ação não pode ser desfeita.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
         )
-        if resposta != QMessageBox.StandardButton.Yes:
+        if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         self._mostrar_erro("")
         try:
-            self._service.excluir_produto(produto.id)
+            if modal.protecao is Protecao.SENHA_MASTER:
+                self._service.arquivar_produto(produto_id)
+            else:
+                self._service.excluir_produto(produto_id)
         except _ERROS_SERVICE as erro:
             self._mostrar_erro(str(erro))
             return
