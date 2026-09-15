@@ -4177,6 +4177,185 @@ produto some de todas as telas.
   exportação do comprovante.
 - **Desarquivar pela tela** — não existe lixeira (§9.13).
 
+### 9.19 O cadastro de impressora num cartão só ✅ CONCLUÍDO — 2026-09-15
+
+Pedido do Vitor, com o mockup "Editar impressora": trocar o formulário de
+fábrica de "Nova impressora"/"Editar impressora" (um `QFormLayout` com a moldura
+do sistema, um combo de cinco tipos, oito campos de texto que apareciam e sumiam,
+um `QSpinBox` de colunas e um `QCheckBox` só na edição) por um cartão com cards
+de conexão, bobina em milímetros, situação com interruptor e resumo ao vivo. Em
+destaque: **um componente só**, `ImpressoraDialog`, para os dois modos.
+
+#### As três decisões do Vitor, perguntadas antes de começar
+
+O mockup e o modelo de dados não batiam em três pontos, e os três são regra de
+negócio:
+
+1. **Três cards, cinco tipos.** O banco tem USB direto, Serial, Rede, fila do
+   Windows e Arquivo; o mockup, Arquivo, USB e Rede. E "Detectar
+   automaticamente" não existe no driver. Na máquina do Vitor não há `pyusb` nem
+   `pyserial`, só o `pywin32`: na prática uma térmica USB entra no Windows como
+   fila de impressão. **Decisão: o card USB é a conexão local.** O campo lista as
+   filas instaladas no Windows e as portas COM, e aceita digitar `COM3` ou
+   `0x04b8:0x0202`. O que se escolhe é gravado como WINDOWS, SERIAL ou USB, os
+   campos que já existiam. Detecção na hora de imprimir não há, e
+   `hardware/impressora_escpos.py` não foi tocado.
+2. **"Uso da impressão" não existe no banco.** **Decisão: mapear para o que
+   existe.** "Recibo do cliente" é `padrao=True`, com a antiga perdendo a marca
+   **no mesmo commit**; "Produção (por categoria)" é `padrao=False`. Copa/Bar do
+   mockup não entrou: faria o mesmo que Cozinha, e seria um rótulo dizendo algo
+   que o sistema não faz. Schema intacto, sem migração.
+3. **O interruptor "Impressora ativa" só existia na edição** (a decisão antiga:
+   cadastrar desligada é cadastrar morta). **Decisão: funciona nos dois modos**,
+   com a regra de proteção de que impressora desligada nunca é a padrão.
+
+#### O desenho
+
+`src/gestor_comercial/ui/widgets/impressora_dialog.py`, o décimo primeiro modal
+em cartão. Uma classe, com as frases de cada modo em `MODOS` e os cards em
+`CONEXOES` (a forma do §9.6 e do §9.12). Quem chama usa `para_nova`/`para_editar`,
+e o `__init__` aceita `modo="novo"`/`modo="editar"`, como o pedido escreveu; modo
+e impressora que não combinam dão `ValueError` na construção. O cartão copia a
+impressora uma vez num `_Retrato` e nunca guarda a instância do SQLAlchemy
+(§3.4).
+
+As leituras dos campos são **funções puras**, testadas sem widget:
+`ler_endereco_de_rede` (IPv4 com porta opcional, 9100 por padrão),
+`ler_destino_local` (a lista do Windows decide primeiro; fora dela, `COMn` é
+serial, `vendor:product` é USB e o resto é nome de fila) e `bobina_das_colunas`
+(até 40 colunas é 58mm; 42 fica na de 80mm, como o pedido diz).
+
+**O cartão grava pela função `salvar` que a view passa**, e só fecha aceito
+quando o service aceitou. Com erro, a mensagem aparece dentro do cartão
+("NÃO FOI POSSÍVEL SALVAR") sem perder nada do que foi escolhido. É de **uma
+abertura só** (`executar_modal`), então não herda o defeito do cartão do §9.12
+que fica com os botões mudos quando é reaberto no `while`. Os sites de modal
+foram de 38 para 37: criar e editar abriam cada um o seu diálogo, e agora abrem
+o mesmo cartão por `_abrir_cadastro`. A lista recarregada volta com a impressora
+gravada selecionada.
+
+**O veredito à direita do resumo** tem quatro estados: nada (o mockup), cinza
+quando falta preencher ("Falta o nome", "Escolha a impressora local"), coral
+quando está errado ("✕ Nome já existente", "✕ IP inválido") e âmbar quando salva
+mas avisa: **"Sem impressora de recibo"**, quando a escolha deixa o app sem
+impressora de recibo. A tela conta a impressora em edição FORA da pergunta "há
+outra de recibo?"; contá-la dentro faria o aviso sumir justamente ao tirar o
+recibo da única que o recebe.
+
+**Desligar o interruptor desliga a opção "Recibo do cliente"** e põe o seletor em
+Produção, para a tela mostrar o que vai ser gravado. Religar devolve a escolha
+que o gerente tinha feito (`activated`, e não `currentIndexChanged`, separa o
+gesto dele da troca forçada).
+
+#### O service: `ativa`, `padrao` e `_aplicar_uso`
+
+`criar_impressora` ganhou `ativa=True` e `padrao=None`; `editar_impressora`,
+`padrao=None`. `None` é o comportamento de sempre: no cadastro, vira padrão só se
+não houver outra ativa; na edição, não mexe. As duas regras da marca, que moravam
+em três métodos, foram para `_aplicar_uso`: desligada nunca é padrão, e só uma
+fica marcada, com as outras perdendo a marca antes do commit de quem chamou.
+`definir_padrao` passou a usar a mesma rotina. A comparação é por identidade
+(`is not`), porque no cadastro a impressora ainda não tem id.
+
+#### A lista do Windows, sem bloquear a tela
+
+`hardware/descoberta_local.py` lê `win32print.EnumPrinters` e a chave
+`HARDWARE\DEVICEMAP\SERIALCOMM` do registro. O `serial.tools.list_ports` lê a
+mesma chave, e ler direto evita pedir o `pyserial`. As filas virtuais (PDF,
+OneNote, XPS, fax) ficam de fora pelo critério da **porta** (`nul:`,
+`PORTPROMPT:`...), e não do nome, que pode ser renomeado. As portas COM saem em
+ordem numérica, com "Bluetooth" no detalhe das `BthModem`. A função nunca
+levanta: sem a lista, o campo aceita o que for digitado.
+
+A UI não fala com `hardware/`: a porta é `ImpressaoService.listar_destinos_locais`,
+**estática de propósito**. Ela roda numa thread de trabalho, e um método comum
+passaria pelo `@transacional`, que num estouro faria `rollback()` na `Session`, e
+na thread errada. O cartão abre a thread no primeiro `showEvent`
+(`_BuscaDeDestinos`, Python puro, sem `QObject`) e confere o resultado num
+`QTimer` de 50ms, que para quando a lista chega ou depois de 8s. Nenhum objeto Qt
+atravessa para a thread, então fechar o cartão no meio da busca não deixa sinal
+apontando para widget morto. No `QComboBox` editável, o primeiro `addItem` troca
+o texto do campo: a edição de uma impressora `COM3` abriria com o nome da
+primeira fila. Por isso o texto é guardado e devolvido com os sinais calados.
+
+#### O que o pedido escrito dizia e não foi seguido ao pé da letra
+
+- **`destroy()` e `unbind()`** são de Tkinter. Os equivalentes estão no cabeçalho
+  do módulo: `executar_modal` destrói, `_soltar_recursos()` para o relógio, solta
+  a busca, desconecta as quinze ligações nominalmente (trava `_limpo`) e solta
+  o escurecedor.
+- **"PORTA USB (opcional)" com "Detectar automaticamente"** virou "PORTA USB",
+  obrigatório, pela decisão 1: sem detecção, deixar vazio não imprimiria em lugar
+  nenhum.
+- **"Copa / Bar"** não entrou (decisão 2).
+- **"Validação de IP válido"** é mais estrita que o service, que aceita nome de
+  máquina. O mínimo de 2 caracteres no nome também é trava só de tela. As duas
+  estão escritas no cabeçalho do módulo. A unicidade do nome espelha a regra
+  **exata** do service: "balcão" passa com "Balcão" cadastrada, pela lição do
+  §9.12.
+- **"Limite de 40 caracteres"** vale para nome novo. Um nome já cadastrado mais
+  longo não é cortado ao abrir a edição (`setMaxLength` cortaria calado).
+- **Largura 600px**, dentro dos "560 a 620" pedidos. Medida com a fonte da marca
+  nas 12 variantes (2 modos × 3 cards × 2 temas): nada espremido, e o cartão tem
+  622px de altura, abaixo dos 728 úteis.
+- **A cor escolhida** é o âmbar do mockup no Escuro e o azul do `acento` no Claro.
+  Os tokens são uma família própria, `impressora_*`, nos dois temas.
+- **Os ícones são desenhados** (`GLIFO_IMPRESSORA`, `GLIFO_ARQUIVO_TEXTO`,
+  `GLIFO_USB`, `GLIFO_REDE`, `GLIFO_SINAL`), pela armadilha do emoji (§9.4,
+  §9.10). `GlifoSolto` ganhou `trocar_token`.
+- **"~90 MB"**: o processo da bancada já mede 113 MB antes do primeiro cartão
+  (QSS, fontes, `win32print`), e o cartão não move esse número de forma
+  sustentada (ver a medição abaixo).
+
+#### Achados no caminho
+
+- **O nome abria todo selecionado.** O `QDialog::setVisible` manda ao campo em
+  foco um `FocusIn` sintético "de Tab" DEPOIS do `showEvent`, e o `QLineEdit`
+  responde a Tab selecionando tudo (medido numa sonda). O `end(False)` foi para um
+  override de `setVisible`.
+- **O helper do teste de integração travava.** Com a view editando pelo caminho
+  de criar (uma mutação), o service recusava o nome, o cartão ficava aberto e o
+  `exec()` nunca voltava: a suíte parou por horas em vez de reprovar. É a
+  armadilha do `encenar()` do §9.14. O helper `_encenar` ganhou um vigia de 3s,
+  filho da tela e parado na volta.
+- **O teste de atomicidade precisou de banco em arquivo.** Trocar o `commit` por um
+  falso deixa a transação aberta com o `flush` dentro, e o `@transacional` não a
+  desfaz (só olha `new`/`dirty`/`deleted`, vazios depois do `flush`). Isso é
+  artefato do teste, não do app: o teste passou a espiar o disco por uma segunda
+  conexão no instante do commit, e o disco ainda mostra a antiga marcada.
+
+#### Conferência
+
+- suíte **2045** (de 1893), 0 falhas, **152 testes novos**:
+  `tests/ui/test_impressora_dialog.py` (leituras puras, os dois modos, pré-carga
+  dos cinco tipos com abrir-e-salvar-sem-mexer devolvendo o mesmo cadastro em 32,
+  42 e 48 colunas, cards, bobina, interruptor, veredito, salvar, a lista do
+  Windows em thread, teclado, nada espremido, ciclo de vida, glifos),
+  `tests/ui/test_impressoras_cadastro.py` (tela → cartão → service → banco),
+  `tests/unit/test_impressora_uso_e_situacao.py` e
+  `tests/unit/test_descoberta_local.py`;
+- **35 mutações, as 35 reprovam.** Na primeira passada, 33 reprovaram, uma
+  sobreviveu (apagar o `deselect()`, redundante com o `end(False)`: saiu o código)
+  e uma travou a suíte (o helper, corrigido acima); as duas refeitas reprovam;
+- memória com a busca REAL das filas do Windows, 300 ciclos pelo `exec()` (card,
+  bobina, interruptor, nome, Cancelar): widgets **1→1**, **0 diálogos vivos**,
+  threads **1→1**, RSS +2,54 / +0,83 / +0,39 / +0,11 / +0,09 MB por bloco de 60,
+  convergindo;
+- tempo: **~14 ms** para montar o cartão; **~71 ms** (pior 103 ms) da abertura até
+  a lista do Windows chegar;
+- bancada de cupons contra `2c7dfa1`: **2 idênticos** linha a linha; bancada
+  visual a 1366x738: **24 telas idênticas byte a byte** (o item vive no cartão, e
+  a tela de Impressoras parada não mudou um pixel).
+
+#### Ficou de fora, de propósito
+
+- **Detecção automática na impressão** (decisão 1).
+- **Filtrar portas COM que não são impressora.** Uma térmica Bluetooth aparece
+  como `BthModem`, igual a um celular pareado; filtrar esconderia a impressora.
+- **Hostname no endereço de rede**, que o service aceitaria.
+- **O `_QuitarConsumoDialog`, o `_AlterarSegredoDialog` e o `_ProdutoDialog`**,
+  que continuam formulários de fábrica.
+
 ---
 
 ## 10. As melhores mudanças que o programa teve — em português de balcão

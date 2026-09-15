@@ -43,6 +43,10 @@ from gestor_comercial.domain.enums import FormaPagamento, StatusCaixa
 from gestor_comercial.domain.fila_impressao import ItemFilaImpressao
 from gestor_comercial.domain.impressora import Impressora
 from gestor_comercial.domain.item_comanda import ItemComanda
+from gestor_comercial.hardware.descoberta_local import DestinoLocal
+from gestor_comercial.hardware.descoberta_local import (
+    listar_destinos_locais as _descobrir_destinos_locais,
+)
 from gestor_comercial.hardware.impressora_escpos import (
     BlocoTexto,
     Documento,
@@ -288,6 +292,23 @@ class ImpressaoService:
         # justamente para o gerente conferir o cabo antes de reativá-la.
         documento = self._documento_teste(impressora, datetime.now())
         return self._enviar(impressora, documento, 0, "Teste de impressora")
+
+    @staticmethod
+    def listar_destinos_locais() -> list[DestinoLocal]:
+        """As filas do Windows e as portas COM que o cadastro oferece (§9.19).
+
+        É a porta da UI para `hardware/descoberta_local` — a tela fala com
+        service, nunca com `hardware/` (arquitetura, §6).
+
+        **`staticmethod` de propósito, e é o que torna esta a única porta deste
+        service que pode rodar fora da thread da UI.** O cartão de cadastro a
+        chama numa thread de trabalho, porque o spooler pode demorar a
+        responder. Um método comum passaria pelo `@transacional`, que num
+        estouro faria `uow.rollback()` — na `Session`, e na thread errada. O
+        `staticmethod` fica fora do embrulho (ver `transacional`) e não tem
+        `self` para alcançar a `Session` nem por engano.
+        """
+        return _descobrir_destinos_locais()
 
     # ------------------------------------------------------------------
     # Roteamento (porte de RoteamentoImpressaoService.rotear)

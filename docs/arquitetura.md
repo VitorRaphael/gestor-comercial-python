@@ -218,6 +218,7 @@ gestor-comercial-python/
 │   │   ├── imagem_service.py · exceptions.py
 │   │
 │   ├── hardware/impressora_escpos.py   # 5 tipos de conexão + BlocoTexto/Documento
+│   ├── hardware/descoberta_local.py    # filas do Windows e portas COM para o cadastro (§9.19)
 │   │
 │   └── ui/                        # PySide6, zero SQL
 │       ├── main_window.py         # login → shell (sidebar + páginas), navegação e PINs

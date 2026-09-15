@@ -1001,6 +1001,8 @@ class CardapioService:
         nome_fila: str | None = None,
         caminho_arquivo: str | None = None,
         colunas: int | str | None = None,
+        ativa: bool = True,
+        padrao: bool | None = None,
     ) -> Impressora:
         """Cadastra uma impressora; só o nome é obrigatório.
 
@@ -1008,12 +1010,19 @@ class CardapioService:
         antiga `criar_impressora("Cozinha")` continue valendo. Sem informar
         nada sai uma impressora ARQUIVO, que grava o cupom num .txt — dá pra
         rodar o food truck inteiro antes de a impressora física chegar.
+
+        `ativa` e `padrao` são o que o cartão de cadastro (§9.19) chama de
+        "Situação" e "Uso da impressão". `padrao=None` é o comportamento de
+        sempre: vira a padrão só se não houver outra ativa. `True`/`False` é a
+        escolha explícita da tela, e vale inclusive para tirar a marca que a
+        regra automática daria. Impressora que nasce desligada NUNCA é a padrão,
+        pedida ou não — ver `_aplicar_uso`.
         """
         self.auth.exigir_gerente()
         nome_limpo = self._texto_obrigatorio(nome, "Informe o nome da impressora.")
         self._exigir_nome_de_impressora_livre(nome_limpo, impressora_id=None)
 
-        impressora = Impressora(nome=nome_limpo, ativa=True, padrao=False)
+        impressora = Impressora(nome=nome_limpo, ativa=bool(ativa), padrao=False)
         impressora.colunas = self._colunas_validas(colunas, COLUNAS_PADRAO)
         self._aplicar_conexao(
             impressora,
@@ -1027,12 +1036,13 @@ class CardapioService:
             nome_fila=nome_fila,
             caminho_arquivo=caminho_arquivo,
         )
-        # Sem padrão ativa, item de categoria sem impressora não tem pra onde ir
-        # e o recibo do cliente não sai. Marcar a primeira (ou a próxima, se a
-        # antiga foi apagada/desativada) faz o dia da instalação funcionar sem
-        # depender de mais um clique do gerente.
-        if self.uow.impressoras.buscar_padrao() is None:
-            impressora.padrao = True
+        if padrao is None:
+            # Sem padrão ativa, item de categoria sem impressora não tem pra onde
+            # ir e o recibo do cliente não sai. Marcar a primeira (ou a próxima,
+            # se a antiga foi apagada/desativada) faz o dia da instalação
+            # funcionar sem depender de mais um clique do gerente.
+            padrao = self.uow.impressoras.buscar_padrao() is None
+        self._aplicar_uso(impressora, padrao)
 
         self.uow.impressoras.salvar(impressora)
         self.uow.commit()
@@ -1054,13 +1064,19 @@ class CardapioService:
         caminho_arquivo: str | None = None,
         colunas: int | str | None = None,
         ativa: bool | None = None,
+        padrao: bool | None = None,
     ) -> Impressora:
         """Grava o formulário inteiro de uma impressora já cadastrada.
 
         É substituição, não remendo: o que não vier no parâmetro do tipo de
-        conexão escolhido fica NULL. `colunas=None` e `ativa=None` são a
-        exceção — significam "não mexe", porque são campos que a tela pode
-        simplesmente não estar editando.
+        conexão escolhido fica NULL. `colunas=None`, `ativa=None` e
+        `padrao=None` são a exceção — significam "não mexe", porque são campos
+        que a tela pode simplesmente não estar editando.
+
+        `padrao=True` tira a marca da antiga padrão no MESMO commit (a escolha
+        "Recibo do cliente" do cartão, §9.19): gravar a impressora e só depois
+        chamar `definir_padrao` deixaria uma janela em que duas estão marcadas,
+        ou nenhuma, se a segunda chamada falhasse.
         """
         self.auth.exigir_gerente()
         impressora = self.buscar_impressora(impressora_id)
@@ -1083,12 +1099,7 @@ class CardapioService:
         )
         if ativa is not None:
             impressora.ativa = bool(ativa)
-        # Impressora desligada pelo gerente não pode continuar sendo a padrão:
-        # o fallback mandaria cupom pra um destino que ele mesmo desativou.
-        # Zerar a marca aqui deixa isso visível na tela em vez de virar
-        # armadilha silenciosa na hora do movimento.
-        if not impressora.ativa:
-            impressora.padrao = False
+        self._aplicar_uso(impressora, impressora.padrao if padrao is None else padrao)
 
         self.uow.impressoras.salvar(impressora)
         self.uow.commit()
@@ -1131,14 +1142,7 @@ class CardapioService:
                 "Ative-a antes de defini-la como padrão."
             )
 
-        # Duas padrão ao mesmo tempo faria o recibo sair em uma e o fechamento
-        # em outra, dependendo da ordem do banco. Derruba a marca das outras.
-        for outra in self.uow.impressoras.listar_todos():
-            if outra.id != impressora.id and outra.padrao:
-                outra.padrao = False
-                self.uow.impressoras.salvar(outra)
-
-        impressora.padrao = True
+        self._aplicar_uso(impressora, True)
         self.uow.impressoras.salvar(impressora)
         self.uow.commit()
         return impressora
@@ -1219,6 +1223,33 @@ class CardapioService:
             impressora.caminho_arquivo = self._caminho_de_arquivo(
                 caminho_arquivo, impressora.nome
             )
+
+    def _aplicar_uso(self, impressora: Impressora, padrao: bool) -> None:
+        """Marca (ou desmarca) a impressora como a do recibo, sem commit.
+
+        Um lugar só para as duas regras da marca, que antes moravam em três
+        métodos:
+
+        * **desligada nunca é a padrão**, pedida ou não. O fallback mandaria
+          cupom para um destino que o próprio gerente desativou; zerar a marca
+          deixa isso visível na tela em vez de virar armadilha na hora do
+          movimento. Vale para o cadastro que nasce desligado (§9.19) e para a
+          edição que desliga;
+        * **só uma marcada**: duas ao mesmo tempo fariam o recibo sair em uma e
+          o fechamento em outra, dependendo da ordem do banco. As outras perdem
+          a marca aqui, antes do commit de quem chamou — então a troca é atômica.
+
+        Compara por identidade (`is not`) e não por id: no cadastro a impressora
+        ainda não foi gravada e não tem id, e `None != outra.id` derrubaria a
+        marca de todo mundo, inclusive dela mesma numa segunda passada.
+        """
+        marcar = bool(padrao) and bool(impressora.ativa)
+        if marcar:
+            for outra in self.uow.impressoras.listar_todos():
+                if outra is not impressora and outra.padrao:
+                    outra.padrao = False
+                    self.uow.impressoras.salvar(outra)
+        impressora.padrao = marcar
 
     def _exigir_nome_de_impressora_livre(self, nome: str, impressora_id: int | None) -> None:
         existente = self.uow.impressoras.buscar_por_nome(nome)

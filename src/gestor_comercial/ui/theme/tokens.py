@@ -444,6 +444,44 @@ TEMA_ESCURO: dict[str, str] = {
     # simetria seria decidir por ele.
     "foco_teclado_anel": "#22D3EE",
     "foco_teclado_tinta": "#132225",
+    # ---- Cadastro de impressora (`impressora_dialog.py`, §9.19) ----
+    # Família própria, pela lição do §9.5 que o `exclusao_*` repetiu: metade
+    # destes hex coincide com `cardapio_icone_*`, `visor_valor_bg` e
+    # `pilula_ativo_*`, e cada um veste outra coisa. O card de conexão escolhido
+    # não pode mudar de cor porque alguém ajustou a insígnia dos KPIs.
+    "impressora_badge_bg": "#1F1A13",
+    "impressora_badge_borda": "rgba(229, 169, 60, 0.2)",
+    "impressora_badge_glifo": "#E5A93C",
+    "impressora_secao": "#E5A93C",
+    # Os campos e o resumo são REBAIXADOS em relação ao cartão, como o visor de
+    # valor: é onde se escreve e onde se confere, não mais um cartão por cima.
+    "impressora_campo_bg": "#111110",
+    "impressora_resumo_bg": "#111110",
+    "impressora_resumo_borda": "rgba(255, 255, 255, 0.06)",
+    # A opção escolhida (card de conexão e botão de bobina) e as outras.
+    "impressora_opcao_bg": "#141413",
+    "impressora_opcao_borda": "rgba(255, 255, 255, 0.06)",
+    "impressora_opcao_glifo": "#A1A1AA",
+    "impressora_opcao_texto": "#A1A1AA",
+    "impressora_opcao_ativa_bg": "#1C1914",
+    "impressora_opcao_ativa_borda": "#E5A93C",
+    "impressora_opcao_ativa_glifo": "#E5A93C",
+    # "Impressora ativa": o verde esmeralda do mockup, e não `sucesso` (#4ADE80
+    # neste tema) — aqui ele diz "está recebendo cupom", não "deu certo".
+    "impressora_situacao_ativa_bg": "#0E1A12",
+    "impressora_situacao_ativa_borda": "rgba(34, 197, 94, 0.35)",
+    "impressora_situacao_ativa_texto": "#22C55E",
+    "impressora_situacao_inativa_bg": "#141413",
+    "impressora_situacao_inativa_borda": "rgba(255, 255, 255, 0.06)",
+    "impressora_situacao_inativa_texto": "#71717A",
+    "impressora_interruptor_ligado": "#22C55E",
+    "impressora_interruptor_desligado": "#3F3F46",
+    "impressora_interruptor_botao_ligado": "#0B0B0A",
+    "impressora_interruptor_botao_desligado": "#A1A1AA",
+    # O veredito curto do formulário, à direita do resumo: âmbar é aviso que
+    # não impede salvar ("o recibo ficará sem impressora"), coral é o que impede.
+    "impressora_aviso": "#F59E0B",
+    "impressora_erro": "#F87171",
 }
 
 TEMA_CLARO: dict[str, str] = {
@@ -717,4 +755,34 @@ TEMA_CLARO: dict[str, str] = {
     "conferencia_maquininha": "#0E7490",
     "foco_teclado_anel": "#0891B2",
     "foco_teclado_tinta": "#ECFEFF",
+    # ---- Cadastro de impressora (`impressora_dialog.py`, §9.19) ----
+    # Ver o comentário gêmeo em TEMA_ESCURO. A opção escolhida segue o `acento`
+    # deste tema (azul), e não o âmbar do escuro: é a cor que diz "escolhido" em
+    # todo o resto do tema claro.
+    "impressora_badge_bg": "#FEF3C7",
+    "impressora_badge_borda": "#FDE68A",
+    "impressora_badge_glifo": "#B45309",
+    "impressora_secao": "#B45309",
+    "impressora_campo_bg": "#FAF9F5",
+    "impressora_resumo_bg": "#FAF9F5",
+    "impressora_resumo_borda": "#E2E1D9",
+    "impressora_opcao_bg": "#FAF9F5",
+    "impressora_opcao_borda": "#E2E1D9",
+    "impressora_opcao_glifo": "#64748B",
+    "impressora_opcao_texto": "#64748B",
+    "impressora_opcao_ativa_bg": "#EFF4FF",
+    "impressora_opcao_ativa_borda": "#0055FF",
+    "impressora_opcao_ativa_glifo": "#0055FF",
+    "impressora_situacao_ativa_bg": "#F0FDF4",
+    "impressora_situacao_ativa_borda": "#BBF7D0",
+    "impressora_situacao_ativa_texto": "#15803D",
+    "impressora_situacao_inativa_bg": "#FAF9F5",
+    "impressora_situacao_inativa_borda": "#E2E1D9",
+    "impressora_situacao_inativa_texto": "#94A3B8",
+    "impressora_interruptor_ligado": "#16A34A",
+    "impressora_interruptor_desligado": "#CBD5E1",
+    "impressora_interruptor_botao_ligado": "#FFFFFF",
+    "impressora_interruptor_botao_desligado": "#FFFFFF",
+    "impressora_aviso": "#B45309",
+    "impressora_erro": "#DC2626",
 }

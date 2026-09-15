@@ -23,6 +23,9 @@ from gestor_comercial.repository.base import Base
 COLUNAS_PADRAO = 48
 """Largura da bobina de 80mm. A de 58mm são 32 colunas."""
 
+COLUNAS_58MM = 32
+"""Largura da bobina de 58mm — o outro botão do seletor de bobina (§9.19)."""
+
 BAUDRATE_PADRAO = 9600
 PORTA_REDE_PADRAO = 9100
 

@@ -46,8 +46,10 @@ ARQUIVO_DO_HELPER = "modais.py"
 # exclusão do §9.18: saíram os seis sites da subcategoria e da categoria (duas
 # caixas e um PIN cada) e entraram quatro — um cartão por entidade, contando o
 # produto, cujo "Sim/Não" era `QMessageBox.question` e não passava por aqui, e
-# UM PIN só (`_pedir_senha_master`), que os três cartões chamam.
-SITES_ESPERADOS = 38
+# UM PIN só (`_pedir_senha_master`), que os três cartões chamam; −1 com o cartão
+# de impressora do §9.19: cadastrar e editar abriam cada um o seu diálogo, e
+# passaram a abrir o MESMO cartão por um site só (`_abrir_cadastro`).
+SITES_ESPERADOS = 37
 
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
 

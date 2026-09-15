@@ -931,6 +931,212 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background: transparent;
     }}
 
+    /* ---------- Modal "Nova impressora" / "Editar impressora"
+       (`widgets/impressora_dialog.py`, §9.19)
+       Decimo primeiro modal em cartao, e UM para os dois modos. Cartao,
+       cabecalho e divisores seguem o desenho do `orgDialog`; o que e proprio
+       daqui sao os cards de conexao, a bobina, a situacao e o resumo. O ✕, o
+       Cancelar e o Confirmar entram nas familias compartilhadas mais abaixo. */
+
+    QDialog#impDialog {{ background: transparent; }}
+    QFrame#impDialogCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+    QWidget#impDialogCabecalho, QWidget#impDialogRodape {{ background: transparent; }}
+    QFrame#impDialogCorpo {{ background: transparent; border: none; }}
+    QStackedWidget#impDialogPilha {{ background: transparent; }}
+    QFrame#impDialogDivisor {{
+      background: {t['cardapio_bloco_divisor']};
+      border: none;
+    }}
+    QFrame#impDialogBadge {{
+      background: {t['impressora_badge_bg']};
+      border: 1px solid {t['impressora_badge_borda']};
+      border-radius: 12px;
+    }}
+    QLabel#impDialogSecao {{
+      color: {t['impressora_secao']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      background: transparent;
+    }}
+    QLabel#impDialogTitulo {{
+      color: {t['texto']};
+      font-size: 18px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#impDialogSubtitulo {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QLabel#impDialogRotulo, QLabel#impDialogContador {{
+      color: {t['texto_fraquissimo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      background: transparent;
+    }}
+
+    /* O nome, os tres campos de conexao e o seletor de uso: a mesma capsula
+       rebaixada, com o anel do `acento` no foco. No seletor editavel o foco e
+       do `QLineEdit` de dentro, que e transparente -- quem desenha a capsula e
+       o `QComboBox`. */
+    QLineEdit#impDialogNome, QLineEdit#impDialogCampo,
+    QComboBox#impDialogLocal, QComboBox#impDialogUso {{
+      background: {t['impressora_campo_bg']};
+      border: 1px solid {t['borda']};
+      border-radius: 12px;
+      padding: 0 14px;
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 600;
+      selection-background-color: {t['acento']};
+      selection-color: {t['acento_texto']};
+    }}
+    QLineEdit#impDialogNome {{ font-size: 14px; font-weight: 700; padding: 0 16px; }}
+    QLineEdit#impDialogNome:focus, QLineEdit#impDialogCampo:focus,
+    QComboBox#impDialogLocal:focus, QComboBox#impDialogUso:focus {{
+      border: 1px solid {t['acento']};
+    }}
+    QComboBox#impDialogLocal, QComboBox#impDialogUso {{ padding-right: 34px; }}
+    QComboBox#impDialogLocal QLineEdit {{
+      background: transparent;
+      border: none;
+      padding: 0;
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 600;
+    }}
+    QComboBox#impDialogLocal::drop-down, QComboBox#impDialogUso::drop-down {{
+      border: none;
+      width: 34px;
+      background: transparent;
+    }}
+    QComboBox#impDialogLocal QAbstractItemView, QComboBox#impDialogUso QAbstractItemView {{
+      background: {t['superficie_2']};
+      border: 1px solid {t['borda']};
+      color: {t['texto']};
+      outline: none;
+    }}
+    /* Os cabecalhos "IMPRESSORAS DO WINDOWS" e "PORTAS COM" sao itens
+       desligados: legenda, nao opcao. A opcao "Recibo do cliente" desligada
+       (impressora desativada) usa a mesma regra, e le igual: indisponivel. */
+    QComboBox#impDialogLocal QAbstractItemView::item:disabled,
+    QComboBox#impDialogUso QAbstractItemView::item:disabled {{
+      color: {t['texto_fraquissimo']};
+    }}
+
+    QFrame#impDialogConexao {{
+      background: {t['impressora_opcao_bg']};
+      border: 1px solid {t['impressora_opcao_borda']};
+      border-radius: 12px;
+    }}
+    QFrame#impDialogConexao:hover {{ border: 1px solid {t['borda']}; }}
+    QFrame#impDialogConexao[selecionado="true"] {{
+      background: {t['impressora_opcao_ativa_bg']};
+      border: 1px solid {t['impressora_opcao_ativa_borda']};
+    }}
+    QLabel#impDialogConexaoTitulo {{
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#impDialogConexaoSubtitulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 11px;
+      background: transparent;
+    }}
+
+    QPushButton#impDialogBobina {{
+      padding: 0 12px;
+      background: {t['impressora_opcao_bg']};
+      border: 1px solid {t['impressora_opcao_borda']};
+      border-radius: 12px;
+      color: {t['impressora_opcao_texto']};
+      font-size: 13px;
+      font-weight: 700;
+    }}
+    QPushButton#impDialogBobina:hover {{ border: 1px solid {t['borda']}; color: {t['texto']}; }}
+    QPushButton#impDialogBobina[selecionada="true"] {{
+      background: {t['impressora_opcao_ativa_bg']};
+      border: 1px solid {t['impressora_opcao_ativa_borda']};
+      color: {t['impressora_opcao_ativa_glifo']};
+    }}
+
+    QFrame#impDialogSituacao {{
+      background: {t['impressora_situacao_inativa_bg']};
+      border: 1px solid {t['impressora_situacao_inativa_borda']};
+      border-radius: 12px;
+    }}
+    QFrame#impDialogSituacao[ativa="true"] {{
+      background: {t['impressora_situacao_ativa_bg']};
+      border: 1px solid {t['impressora_situacao_ativa_borda']};
+    }}
+    QLabel#impDialogSituacaoTexto {{
+      color: {t['impressora_situacao_inativa_texto']};
+      font-size: 13px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#impDialogSituacaoTexto[ativa="true"] {{
+      color: {t['impressora_situacao_ativa_texto']};
+    }}
+
+    QFrame#impDialogResumo {{
+      background: {t['impressora_resumo_bg']};
+      border: 1px solid {t['impressora_resumo_borda']};
+      border-radius: 12px;
+    }}
+    QFrame#impDialogResumoIcone {{
+      background: {t['impressora_badge_bg']};
+      border: 1px solid {t['impressora_badge_borda']};
+      border-radius: 10px;
+    }}
+    QLabel#impDialogResumoRotulo {{
+      color: {t['texto_fraquissimo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      background: transparent;
+    }}
+    QLabel#impDialogResumoRotulo[estado="erro"] {{ color: {t['impressora_erro']}; }}
+    QLabel#impDialogResumoTexto {{
+      color: {t['texto']};
+      font-size: 14px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#impDialogErroServico {{
+      color: {t['impressora_erro']};
+      font-size: 12px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    /* O veredito curto, a direita: some quando nao ha nada a dizer (o
+       mockup), cinza quando falta preencher, ambar quando salva mas avisa,
+       coral quando impede. */
+    QLabel#impDialogStatus {{
+      color: {t['texto_fraquissimo']};
+      font-size: 11px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel#impDialogStatus[estado="aviso"] {{ color: {t['impressora_aviso']}; }}
+    QLabel#impDialogStatus[estado="erro"] {{ color: {t['impressora_erro']}; }}
+    QLabel#impDialogAtalhos {{
+      color: {t['texto_fraquissimo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      background: transparent;
+    }}
+
     /* ---------- Modal "Composicao do combo"
        (`widgets/composicao_combo_dialog.py`, §9.15)
        Nono modal em cartao. Cartao, cabecalho e divisores seguem o desenho do
@@ -1109,7 +1315,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
       border: 1px solid {t['borda']};
       color: {t['texto_fraquissimo']};
     }}
-    QPushButton#comboDialogAdicionar {{
+    QPushButton#comboDialogAdicionar, QPushButton#impDialogConfirmar {{
       padding: 9px 20px 9px 36px;
       background: {t['acento']};
       border: 1px solid {t['acento']};
@@ -1118,11 +1324,11 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-size: 12px;
       font-weight: 800;
     }}
-    QPushButton#comboDialogAdicionar:hover {{
+    QPushButton#comboDialogAdicionar:hover, QPushButton#impDialogConfirmar:hover {{
       background: {t['acento_hover']};
       border-color: {t['acento_hover']};
     }}
-    QPushButton#comboDialogAdicionar:disabled {{
+    QPushButton#comboDialogAdicionar:disabled, QPushButton#impDialogConfirmar:disabled {{
       background: {t['pilula_disabled_bg']};
       border-color: {t['pilula_disabled_bg']};
       color: {t['pilula_disabled_texto']};
@@ -1696,7 +1902,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QPushButton#addItemFechar, QPushButton#addItemPasso, QPushButton#funcDialogFechar,
     QPushButton#movCaixaFechar, QPushButton#turnoFechar, QPushButton#orgDialogFechar,
     QPushButton#cpfDialogFechar, QPushButton#comboDialogFechar,
-    QPushButton#exclusaoDialogFechar {{
+    QPushButton#exclusaoDialogFechar, QPushButton#impDialogFechar {{
       padding: 0;
       background: {t['botao_circular_bg']};
       border: 1px solid {t['botao_circular_borda']};
@@ -1707,13 +1913,14 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QPushButton#movCaixaFechar, QPushButton#turnoFechar,
     QPushButton#orgDialogFechar, QPushButton#cpfDialogFechar,
     QPushButton#comboDialogFechar,
-    QPushButton#exclusaoDialogFechar {{ border-radius: 16px; font-size: 13px; }}
+    QPushButton#exclusaoDialogFechar,
+    QPushButton#impDialogFechar {{ border-radius: 16px; font-size: 13px; }}
     QPushButton#addItemPasso {{ border-radius: 17px; font-size: 18px; }}
     QPushButton#addItemFechar:hover, QPushButton#addItemPasso:hover,
     QPushButton#funcDialogFechar:hover, QPushButton#movCaixaFechar:hover,
     QPushButton#turnoFechar:hover, QPushButton#orgDialogFechar:hover,
     QPushButton#cpfDialogFechar:hover, QPushButton#comboDialogFechar:hover,
-    QPushButton#exclusaoDialogFechar:hover {{
+    QPushButton#exclusaoDialogFechar:hover, QPushButton#impDialogFechar:hover {{
       background: {t['botao_circular_hover']};
       color: {t['texto']};
     }}
@@ -1854,7 +2061,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QLabel#addItemAviso[estado="erro"] {{ color: {t['perigo']}; }}
     QLabel#addItemAviso[estado="sucesso"] {{ color: {t['sucesso']}; }}
 
-    QPushButton#orgDialogCancelar,
+    QPushButton#orgDialogCancelar, QPushButton#impDialogCancelar,
     QPushButton#cpfDialogCancelar, QPushButton#exclusaoDialogCancelar,
     QPushButton#addItemCancelar, QPushButton#funcDialogCancelar,
     QPushButton#movCaixaCancelar, QPushButton#turnoCancelar {{
@@ -1866,7 +2073,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-size: 12px;
       font-weight: 700;
     }}
-    QPushButton#orgDialogCancelar:hover,
+    QPushButton#orgDialogCancelar:hover, QPushButton#impDialogCancelar:hover,
     QPushButton#cpfDialogCancelar:hover, QPushButton#exclusaoDialogCancelar:hover,
     QPushButton#addItemCancelar:hover, QPushButton#funcDialogCancelar:hover,
     QPushButton#movCaixaCancelar:hover,

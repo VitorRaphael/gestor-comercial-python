@@ -110,6 +110,15 @@ GLIFO_MAIS = "mais"
 # Segoe UI Emoji — sai amarelo chapado nos dois avisos, que pedem cores
 # diferentes (âmbar no protegido, coral no permanente).
 GLIFO_ALERTA = "alerta"
+# Os cinco do cartão de impressora (§9.19): o badge do cabeçalho e o do resumo,
+# os três cards de conexão e o sinal de "Impressora ativa". O `🖨`, o `📄` e o
+# `🌐` que a tela de Impressoras usa na tabela moram no bloco de emoji — no
+# cartão eles sairiam coloridos, chapados e sem acompanhar o card escolhido.
+GLIFO_IMPRESSORA = "impressora"
+GLIFO_ARQUIVO_TEXTO = "arquivo_texto"
+GLIFO_USB = "usb"
+GLIFO_REDE = "rede"
+GLIFO_SINAL = "sinal"
 
 # Os glifos são traçados numa grade de 24x24 e escalados para o tamanho pedido,
 # então um desenho só serve a insígnia de 40px e a seta de 12px.
@@ -282,6 +291,88 @@ def _caminho_do_glifo(nome: str) -> QPainterPath:
         p.lineTo(12.0, 13.4)
         p.moveTo(12.0, 16.8)
         p.lineTo(12.0, 16.9)
+    elif nome == GLIFO_IMPRESSORA:
+        # A folha que entra por cima, o corpo com os ombros arredondados e a
+        # folha impressa que sai pela frente, cobrindo a base do corpo.
+        p.moveTo(6.5, 9.0)
+        p.lineTo(6.5, 3.5)
+        p.lineTo(17.5, 3.5)
+        p.lineTo(17.5, 9.0)
+        p.moveTo(6.5, 17.5)
+        p.lineTo(4.5, 17.5)
+        p.quadTo(2.5, 17.5, 2.5, 15.5)
+        p.lineTo(2.5, 11.0)
+        p.quadTo(2.5, 9.0, 4.5, 9.0)
+        p.lineTo(19.5, 9.0)
+        p.quadTo(21.5, 9.0, 21.5, 11.0)
+        p.lineTo(21.5, 15.5)
+        p.quadTo(21.5, 17.5, 19.5, 17.5)
+        p.lineTo(17.5, 17.5)
+        p.addRect(QRectF(6.5, 14.0, 11.0, 6.5))
+    elif nome == GLIFO_ARQUIVO_TEXTO:
+        # A folha com a orelha dobrada e três linhas de texto.
+        p.moveTo(14.0, 2.5)
+        p.lineTo(6.5, 2.5)
+        p.quadTo(4.5, 2.5, 4.5, 4.5)
+        p.lineTo(4.5, 19.5)
+        p.quadTo(4.5, 21.5, 6.5, 21.5)
+        p.lineTo(17.5, 21.5)
+        p.quadTo(19.5, 21.5, 19.5, 19.5)
+        p.lineTo(19.5, 8.0)
+        p.closeSubpath()
+        p.moveTo(14.0, 2.5)
+        p.lineTo(14.0, 8.0)
+        p.lineTo(19.5, 8.0)
+        p.moveTo(8.5, 9.5)
+        p.lineTo(10.5, 9.5)
+        p.moveTo(8.5, 13.5)
+        p.lineTo(15.5, 13.5)
+        p.moveTo(8.5, 17.0)
+        p.lineTo(15.5, 17.0)
+    elif nome == GLIFO_USB:
+        # O tridente do USB: a haste com a seta, o ramo do círculo à esquerda e
+        # o do quadrado à direita, e o círculo da base.
+        p.moveTo(12.0, 18.3)
+        p.lineTo(12.0, 6.0)
+        p.moveTo(9.6, 6.6)
+        p.lineTo(12.0, 2.6)
+        p.lineTo(14.4, 6.6)
+        p.closeSubpath()
+        p.addEllipse(QPointF(12.0, 20.0), 1.7, 1.7)
+        p.moveTo(12.0, 15.6)
+        p.lineTo(7.0, 12.8)
+        p.lineTo(7.0, 10.4)
+        p.addEllipse(QPointF(7.0, 8.8), 1.6, 1.6)
+        p.moveTo(12.0, 13.2)
+        p.lineTo(17.0, 10.4)
+        p.lineTo(17.0, 8.6)
+        p.addRect(QRectF(15.5, 5.6, 3.0, 3.0))
+    elif nome == GLIFO_REDE:
+        # Três nós e o barramento que os liga.
+        p.addRoundedRect(QRectF(9.5, 2.5, 5.0, 5.0), 1.0, 1.0)
+        p.addRoundedRect(QRectF(2.5, 16.5, 5.0, 5.0), 1.0, 1.0)
+        p.addRoundedRect(QRectF(16.5, 16.5, 5.0, 5.0), 1.0, 1.0)
+        p.moveTo(12.0, 7.5)
+        p.lineTo(12.0, 12.0)
+        p.moveTo(5.0, 16.5)
+        p.lineTo(5.0, 13.0)
+        p.quadTo(5.0, 12.0, 6.0, 12.0)
+        p.lineTo(18.0, 12.0)
+        p.quadTo(19.0, 12.0, 19.0, 13.0)
+        p.lineTo(19.0, 16.5)
+    elif nome == GLIFO_SINAL:
+        # O ponto com dois pares de ondas, o `((•))` do mockup. Os pontos de
+        # controle das ondas de fora saem da grade de propósito: a curva de
+        # Bézier passa só pela metade do caminho até eles, e fica dentro.
+        p.addEllipse(QPointF(12.0, 12.0), 1.8, 1.8)
+        p.moveTo(8.4, 15.6)
+        p.quadTo(5.0, 12.0, 8.4, 8.4)
+        p.moveTo(15.6, 8.4)
+        p.quadTo(19.0, 12.0, 15.6, 15.6)
+        p.moveTo(5.2, 18.8)
+        p.quadTo(-1.2, 12.0, 5.2, 5.2)
+        p.moveTo(18.8, 5.2)
+        p.quadTo(25.2, 12.0, 18.8, 18.8)
     return p
 
 
@@ -477,6 +568,17 @@ class GlifoSolto(QWidget):
         self.setFixedSize(lado, lado)
         # O clique sobre a lupa tem que chegar ao campo de busca embaixo dela.
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def trocar_token(self, token: str) -> None:
+        """Repinta o glifo em outra cor — o card de conexão escolhido (§9.19).
+
+        Troca o NOME do token, e não uma cor: a cor continua sendo lida da
+        paleta a cada pintura, e o glifo segue o alternador de tema (§3.15).
+        """
+        if token == self._token:
+            return
+        self._token = token
+        self.update()
 
     @nao_deixa_escapar()
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)

@@ -6,9 +6,10 @@ cadastro precisa carregar os parâmetros de conexão de verdade — vendor/produ
 id, porta serial, host, fila do Windows ou caminho do .txt — porque é com eles
 que `hardware/impressora_escpos` abre o driver.
 
-O formulário mostra só os campos do tipo de conexão escolhido: quem cadastra é
-o gerente do food truck no dia da instalação, não um técnico, e ver oito campos
-vazios ao mesmo tempo é convite para preencher o errado.
+O cadastro e a edição moram no cartão `widgets/impressora_dialog.py` (§9.19):
+três cards de conexão em vez de cinco tipos num combo, a bobina em milímetros
+em vez de colunas, e o uso ("Recibo do cliente" é a padrão) escolhido ali mesmo.
+Quem cadastra é o gerente do food truck no dia da instalação, não um técnico.
 
 Cadastrar, editar, excluir e definir padrão são ações administrativas e exigem
 gerente — quem barra isso é `CardapioService` (via `AuthService.exigir_gerente`);
@@ -17,22 +18,18 @@ aqui só se mostra o erro que o service levantar.
 
 from __future__ import annotations
 
+from functools import partial
+
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
     QDialog,
-    QDialogButtonBox,
-    QFormLayout,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
     QSizePolicy,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -43,12 +40,8 @@ from PySide6.QtGui import QMouseEvent
 
 from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.domain.enums import TipoConexaoImpressora
-from gestor_comercial.domain.impressora import COLUNAS_PADRAO, Impressora
-from gestor_comercial.services.cardapio_service import (
-    COLUNAS_MAXIMAS,
-    COLUNAS_MINIMAS,
-    CardapioService,
-)
+from gestor_comercial.domain.impressora import Impressora
+from gestor_comercial.services.cardapio_service import CardapioService
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
     NaoAutorizadoError,
@@ -57,7 +50,7 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
-from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.widgets.impressora_dialog import DadosImpressora, ImpressoraDialog
 from gestor_comercial.ui.widgets.modais import executar_modal
 from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
@@ -103,6 +96,9 @@ class ImpressorasView(QWidget):
         self._service = cardapio_service
         self._impressao = impressao_service
         self._impressoras: list[Impressora] = []
+        # O id que a última gravação do cartão devolveu, para a lista recarregada
+        # voltar com ela selecionada.
+        self._id_gravado: int | None = None
 
         self._montar_layout()
         self.atualizar()
@@ -505,36 +501,84 @@ class ImpressorasView(QWidget):
         return self._impressoras[linha]
 
     def _criar(self) -> None:
-        modal = _ImpressoraDialog("Nova impressora", self)
-        if executar_modal(modal) != QDialog.DialogCode.Accepted:
-            return
-        nome, tipo, parametros = modal.resultado()
-
         self._mostrar_erro("")
-        try:
-            self._service.criar_impressora(nome, tipo, **parametros)
-        except _ERROS_SERVICE as erro:
-            self._mostrar_erro(str(erro))
-            return
-        self.atualizar()
+        modal = ImpressoraDialog.para_nova(
+            self._nomes_de_impressora(),
+            self,
+            ha_padrao_ativa=self._ha_padrao_ativa(excluindo=None),
+            salvar=partial(self._gravar, None),
+            listar_destinos=self._impressao.listar_destinos_locais,
+        )
+        self._abrir_cadastro(modal)
 
     def _editar(self) -> None:
         impressora = self._impressora_selecionada()
         if impressora is None:
             self._mostrar_erro("Selecione uma impressora na lista.")
             return
-        modal = _ImpressoraDialog("Editar impressora", self, impressora=impressora)
+        self._mostrar_erro("")
+        modal = ImpressoraDialog.para_editar(
+            impressora,
+            self._nomes_de_impressora(),
+            self,
+            outra_padrao_ativa=self._ha_padrao_ativa(excluindo=impressora.id),
+            salvar=partial(self._gravar, impressora.id),
+            listar_destinos=self._impressao.listar_destinos_locais,
+        )
+        self._abrir_cadastro(modal)
+
+    def _abrir_cadastro(self, modal: ImpressoraDialog) -> None:
+        """Um site de modal só para cadastrar e editar.
+
+        O cartão grava pela função `salvar` e só fecha aceito se o service
+        aceitou — então aqui não há erro a mostrar, só a lista a recarregar,
+        com a impressora gravada selecionada (a nova entra no fim da lista).
+        """
+        self._id_gravado = None
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-        nome, tipo, parametros = modal.resultado()
-
-        self._mostrar_erro("")
-        try:
-            self._service.editar_impressora(impressora.id, nome, tipo, **parametros)
-        except _ERROS_SERVICE as erro:
-            self._mostrar_erro(str(erro))
-            return
         self.atualizar()
+        self._selecionar_por_id(self._id_gravado)
+
+    def _gravar(self, impressora_id: int | None, dados: DadosImpressora) -> str | None:
+        """O que o cartão chama ao salvar: `None` se gravou, a mensagem se não.
+
+        O erro volta como texto, e não como exceção, para o cartão continuar
+        aberto com tudo o que foi escolhido. A transação é do service: um
+        commit só, com a troca de padrão dentro (`_aplicar_uso`).
+        """
+        try:
+            if impressora_id is None:
+                gravada = self._service.criar_impressora(
+                    dados.nome, dados.tipo_conexao, **dados.parametros()
+                )
+            else:
+                gravada = self._service.editar_impressora(
+                    impressora_id, dados.nome, dados.tipo_conexao, **dados.parametros()
+                )
+        except _ERROS_SERVICE as erro:
+            return str(erro)
+        self._id_gravado = gravada.id
+        return None
+
+    def _nomes_de_impressora(self) -> list[str]:
+        """Para o cartão avisar do nome repetido antes de salvar."""
+        return [impressora.nome for impressora in self._impressoras]
+
+    def _ha_padrao_ativa(self, *, excluindo: int | None) -> bool:
+        """Existe outra impressora recebendo o recibo? Decide o aviso do cartão."""
+        return any(
+            impressora.padrao and impressora.ativa and impressora.id != excluindo
+            for impressora in self._impressoras
+        )
+
+    def _selecionar_por_id(self, impressora_id: int | None) -> None:
+        if impressora_id is None:
+            return
+        for linha, impressora in enumerate(self._impressoras):
+            if impressora.id == impressora_id:
+                self._tabela.selectRow(linha)
+                return
 
     def _definir_padrao(self) -> None:
         impressora = self._impressora_selecionada()
@@ -713,144 +757,6 @@ class _LinhaCategoria(QFrame):
             aplicar_propriedade(widget, "marcada", valor)
 
 
-class _ImpressoraDialog(QDialog):
-    """Modal de cadastro/edição: nome, bobina e só os campos do tipo escolhido."""
-
-    def __init__(
-        self,
-        titulo: str,
-        parent: QWidget | None = None,
-        *,
-        impressora: Impressora | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(titulo)
-
-        layout = QVBoxLayout(self)
-        self._formulario = QFormLayout()
-
-        self._campo_nome = QLineEdit(impressora.nome if impressora else "")
-        self._campo_nome.setPlaceholderText("Ex.: Cozinha")
-        self._formulario.addRow("Nome", self._campo_nome)
-
-        self._combo_tipo = QComboBox()
-        for tipo in TipoConexaoImpressora:
-            self._combo_tipo.addItem(_ROTULOS_TIPO[tipo], tipo)
-        # Cadastro novo já abre em ARQUIVO, o mesmo default de
-        # `criar_impressora`: é o único tipo que funciona sem hardware nenhum,
-        # então é o que faz o food truck imprimir no dia em que o app chega.
-        tipo_inicial = impressora.tipo_conexao if impressora else TipoConexaoImpressora.ARQUIVO
-        indice = self._combo_tipo.findData(tipo_inicial)
-        if indice >= 0:
-            self._combo_tipo.setCurrentIndex(indice)
-        self._combo_tipo.currentIndexChanged.connect(self._atualizar_campos_visiveis)
-        self._formulario.addRow("Tipo de conexão", self._combo_tipo)
-
-        self._campo_vendor_id = self._campo_texto(
-            "Vendor id (USB)", _texto(impressora, "vendor_id"), "Ex.: 0x04b8"
-        )
-        self._campo_product_id = self._campo_texto(
-            "Product id (USB)", _texto(impressora, "product_id"), "Ex.: 0x0202"
-        )
-        self._campo_porta_serial = self._campo_texto(
-            "Porta serial", _texto(impressora, "porta_serial"), "Ex.: COM3"
-        )
-        self._campo_baudrate = self._campo_texto(
-            "Baudrate", _texto(impressora, "baudrate"), "Opcional, padrão 9600"
-        )
-        self._campo_host = self._campo_texto(
-            "Endereço de rede", _texto(impressora, "host"), "Ex.: 192.168.0.50"
-        )
-        self._campo_porta_rede = self._campo_texto(
-            "Porta de rede", _texto(impressora, "porta_rede"), "Opcional, padrão 9100"
-        )
-        self._campo_nome_fila = self._campo_texto(
-            "Nome no Windows",
-            _texto(impressora, "nome_fila"),
-            "Como aparece em Dispositivos e Impressoras",
-        )
-        self._campo_caminho_arquivo = self._campo_texto(
-            "Arquivo do cupom",
-            _texto(impressora, "caminho_arquivo"),
-            "Opcional, padrão cupons/<nome>.txt",
-        )
-
-        self._campos_por_tipo = {
-            TipoConexaoImpressora.USB: (self._campo_vendor_id, self._campo_product_id),
-            TipoConexaoImpressora.SERIAL: (self._campo_porta_serial, self._campo_baudrate),
-            TipoConexaoImpressora.REDE: (self._campo_host, self._campo_porta_rede),
-            TipoConexaoImpressora.WINDOWS: (self._campo_nome_fila,),
-            TipoConexaoImpressora.ARQUIVO: (self._campo_caminho_arquivo,),
-        }
-
-        self._campo_colunas = QSpinBox()
-        self._campo_colunas.setMinimum(COLUNAS_MINIMAS)
-        self._campo_colunas.setMaximum(COLUNAS_MAXIMAS)
-        self._campo_colunas.setSuffix(" colunas")
-        self._campo_colunas.setValue(impressora.colunas if impressora else COLUNAS_PADRAO)
-        self._formulario.addRow("Largura da bobina", self._campo_colunas)
-
-        # "Ativa" só existe na edição: `criar_impressora` sempre nasce ativa, e
-        # um checkbox desmarcável no cadastro só produziria impressora nascida
-        # morta. Desativar é decisão posterior, sobre algo que já existe.
-        self._campo_ativa: QCheckBox | None = None
-        if impressora is not None:
-            self._campo_ativa = QCheckBox("Impressora em uso")
-            self._campo_ativa.setChecked(impressora.ativa)
-            self._formulario.addRow("Ativa", self._campo_ativa)
-
-        layout.addLayout(self._formulario)
-
-        botoes = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        botoes.button(QDialogButtonBox.StandardButton.Ok).setText("Salvar")
-        botoes.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
-        botoes.accepted.connect(self.accept)
-        botoes.rejected.connect(self.reject)
-        layout.addWidget(botoes)
-
-        self._atualizar_campos_visiveis()
-
-    def _campo_texto(self, rotulo: str, valor: str, dica: str) -> QLineEdit:
-        campo = QLineEdit(valor)
-        campo.setPlaceholderText(dica)
-        self._formulario.addRow(rotulo, campo)
-        return campo
-
-    def _atualizar_campos_visiveis(self) -> None:
-        """Esconde os campos que não são do tipo de conexão escolhido."""
-        tipo_atual = self._combo_tipo.currentData()
-        for tipo, campos in self._campos_por_tipo.items():
-            for campo in campos:
-                # `setRowVisible` some com o rótulo junto com o campo — esconder
-                # só o QLineEdit deixaria o texto órfão flutuando no formulário.
-                self._formulario.setRowVisible(campo, tipo is tipo_atual)
-        self.adjustSize()
-
-    def resultado(self) -> tuple[str, TipoConexaoImpressora, dict[str, object]]:
-        """Devolve (nome, tipo, parâmetros) prontos para `**kwargs` no service.
-
-        Manda todos os campos, inclusive os escondidos: `CardapioService` limpa
-        os que o tipo escolhido não usa e só valida os que usa. Filtrar aqui
-        duplicaria essa regra na tela.
-        """
-        parametros: dict[str, object] = {
-            "vendor_id": _ou_nulo(self._campo_vendor_id),
-            "product_id": _ou_nulo(self._campo_product_id),
-            "porta_serial": _ou_nulo(self._campo_porta_serial),
-            "baudrate": _ou_nulo(self._campo_baudrate),
-            "host": _ou_nulo(self._campo_host),
-            "porta_rede": _ou_nulo(self._campo_porta_rede),
-            "nome_fila": _ou_nulo(self._campo_nome_fila),
-            "caminho_arquivo": _ou_nulo(self._campo_caminho_arquivo),
-            "colunas": self._campo_colunas.value(),
-        }
-        if self._campo_ativa is not None:
-            parametros["ativa"] = self._campo_ativa.isChecked()
-        return self._campo_nome.text().strip(), self._combo_tipo.currentData(), parametros
-
-
 def _descricao_destino(impressora: Impressora) -> str:
     """Resume, numa coluna só, para onde o cupom desta impressora vai."""
     tipo = impressora.tipo_conexao
@@ -863,14 +769,3 @@ def _descricao_destino(impressora: Impressora) -> str:
     if tipo is TipoConexaoImpressora.WINDOWS:
         return impressora.nome_fila or "?"
     return impressora.caminho_arquivo or "?"
-
-
-def _texto(impressora: Impressora | None, campo: str) -> str:
-    if impressora is None:
-        return ""
-    valor = getattr(impressora, campo)
-    return "" if valor is None else str(valor)
-
-
-def _ou_nulo(campo: QLineEdit) -> str | None:
-    return campo.text().strip() or None
