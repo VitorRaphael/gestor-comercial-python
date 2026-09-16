@@ -4356,6 +4356,309 @@ primeira fila. Por isso o texto é guardado e devolvido com os sinais calados.
 - **O `_QuitarConsumoDialog`, o `_AlterarSegredoDialog` e o `_ProdutoDialog`**,
   que continuam formulários de fábrica.
 
+### 9.20 O campo de dinheiro: preço e custo só aceitam número ✅ CONCLUÍDO — 2026-09-16
+
+Pedido do Vitor: o preço de venda e o preço de custo dos modais "Novo produto" e
+"Editar produto" não podiam aceitar letra nem caractere solto, deviam sanear o
+que é colado ("R$ 15,90 kg", "abc12.5"), mostrar o "R$" fixo, completar os
+centavos ao sair do campo e entregar ao service um número válido. Em destaque:
+**um validador reutilizável**, e nada que custe por tecla numa máquina de 4 GB.
+
+#### Antes
+
+Os dois campos eram `QLineEdit` crus. Aceitavam "12,5abc" e três vírgulas, e o
+problema só aparecia no OK, quando `safe_decimal` não conseguia ler e a linha
+vermelha dizia "Informe um preço válido, maior que zero." — a mesma frase para
+campo vazio, para zero e para texto ilegível.
+
+#### O desenho: uma porta só
+
+- **`sanitizar_edicao_moeda(anterior, novo, cursor)`** em `ui/formatacao.py`, ao
+  lado de `formatar_para_campo` e `safe_decimal` (a regra do §3.8: como o
+  dinheiro vira texto e como o texto vira dinheiro têm dono único). Pura, sem Qt,
+  nunca levanta. Devolve sempre texto **canônico**: até 8 dígitos inteiros (o teto
+  sai de `dinheiro.LIMITE`, como no numpad do §9.6), no máximo uma vírgula, até 2
+  casas. Canônico entra e sai igual, e é esse ponto fixo que impede laço.
+- **`ValidadorMoeda`** e **`CampoMoeda`** em `ui/widgets/campo_moeda.py`. A regra
+  mora num `QValidator` que **reescreve** o texto, e não num `keyPressEvent`: o
+  `QLineEdit` consulta o validador em toda mudança de texto (tecla, Ctrl+V,
+  Shift+Insert, "Colar" do menu de contexto, arrastar e soltar, `setText`).
+  Interceptar o teclado deixaria passar o "Colar" do botão direito, que é ligado
+  em C++ ao slot `paste()`, fora do alcance de um override em Python.
+- **O validador nunca devolve `Invalid`.** Com `Invalid` o Qt desfaz a edição que
+  veio do teclado, mas não a que veio de `setText` (medido numa sonda): o texto
+  recusado ficaria no campo, marcado como inválido.
+- **`CampoMoeda` continua sendo um `QLineEdit`.** O QSS de campo (borda, anel no
+  foco, `[erro="true"]`) e o `_marcar_erro` das telas valem sem cópia.
+
+#### As regras que não são óbvias
+
+- **O que a edição trouxe é separado do que já estava**, e é isso que decide. O
+  validador guarda o último texto aceito e usa o cursor do Qt, que fica logo
+  depois do que entrou. Sem o cursor, a comparação de prefixo e sufixo erra
+  quando o colado repete os vizinhos: colar "05" depois de "12,5" daria "12,55".
+  Medido: em 300 mil edições sorteadas, o cursor muda o resultado de 5.299.
+- **A vírgula que já estava vence.** Um segundo separador digitado é recusado,
+  inclusive o ponto depois da vírgula. Lido como milhar, "12,5" + "." viraria 125.
+- **Ponto digitado vira vírgula**, porque o teclado numérico manda um ou outro
+  conforme o layout do Windows.
+- **Colagem com milhar é lida como a `safe_decimal` lê**: o separador cujo tipo
+  aparece uma vez só, e por último, é o decimal ("R$ 1.234,56" e "1,234.56" viram
+  "1234,56"); o tipo que se repete é milhar ("1.234.567").
+- **No excesso, sai o que a edição trouxe.** A 3ª casa digitada é recusada, e uma
+  vírgula digitada antes de três dígitos que já estavam também (aceitá-la apagaria
+  dígitos que o operador não tocou).
+- **Lixo puro sobre uma seleção não apaga o valor.** Selecionar "12,50" e colar
+  "R$ kg" deixa "12,50".
+- **Dígito ASCII, e não `str.isdigit()`**: "²" e "١" são dígitos para o Python e
+  não são para `Decimal`.
+- **Contagem por tipo num passo só** (`Counter`): comparar cada separador com os
+  outros seria quadrático, e o `maxLength` padrão deixa colar 32.767 caracteres.
+
+#### O "R$" e o foco
+
+- **O "R$" é um `QLabel` filho**, dentro da margem esquerda do texto
+  (`setTextMargins`), posto na área que o estilo devolve (`SE_LineEditContents`),
+  e não num número fixo, porque é o QSS que decide o `padding`. O cursor não
+  alcança o que não é texto: Home + Backspace não apaga o símbolo, e `text()`
+  nunca o contém. É transparente ao mouse.
+- **`background: transparent` no QSS é obrigatório**: sem ele o `QWidget
+  {background}` do topo pinta um retângulo de `bg_marca` em volta do "R$".
+- **Cor**: `texto_fraquissimo` em repouso e `acento` com o foco, que no Escuro são
+  exatamente o `#71717A` e o `#E5A93C` pedidos. No Claro, o cinza e o azul de lá.
+  Nenhum token novo. A troca é por propriedade `foco` (`aplicar_propriedade`), só
+  quando o foco muda, nunca por tecla.
+- **Ao sair do campo** "12" vira "12,00", ",5" vira "0,50" e "007" vira "7,00".
+  Vazio continua vazio, para o preço poder dizer "informe". O foco roubado pelo
+  menu de contexto (`PopupFocusReason`) não formata: trocaria o texto debaixo da
+  seleção de quem ia clicar em "Colar". O `setText` só acontece se o texto mudou;
+  `setText` igual não emite `textChanged`, mas apaga o Ctrl+Z, e cada Tab o
+  apagaria.
+
+#### No cadastro de produto
+
+- Os dois campos viraram `CampoMoeda`, com os rótulos do pedido: **"Preço de
+  venda"** e **"Preço de custo"**. Placeholders "0,00" e "0,00 (opcional)", sem
+  repetir o "R$".
+- **Cada recusa tem a sua frase**: "Informe o preço de venda." (vazio) e "O preço
+  de venda deve ser maior que zero." (zero). Texto ilegível deixou de existir.
+- `resultado()` lê `CampoMoeda.valor()`: `Decimal` de 2 casas ou `None`. Custo
+  vazio vai como zero, como antes.
+- **Service intocado**: `_preco_valido` e `_custo_valido` continuam recusando zero
+  e negativo. É a segunda trava, e a de verdade.
+
+#### O que o pedido escrito dizia e não foi seguido ao pé da letra
+
+- **`parse_moeda_para_float`** não foi criada. `float` é recusado de propósito
+  por `dinheiro()` (TypeError), e o `_valor_monetario` do service trata float como
+  erro de programação da tela: um conversor para float faria o clique em OK
+  estourar. E a conversão pedida já existe, com testes: é a `safe_decimal`
+  (vírgula ou ponto, "R$" e espaços descartados, milhar, nunca levanta). Um
+  segundo conversor ao lado seria o defeito das dez cópias do §3.8.
+- **`core/validators.py`**: a regra foi para `ui/formatacao.py`, onde a leitura e
+  a escrita de dinheiro na tela já moram, e o widget para `ui/widgets/`.
+- **O fundo `#111110`** é o dos campos dos modais em cartão (`impressora_campo_bg`,
+  `visor_valor_bg`). O `_ProdutoDialog` ainda é formulário de fábrica, com os
+  campos em `superficie_2`. Pintar só os dois de preço deixaria o formulário com
+  duas cores de campo, e emprestar o token de outra família é o erro do §9.5. A
+  borda sutil e o anel âmbar no foco já eram do QSS de campo.
+- **"Validação ao pressionar tecla"** não virou `keyPressEvent` (ver "uma porta só").
+
+#### Conferência
+
+- suíte **2128** (de 2045), 0 falhas, **83 testes novos**:
+  `tests/unit/test_sanitizar_moeda.py` (digitação, colagem, tetos, cursor,
+  Backspace até esvaziar, 3.000 edições sorteadas conferindo canônico + ponto fixo
+  + nunca negativo, colagem de 32 mil caracteres, `Decimal` de 2 casas que
+  `dinheiro()` aceita) e `tests/ui/test_campo_moeda.py` (as quatro portas de
+  entrada com a área de transferência de verdade, centavos ao sair com foco real,
+  menu de contexto, "R$" fora do texto, cor por foco nos dois temas, fundo
+  transparente por pixel, validações por tecla, objetos por tecla, vazamento, e o
+  cadastro da tecla até o SQLite, com `typeof()` numérico na coluna);
+- **30 mutações, 29 reprovam.** Na primeira passada sobreviveram três: o cursor
+  ignorado (virou o teste do "05"), o `if` antes do `setText` (virou o teste do
+  Ctrl+Z, e a docstring, que dizia que ele evitava um `textChanged`, foi
+  corrigida). **A sobrevivente declarada é o `ensurePolished()` antes de medir o
+  "R$"**: no offscreen a fonte de antes do polimento cai por fallback no mesmo
+  arquivo Archivo Black, e as duas medem 17px. No app, o primeiro `resizeEvent`
+  já mede polido (o `show` pole os filhos), então a chamada só protege o
+  `sizeHint` pedido antes de o campo aparecer. Um teste escrito para ela passava
+  com e sem a linha, e foi apagado em vez de ficar fingindo cobertura;
+- **custo por tecla**: 5,4 µs na regra pura e 37 µs no evento completo do
+  `QLineEdit`. Uma chamada de `validate` por tecla aceita, duas quando reescreve
+  (a segunda devolve igual). Nenhum sinal ligado, nenhum timer, nenhum objeto
+  criado (`findChildren` igual depois de 100 rodadas de digitar e colar);
+- **300 ciclos do cadastro** (abrir, digitar com letra, colar sujo, fechar pelo
+  `exec()`): **0 diálogos vivos**, memória privada 78,0 → 78,11 MB no primeiro
+  bloco e plana nos quatro seguintes;
+- bancada visual a 1366x738 contra `e432a57`: **24 telas idênticas byte a byte**
+  (o QSS ganhou uma regra por `objectName` que só o campo usa). Cupons não
+  conferidos: nenhum service nem código de impressão foi tocado;
+- renderização do modal nos dois temas, com foco e com a linha de erro.
+
+#### Ficou de fora, de propósito
+
+- **Os outros campos de dinheiro digitado**: o valor do `PagamentoDialog` e o do
+  `_QuitarConsumoDialog`. Ambos já leem por `safe_decimal`, e trocar o
+  `QLineEdit` por `CampoMoeda` é uma linha em cada, mas o pagamento é o caminho
+  da venda e não foi pedido.
+- **O `_ProdutoDialog` em cartão**, que continua o último formulário de fábrica
+  do Cardápio.
+- **Separador de milhar enquanto se digita** ("1.234,50" no campo). Moveria o
+  cursor a cada tecla e obrigaria a tirar o ponto de volta antes de ler.
+
+### 9.21 O `.exe` de produção: ícone novo, cardápio embutido e pasta de dados própria ✅ CONCLUÍDO — 2026-09-16
+
+Pedido do Vitor: gerar o executável final num fluxo automático, com o ícone
+oficial novo (`NovoÍconeAPP.png`), e com uma garantia acima de tudo — **o
+programa nasce com o cardápio e as fotos atuais e jamais conecta nos dados
+antigos da máquina de destino**, que já rodou o `.exe` de testes de 2026-09-01.
+
+#### Antes
+
+O `DEPLOYMENT.md` mandava gerar o `.exe`, copiar o `gestor_comercial.db` para o
+pendrive e colocá-lo à mão em `%USERPROFILE%\.gestor_comercial\` na máquina do
+pai — a mesma pasta que o `.exe` antigo usou. Três defeitos nisso, dois deles
+calados:
+
+- **A cópia do `.db` perde o que está no `-wal`.** Medido no banco de trabalho
+  neste dia, com o programa fechado: 400 KB de `-wal` pendente. Uma cópia só do
+  `.db` teria **182 produtos em vez de 188, 169 fotos em vez de 177 e 8 itens de
+  combo em vez de 29**. Nenhum erro.
+- **As fotos não iam.** Moram em `uploads/thumbnails/`, fora do `.db`; o roteiro
+  dizia que estavam "direto no `.db`".
+- **O programa novo e o antigo dividiam a pasta**, e a variável
+  `GESTOR_COMERCIAL_DB` era sugerida para fixar o caminho na máquina do pai —
+  esquecida no Windows dele, levaria qualquer versão futura ao banco velho.
+
+A regra "onde fica a pasta de dados" existia em **quatro cópias** (banco, log,
+fotos, cupons), e a dos cupons ignorava a variável de ambiente.
+
+#### O desenho
+
+- **`core/caminhos.py`** é o dono único das duas raízes: *recursos* (repo em
+  dev, `sys._MEIPASS` no `.exe`) e *dados*. Em dev nada mudou
+  (`~/.gestor_comercial`, variável valendo). No `.exe` a pasta é
+  **`%APPDATA%\GestorComercial_V2\`**, sem fallback, e a variável é ignorada.
+  `repository/base.py`, `core/resilience.py`, `hardware/impressora_escpos.py` e
+  `imagem_service.py` passaram a perguntar a ele; uma varredura na suíte reprova
+  quem voltar a montar `Path.home()` ou `".gestor_comercial"` por conta própria.
+- **A semente é gerada no build, não copiada à mão.** `app.spec` chama
+  `packaging/preparar_semente.py`, que usa `repository/preparo_da_semente.py`:
+  API de backup do SQLite a partir de conexão **somente leitura** (pega o `-wal`,
+  não altera o banco de trabalho), migration aplicada na CÓPIA até a `head`,
+  `journal_mode=DELETE` + `VACUUM`, `integrity_check` e `foreign_key_check`. Só
+  as fotos que algum produto usa entram. **O build para** se o banco tiver
+  qualquer linha de movimento (caixa, comanda, pagamento, movimento, quitação,
+  fila de impressão) — um turno de teste esquecido aberto faria o programa do pai
+  nascer com caixa aberto, e apagar dado de venda no build seria decidir sozinho
+  — ou se um produto apontar para foto que não está em disco. Recusa apaga a
+  semente pela metade.
+- **`core/banco_semente.py::provisionar`** roda no boot antes de qualquer
+  conexão. Banco existe → um `stat` e mais nada, sem trava. Não existe → sob trava
+  de arquivo do SO (`msvcrt.locking`; o Windows solta se o processo morrer),
+  copia as fotos, apaga `-wal`/`-shm`/`-journal` órfãos (o SQLite aplicaria as
+  páginas de outro banco sobre a semente) e publica o banco **por último**, via
+  temporário + `fsync` + `os.replace`. O banco é o ponto de confirmação: queda
+  no meio → boot seguinte refaz do zero. A trava existe pelo duplo clique: o
+  `.exe` de arquivo único leva segundos para extrair, e a segunda instância, ao
+  entrar, reconfere e sai sem tocar em nada.
+- **Ícone**: `packaging/gerar_icone.py` virou o conversor do PNG oficial (o
+  antigo desenhava o "GC" em fonte de sistema e, se rodado, sobrescreveria a
+  marca). A arte veio **sobre fundo branco**: o fundo ligado aos cantos vira
+  transparente por preenchimento de conectividade, com "cor para alfa" no anel
+  suavizado (sem halo cinza na barra escura) e o ruído 250–254 do branco zerado.
+  `resources/icons/app_icon.ico` com 16/32/48/64/128/256; `app.ico` apagado; a
+  arte fica versionada em `packaging/app_icon_fonte.png`, fora de `resources/`
+  (que vai inteiro para dentro do `.exe`).
+- **Barra de tarefas**: `SetCurrentProcessExplicitAppUserModelID("gestor.comercial.pdv.v2")`
+  antes do `QApplication`, e `setWindowIcon` no próprio `QApplication` (vale até
+  para o "Erro ao iniciar"). O `instalador.iss` grava o **mesmo** AppUserModelID
+  nos atalhos — divergindo, o programa fixado e o aberto virariam dois botões —,
+  conferido por teste.
+- **Binário**: poda do Qt por **alcançabilidade**, não por lista. Saem
+  `opengl32sw.dll`, `translations/` e os plugins que puxam Quick/QML (teclado
+  virtual), PDF e Network/OpenSSL (toque TUIO, TLS, informação de rede); depois,
+  cada `Qt6*.dll` só sai se nenhum binário restante a importa, pelo grafo do
+  próprio PyInstaller. Fora também `pygments`, `setuptools`, `numpy`, `tkinter` e
+  o leitor AVIF do Pillow (7,9 MB), que chegavam por imports opcionais de
+  terceiros. UPX desligado (CPU a cada boot e falso positivo de antivírus).
+- **`packaging/gerar_exe.py`**: ícone → suíte → `pyinstaller --clean` → **prova
+  de fumaça do `.exe` de verdade** numa pasta de usuário falsa (`APPDATA`/`TEMP`
+  descartáveis, `GESTOR_COMERCIAL_DB` apontando para uma isca): espera a linha
+  nova "Janela principal aberta" no log, confere produtos e fotos contra a
+  semente, confere que a isca não foi criada e que o banco de trabalho não mudou,
+  grava uma marca, reabre e confere que o banco foi preservado.
+
+#### Conferência
+
+- suíte **2157** (de 2128), 0 falhas, **29 testes novos**:
+  `tests/unit/test_caminhos.py` (dev inalterado; `.exe` só na
+  `GestorComercial_V2`, com a variável apontando para o banco velho; log junto;
+  varredura contra caminho montado à mão), `test_banco_semente.py` (primeira
+  abertura, banco existente intocado, abertura normal sem esperar trava, sem
+  semente não cria nada, `-wal` órfão, queda no meio refeita, duplo clique,
+  trava com teto), `test_preparo_da_semente.py` (bancos criados pelas migrations
+  reais: o `-wal` pendente entra, `journal_mode=delete`, banco de trabalho com o
+  mesmo hash, migration só na cópia, só fotos usadas, sobra de build, venda e foto
+  faltando recusadas sem apagar nada, ida e volta build → boot) e
+  `test_empacotamento.py` (tamanhos e cantos do ícone, AppUserModelID igual no
+  instalador, spec e `.iss` apontando para o ícone que existe);
+- **15 mutações, 15 reprovam.** Na primeira passada sobreviveu uma: tirar o
+  atalho "banco existe → sai" antes da trava. O resultado continuava certo (a
+  reconferência sob a trava devolvia `JA_EXISTIA`), mas toda abertura do dia a
+  dia passaria a esperar a trava — e uma janela presa no primeiro boot travaria
+  as seguintes. Virou o teste da abertura normal com a trava tomada;
+- **semente real**: 228 KB, revisão `c7b4e0f12a86`, 4 categorias, 25
+  subcategorias, 177 produtos (188 com os arquivados), 29 itens de combo, 60
+  mesas, 177 fotos (2 sem produto, ignoradas); banco de trabalho com `.db` e
+  `-wal` do mesmo tamanho e data depois do build;
+- **binário**: conteúdo extraído a cada abertura **136,3 → 81,0 MB**, `.exe`
+  **69,1 → 41,3 MB**. A poda tirou `Qt6Quick`, `Qt6Qml` (+3), `Qt6Pdf`,
+  `Qt6OpenGL`, `Qt6VirtualKeyboard` e o OpenSSL do Qt; ficaram `qwindows`,
+  `qico` (ícone da janela), `qjpeg` (fotos) e `qwebp` (seletor). O ícone extraído
+  do `.exe` pelo shell do Windows é o novo;
+- **prova de fumaça do `.exe` real**, na rodada final do `gerar_exe.py`: janela
+  em **6,5 s** na primeira abertura (com a provisão) e **4,5 s** na segunda,
+  nesta máquina — no Celeron será mais; 188 produtos e 177 fotos iguais à
+  semente; isca de `GESTOR_COMERCIAL_DB` não criada; banco de trabalho intocado;
+  marca gravada entre as aberturas preservada. A segunda abertura vem depois de
+  um encerramento forçado, então a recuperação do WAL no `.exe` também passou.
+
+A própria prova teve dois defeitos, achados rodando e corrigidos no script:
+ler o banco com conexão **somente leitura** depois do `taskkill` ("disk I/O
+error": o `-wal` de um processo morto à força pede recuperação, que só conexão de
+escrita faz — o mesmo sintoma do teste de queda de energia do §9.7) e esperar só
+o processo **pai** do `.exe` de arquivo único, quando quem segura o banco é o
+filho. A espera agora é pela árvore (Toolhelp32 + `WaitForSingleObject`), sem
+repetição às cegas.
+
+#### Não seguido ao pé da letra
+
+- **`core/paths.py`** virou `core/caminhos.py`, no idioma do projeto; a
+  `resource_path` pedida é `caminhos.recurso()`.
+- **"Script utilitário temporário"** para o ícone: ficou versionado, substituindo
+  o gerador antigo — que, esquecido, regeraria o ícone errado.
+- **`app_icon.ico` na raiz**: foi para `resources/icons/`, onde o spec e a janela
+  já leem recursos.
+- **`pyinstaller --clean app.spec`** na raiz: o spec continua em `packaging/`
+  (com o `instalador.iss` e o resto do empacotamento); o comando é
+  `pyinstaller --clean packaging\app.spec`, ou o `gerar_exe.py`.
+
+#### Ficou de fora
+
+- **Compilar o instalador** (`ISCC.exe`): não pedido; o `.iss` foi atualizado
+  (ícone, pasta de dados, AppUserModelID).
+- **As senhas viajam dentro do `.exe`**, junto com o cardápio (é o `loja_config`
+  do banco de trabalho, inclusive a cópia recuperável do §9.10, cuja chave mora no
+  mesmo banco). Quem tiver o `.exe` tem o que o §9.10 chamou de "o arquivo E o
+  programa". Mitigação sem código: não distribuir o `.exe` além da máquina do pai
+  e trocar as senhas na primeira abertura lá — as novas só existem no banco da
+  `GestorComercial_V2`.
+- **Onedir em vez de arquivo único**: o `.exe` único extrai tudo em `%TEMP%` a
+  cada abertura; uma pasta instalada abriria mais rápido no Celeron. Mantido o
+  formato já decidido (e o do instalador), com a poda reduzindo o que é extraído.
+
 ---
 
 ## 10. As melhores mudanças que o programa teve — em português de balcão

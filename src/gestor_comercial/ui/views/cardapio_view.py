@@ -91,11 +91,8 @@ from gestor_comercial.services.imagem_service import (
     remover_thumbnail,
 )
 from gestor_comercial.services.texto import chave_de_agrupamento
-from gestor_comercial.ui.formatacao import (
-    formatar_para_campo,
-    formatar_reais,
-    safe_decimal,
-)
+from gestor_comercial.ui.formatacao import formatar_reais
+from gestor_comercial.ui.widgets.campo_moeda import CampoMoeda
 from gestor_comercial.ui.widgets.cardapio_cartoes import (
     GLIFO_CAIXA,
     GLIFO_CAMADAS,
@@ -2166,14 +2163,18 @@ class _ProdutoDialog(QDialog):
         self._erro_nome = _criar_rotulo_erro()
         formulario.addRow("", self._erro_nome)
 
-        self._campo_preco = QLineEdit(formatar_para_campo(preco_inicial))
-        formulario.addRow("Preço", self._campo_preco)
+        # Os dois valores em `CampoMoeda` (§9.20): o campo não aceita letra nem
+        # segunda vírgula, saneia o que é colado e completa os centavos ao sair.
+        # O "R$" é do campo, e por isso os placeholders não o repetem.
+        self._campo_preco = CampoMoeda(preco_inicial)
+        self._campo_preco.setPlaceholderText("0,00")
+        formulario.addRow("Preço de venda", self._campo_preco)
         self._erro_preco = _criar_rotulo_erro()
         formulario.addRow("", self._erro_preco)
 
-        self._campo_custo = QLineEdit(formatar_para_campo(custo_inicial))
-        self._campo_custo.setPlaceholderText("Opcional, padrão 0,00")
-        formulario.addRow("Custo", self._campo_custo)
+        self._campo_custo = CampoMoeda(custo_inicial)
+        self._campo_custo.setPlaceholderText("0,00 (opcional)")
+        formulario.addRow("Preço de custo", self._campo_custo)
 
         self._seletor_categoria = QComboBox()
         for categoria in categorias:
@@ -2234,9 +2235,17 @@ class _ProdutoDialog(QDialog):
         else:
             _limpar_erro(self._campo_nome, self._erro_nome)
 
-        preco = safe_decimal(self._campo_preco.text(), padrao=None)
-        if preco is None or preco <= 0:
-            _marcar_erro(self._campo_preco, self._erro_preco, "Informe um preço válido, maior que zero.")
+        # O campo não guarda texto ilegível (§9.20), então sobraram só dois
+        # motivos de recusa, e cada um tem a sua frase: "vazio" pede o preço,
+        # "zero" diz a regra. A mesma frase para os dois fazia o operador
+        # procurar um erro de digitação que não existia.
+        preco = self._campo_preco.valor()
+        if preco is None:
+            _marcar_erro(self._campo_preco, self._erro_preco, "Informe o preço de venda.")
+            foco = foco or self._campo_preco
+            valido = False
+        elif preco <= ZERO:
+            _marcar_erro(self._campo_preco, self._erro_preco, "O preço de venda deve ser maior que zero.")
             foco = foco or self._campo_preco
             valido = False
         else:
@@ -2342,10 +2351,10 @@ class _ProdutoDialog(QDialog):
         # produto nasce com preço zero e visível na tela, em vez de o clique
         # morrer sem explicação.
         nome = self._campo_nome.text().strip()
-        preco = safe_decimal(self._campo_preco.text(), padrao=None) or ZERO
+        preco = self._campo_preco.valor() or ZERO
         # Custo em branco é legítimo (produto sem custo cadastrado ainda), e é
-        # por isso que este usa o padrão zero em vez de `None`.
-        custo = safe_decimal(self._campo_custo.text()) or ZERO
+        # por isso que ele cai no zero em vez de marcar erro.
+        custo = self._campo_custo.valor() or ZERO
         return DadosProduto(
             nome=nome,
             preco=preco,

@@ -560,6 +560,18 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background-color: {t['campo_erro_bg']};
     }}
 
+    /* Campo de dinheiro (`widgets/campo_moeda.py`, §9.20). O "R$" é um QLabel
+       FILHO do campo, fora do texto. `background: transparent` é obrigatório:
+       sem ele o `QWidget {{ background }}` do topo pinta um retângulo de
+       bg_marca por cima do campo (e por cima do vermelho do [erro="true"]).
+       Apagado em repouso, no acento do tema com o foco — junto com a borda. */
+    QLabel#campoMoedaPrefixo {{
+      background: transparent;
+      color: {t['texto_fraquissimo']};
+      font-weight: 700;
+    }}
+    QLabel#campoMoedaPrefixo[foco="true"] {{ color: {t['acento']}; }}
+
     /* Comprovante digital de fechamento. Era o último widget lendo as
        "constantes planas" de `tokens.py` — o bloco inteiro morreu com isto. */
     QDialog#comprovanteDialog {{ background: {t['superficie']}; }}
