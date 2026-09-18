@@ -31,9 +31,11 @@ from gestor_comercial.domain.combo_item import ComboItem
 from gestor_comercial.domain.enums import TipoConexaoImpressora
 from gestor_comercial.domain.impressora import (
     BAUDRATE_PADRAO,
+    BOBINAS_MM,
     COLUNAS_PADRAO,
     PORTA_REDE_PADRAO,
     Impressora,
+    bobina_mm_das_colunas,
 )
 from gestor_comercial.domain.produto import Produto
 from gestor_comercial.domain.subcategoria import Subcategoria
@@ -1001,6 +1003,8 @@ class CardapioService:
         nome_fila: str | None = None,
         caminho_arquivo: str | None = None,
         colunas: int | str | None = None,
+        bobina_mm: int | str | None = None,
+        letra_grossa: bool = False,
         ativa: bool = True,
         padrao: bool | None = None,
     ) -> Impressora:
@@ -1017,6 +1021,11 @@ class CardapioService:
         escolha explícita da tela, e vale inclusive para tirar a marca que a
         regra automática daria. Impressora que nasce desligada NUNCA é a padrão,
         pedida ou não — ver `_aplicar_uso`.
+
+        `bobina_mm` e `letra_grossa` são o formato do cupom (§9.22). Sem bobina,
+        ela sai das colunas pela regra de antes de ser gravada
+        (`bobina_mm_das_colunas`), e `criar_impressora("Cozinha")` continua
+        nascendo 48 colunas, 80mm e letra fina.
         """
         self.auth.exigir_gerente()
         nome_limpo = self._texto_obrigatorio(nome, "Informe o nome da impressora.")
@@ -1024,6 +1033,10 @@ class CardapioService:
 
         impressora = Impressora(nome=nome_limpo, ativa=bool(ativa), padrao=False)
         impressora.colunas = self._colunas_validas(colunas, COLUNAS_PADRAO)
+        impressora.bobina_mm = self._bobina_valida(
+            bobina_mm, bobina_mm_das_colunas(impressora.colunas)
+        )
+        impressora.letra_grossa = bool(letra_grossa)
         self._aplicar_conexao(
             impressora,
             tipo_conexao,
@@ -1063,15 +1076,19 @@ class CardapioService:
         nome_fila: str | None = None,
         caminho_arquivo: str | None = None,
         colunas: int | str | None = None,
+        bobina_mm: int | str | None = None,
+        letra_grossa: bool | None = None,
         ativa: bool | None = None,
         padrao: bool | None = None,
     ) -> Impressora:
         """Grava o formulário inteiro de uma impressora já cadastrada.
 
         É substituição, não remendo: o que não vier no parâmetro do tipo de
-        conexão escolhido fica NULL. `colunas=None`, `ativa=None` e
-        `padrao=None` são a exceção — significam "não mexe", porque são campos
-        que a tela pode simplesmente não estar editando.
+        conexão escolhido fica NULL. `colunas`, `bobina_mm`, `letra_grossa`,
+        `ativa` e `padrao` em `None` são a exceção — significam "não mexe",
+        porque são campos que a tela pode simplesmente não estar editando. A
+        bobina NÃO é deduzida de novo quando só as colunas mudam: ela é gravada
+        de propósito, e "58mm + 48 col." é uma escolha que o gerente pode fazer.
 
         `padrao=True` tira a marca da antiga padrão no MESMO commit (a escolha
         "Recibo do cliente" do cartão, §9.19): gravar a impressora e só depois
@@ -1085,6 +1102,9 @@ class CardapioService:
 
         impressora.nome = nome_limpo
         impressora.colunas = self._colunas_validas(colunas, impressora.colunas)
+        impressora.bobina_mm = self._bobina_valida(bobina_mm, impressora.bobina_mm)
+        if letra_grossa is not None:
+            impressora.letra_grossa = bool(letra_grossa)
         self._aplicar_conexao(
             impressora,
             tipo_conexao,
@@ -1334,6 +1354,13 @@ class CardapioService:
         )
         valor = self._inteiro_positivo(colunas, padrao, mensagem)
         if valor < COLUNAS_MINIMAS or valor > COLUNAS_MAXIMAS:
+            raise RegraDeNegocioError(mensagem)
+        return valor
+
+    def _bobina_valida(self, bobina_mm: int | str | None, padrao: int) -> int:
+        mensagem = "A bobina da impressora deve ser de 58mm ou de 80mm."
+        valor = self._inteiro_positivo(bobina_mm, padrao, mensagem)
+        if valor not in BOBINAS_MM:
             raise RegraDeNegocioError(mensagem)
         return valor
 

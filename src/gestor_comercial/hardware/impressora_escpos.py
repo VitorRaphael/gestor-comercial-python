@@ -27,6 +27,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator, Protocol, runtime_checkable
 
+from gestor_comercial.core.caminhos import pasta_de_dados
+
 if TYPE_CHECKING:  # pragma: no cover - só para o type checker
     # Import só de tipo: em runtime `hardware/` não depende de `domain/`, o que
     # mantém esta camada testável com um objeto qualquer que tenha os campos
@@ -37,10 +39,21 @@ if TYPE_CHECKING:  # pragma: no cover - só para o type checker
 # bobina de 80mm, a mais comum em food truck. 32 é a de 58mm.
 COLUNAS_PADRAO = 48
 
+# Quantas colunas cada bobina imprime na fonte NORMAL do ESC/POS (a fonte A, 12
+# pontos por caractere): 384 pontos úteis na de 58mm, 576 na de 80mm. Passou
+# disso, o driver liga a fonte condensada (a fonte B, 9 pontos), que é o que
+# faz as 64 colunas da bobina de 80mm caberem numa linha (§9.22). As 80 colunas
+# não cabem nem na condensada de uma térmica comum, e ficaram no seletor por
+# decisão do Vitor: quem responde se a impressora dele imprime é a régua do
+# cupom de teste.
+COLUNAS_NA_FONTE_NORMAL = {58: 32, 80: 48}
+BOBINA_PADRAO_MM = 80
+
 # Pasta onde caem os cupons do modo ARQUIVO quando ninguém informa caminho.
-# Mesma raiz do banco (`~/.gestor_comercial/`), mas montada aqui em vez de
-# importada do repository: `hardware/` não deve depender da camada de dados.
-PASTA_CUPONS_PADRAO = Path.home() / ".gestor_comercial" / "cupons"
+# Mesma raiz do banco, vinda de `core/` e não do repository: `hardware/` não deve
+# depender da camada de dados. No `.exe`, é a pasta de dados própria da versão —
+# nunca a `~/.gestor_comercial/` do programa anterior.
+PASTA_CUPONS_PADRAO = pasta_de_dados() / "cupons"
 
 TIPOS_SUPORTADOS = ("USB", "SERIAL", "REDE", "WINDOWS", "ARQUIVO")
 
@@ -144,6 +157,8 @@ class ParametrosImpressora:
     porta_rede: int | None = None
     nome_fila: str | None = None
     caminho_arquivo: str | None = None
+    bobina_mm: int = BOBINA_PADRAO_MM
+    letra_grossa: bool = False
 
     @classmethod
     def de(cls, impressora: "Impressora") -> "ParametrosImpressora":
@@ -152,6 +167,8 @@ class ParametrosImpressora:
             nome=_nome_da(impressora),
             tipo_conexao=str(getattr(bruto, "value", bruto) or ""),
             colunas=_colunas_de(impressora),
+            bobina_mm=_bobina_de(impressora),
+            letra_grossa=_letra_grossa_de(impressora),
             vendor_id=getattr(impressora, "vendor_id", None),
             product_id=getattr(impressora, "product_id", None),
             porta_serial=getattr(impressora, "porta_serial", None),
@@ -218,15 +235,23 @@ def _sessao_de_impressao(
     tipo = _tipo_de_conexao(impressora)
     nome = _nome_da(impressora)
     colunas = _colunas_de(impressora)
+    letra_grossa = _letra_grossa_de(impressora)
 
     if tipo == "ARQUIVO":
         # Não há conexão a fechar: cada impressão abre e fecha o arquivo.
-        yield _DriverArquivo(_caminho_do_arquivo(impressora), colunas, nome)
+        yield _DriverArquivo(
+            _caminho_do_arquivo(impressora), colunas, nome, letra_grossa=letra_grossa
+        )
         return
 
     conexao = _abrir_conexao_escpos(impressora, tipo, nome, timeout_s)
     try:
-        yield _DriverEscpos(conexao, nome)
+        yield _DriverEscpos(
+            conexao,
+            nome,
+            letra_grossa=letra_grossa,
+            condensada=usa_fonte_condensada(colunas, _bobina_de(impressora)),
+        )
     except BaseException:
         # Já existe um erro em curso: fechar não pode mascarar o erro real da
         # impressão. Se a impressora caiu no meio do cupom, o close também vai
@@ -252,11 +277,20 @@ def _sessao_de_impressao(
 
 
 class _DriverEscpos:
-    """Adapta os `BlocoTexto` para os comandos ESC/POS da biblioteca."""
+    """Adapta os `BlocoTexto` para os comandos ESC/POS da biblioteca.
 
-    def __init__(self, conexao: Any, nome: str) -> None:
+    `letra_grossa` e `condensada` são do cadastro da impressora, e não do
+    documento (§9.22): o mesmo recibo sai em letra grossa numa impressora e fina
+    em outra, e a fila de contingência reimprime com o que a impressora é HOJE.
+    """
+
+    def __init__(
+        self, conexao: Any, nome: str, *, letra_grossa: bool = False, condensada: bool = False
+    ) -> None:
         self._conexao = conexao
         self._nome = nome
+        self._letra_grossa = letra_grossa
+        self._condensada = condensada
 
     def imprimir(self, documento: Documento) -> None:
         try:
@@ -273,9 +307,19 @@ class _DriverEscpos:
                 # bloco em dobro (o número da mesa) ligaria o tamanho duplo e
                 # nada o desligaria: o resto do cupom, e o cupom seguinte,
                 # sairiam todos dobrados e cortados pela largura da bobina.
+                #
+                # A letra grossa e a fonte condensada vão EM TODO BLOCO, e não uma
+                # vez no cabeçalho, pelo mesmo motivo: o `ESC ! 0` que o
+                # `normal_textsize` manda zera a ênfase e volta à fonte A, e o
+                # `bold=False` de um bloco comum manda `ESC E 0`. Um `ESC E 1`
+                # só no começo morreria na primeira linha. O `set()` emite o
+                # tamanho antes da ênfase e da fonte, então elas sobrevivem.
                 self._conexao.set(
                     align="center" if bloco.centralizado else "left",
-                    bold=bloco.negrito,
+                    bold=bloco.negrito or self._letra_grossa,
+                    # `None` quando não é condensada: nada é enviado, e o cupom
+                    # de quem cabe na fonte normal sai com os bytes de sempre.
+                    font="b" if self._condensada else None,
                     normal_textsize=not bloco.dobro,
                     double_width=bloco.dobro,
                     double_height=bloco.dobro,
@@ -283,7 +327,8 @@ class _DriverEscpos:
                 self._conexao.textln(bloco.texto)
             # Volta ao estado neutro antes de cortar: a impressora guarda o
             # último estilo entre trabalhos, e sem isso o próximo cupom sairia
-            # inteiro em negrito dobrado.
+            # inteiro em negrito dobrado. É aqui o `ESC E 0` do fim da letra
+            # grossa, e o `ESC ! 0` do `normal_textsize` devolve a fonte A.
             self._conexao.set(
                 align="left",
                 bold=False,
@@ -318,12 +363,17 @@ class _DriverArquivo:
     `formatador_cupom`: quebrar o que não coube é comportamento da impressora,
     não do documento — se o serviço mandar uma linha larga demais, o arquivo
     tem que mostrar o mesmo estrago que o papel mostraria.
+
+    A letra grossa (§9.22) segue a mesma simulação do negrito: o cupom inteiro
+    em MAIÚSCULA. É o que o papel mostra — com tudo em negrito, os títulos
+    deixam de se destacar do resto.
     """
 
-    def __init__(self, caminho: Path, colunas: int, nome: str) -> None:
+    def __init__(self, caminho: Path, colunas: int, nome: str, *, letra_grossa: bool = False) -> None:
         self._caminho = caminho
         self._colunas = colunas
         self._nome = nome
+        self._letra_grossa = letra_grossa
 
     def imprimir(self, documento: Documento) -> None:
         linhas: list[str] = [
@@ -351,7 +401,7 @@ class _DriverArquivo:
             ) from erro
 
     def _renderizar(self, bloco: BlocoTexto) -> list[str]:
-        texto = bloco.texto.upper() if bloco.negrito else bloco.texto
+        texto = bloco.texto.upper() if bloco.negrito or self._letra_grossa else bloco.texto
         # Bloco em dobro ocupa 2 colunas por caractere, então cabe metade.
         largura_util = max(1, self._colunas // 2 if bloco.dobro else self._colunas)
 
@@ -502,6 +552,30 @@ def _colunas_de(impressora: "Impressora") -> int:
     # Largura absurda (ou negativa) quebraria o center()/wrap() lá embaixo;
     # cair no padrão é melhor do que derrubar a impressão por um cadastro torto.
     return valor if 20 <= valor <= 120 else COLUNAS_PADRAO
+
+
+def _bobina_de(impressora: "Impressora") -> int:
+    """58 ou 80. Sem bobina válida, a de 80mm.
+
+    Do banco ela sempre vem (`NOT NULL` desde a migração `b9d2f5a31c47`); sem
+    ela só chega um objeto solto de teste ou um valor mexido à mão. Cair na de
+    80mm nunca liga a condensada para quem cabe nas 48 colunas da fonte normal.
+    """
+    bobina = getattr(impressora, "bobina_mm", None)
+    return bobina if bobina in COLUNAS_NA_FONTE_NORMAL else BOBINA_PADRAO_MM
+
+
+def _letra_grossa_de(impressora: "Impressora") -> bool:
+    return bool(getattr(impressora, "letra_grossa", False))
+
+
+def usa_fonte_condensada(colunas: int, bobina_mm: int) -> bool:
+    """A fonte B entra quando as colunas passam do que a bobina imprime na fonte A.
+
+    32 na de 58mm e 48 na de 80mm ficam na normal; 64 e 80 na de 80mm, e
+    qualquer coisa acima de 32 na de 58mm, pedem a condensada.
+    """
+    return colunas > COLUNAS_NA_FONTE_NORMAL.get(bobina_mm, COLUNAS_PADRAO)
 
 
 def _caminho_do_arquivo(impressora: "Impressora") -> Path:

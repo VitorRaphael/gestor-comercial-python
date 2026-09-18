@@ -1065,7 +1065,10 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background: transparent;
     }}
 
-    QPushButton#impDialogBobina {{
+    /* Bobina e colunas por linha: o mesmo segmento, ambar quando escolhido
+       (o #E5A93C e o #1C1914 do mockup sao os tokens `impressora_opcao_ativa_*`
+       do Escuro). */
+    QPushButton#impDialogBobina, QPushButton#impDialogColunas {{
       padding: 0 12px;
       background: {t['impressora_opcao_bg']};
       border: 1px solid {t['impressora_opcao_borda']};
@@ -1074,11 +1077,45 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-size: 13px;
       font-weight: 700;
     }}
-    QPushButton#impDialogBobina:hover {{ border: 1px solid {t['borda']}; color: {t['texto']}; }}
-    QPushButton#impDialogBobina[selecionada="true"] {{
+    QPushButton#impDialogBobina:hover, QPushButton#impDialogColunas:hover {{
+      border: 1px solid {t['borda']};
+      color: {t['texto']};
+    }}
+    QPushButton#impDialogBobina[selecionada="true"],
+    QPushButton#impDialogColunas[selecionada="true"] {{
       background: {t['impressora_opcao_ativa_bg']};
       border: 1px solid {t['impressora_opcao_ativa_borda']};
       color: {t['impressora_opcao_ativa_glifo']};
+    }}
+
+    /* Espessura da letra: o mesmo segmento, com glifo e palavra juntos no
+       meio. Cada palavra tem o peso que promete -- a grossa em negrito. */
+    QFrame#impDialogEspessura {{
+      background: {t['impressora_opcao_bg']};
+      border: 1px solid {t['impressora_opcao_borda']};
+      border-radius: 12px;
+    }}
+    QFrame#impDialogEspessura:hover {{ border: 1px solid {t['borda']}; }}
+    QFrame#impDialogEspessura[selecionada="true"] {{
+      background: {t['impressora_opcao_ativa_bg']};
+      border: 1px solid {t['impressora_opcao_ativa_borda']};
+    }}
+    QLabel#impDialogEspessuraTexto {{
+      color: {t['impressora_opcao_texto']};
+      font-size: 13px;
+      font-weight: 500;
+      background: transparent;
+    }}
+    QLabel#impDialogEspessuraTexto[espessura="grossa"] {{ font-weight: 800; }}
+    QLabel#impDialogEspessuraTexto[selecionada="true"] {{
+      color: {t['impressora_opcao_ativa_glifo']};
+    }}
+    QLabel#impDialogTag {{
+      color: {t['texto_fraquissimo']};
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      background: transparent;
     }}
 
     QFrame#impDialogSituacao {{

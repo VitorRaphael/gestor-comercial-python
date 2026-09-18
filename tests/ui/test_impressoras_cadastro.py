@@ -25,7 +25,7 @@ from gestor_comercial.hardware.descoberta_local import DestinoLocal
 from gestor_comercial.services.cardapio_service import CardapioService
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.ui.views.impressoras_view import ImpressorasView
-from gestor_comercial.ui.widgets.impressora_dialog import Bobina, Conexao, ImpressoraDialog
+from gestor_comercial.ui.widgets.impressora_dialog import Bobina, Conexao, Espessura, ImpressoraDialog
 
 DESTINOS = [DestinoLocal("EPSON TM-T20", "WINDOWS", "Impressora do Windows · USB001")]
 
@@ -181,10 +181,18 @@ def test_editar_para_uma_porta_com_grava_serial(qapp, tela):
 
 
 def test_abrir_e_salvar_sem_mexer_nao_muda_o_cadastro(qapp, tela):
-    """A não-regressão pelo caminho inteiro: tela → cartão → service → banco."""
+    """A não-regressão pelo caminho inteiro: tela → cartão → service → banco.
+    Com a combinação que a dedução de antes não devolveria (42 colunas numa
+    bobina de 58mm) e a letra grossa, os dois do §9.22."""
     view, cardapio = tela
     cardapio.criar_impressora(
-        "Balcão", TipoConexaoImpressora.SERIAL, porta_serial="COM3", baudrate=19200, colunas=42
+        "Balcão",
+        TipoConexaoImpressora.SERIAL,
+        porta_serial="COM3",
+        baudrate=19200,
+        colunas=42,
+        bobina_mm=58,
+        letra_grossa=True,
     )
     view.atualizar()
     view._tabela.selectRow(0)
@@ -274,7 +282,45 @@ def _retrato(impressora: Impressora) -> dict[str, object]:
             "nome_fila",
             "caminho_arquivo",
             "colunas",
+            "bobina_mm",
+            "letra_grossa",
             "ativa",
             "padrao",
         )
+    }
+
+
+def test_o_formato_escolhido_no_cartao_e_o_que_fica_gravado_e_o_que_reabre(qapp, tela):
+    """§9.22 pelo caminho real: cadastrar "58mm + 48 col. + letra grossa", ver
+    o banco, e reabrir a edição com os mesmos três botões acesos."""
+    view, cardapio = tela
+    view.atualizar()
+
+    def cadastrar(cartao: ImpressoraDialog) -> None:
+        cartao._campo_nome.setText("Caixa 01")
+        _clicar(cartao._botoes_bobina[Bobina.MM58])
+        _clicar(cartao._botoes_colunas[48])
+        _clicar(cartao._botoes_espessura[Espessura.GROSSA])
+        _clicar(cartao._botao_confirmar)
+
+    assert _encenar(view, view._criar, cadastrar) == []
+    gravada = next(i for i in cardapio.listar_impressoras() if i.nome == "Caixa 01")
+    assert (gravada.colunas, gravada.bobina_mm, gravada.letra_grossa) == (48, 58, True)
+
+    visto: dict[str, object] = {}
+
+    def conferir(cartao: ImpressoraDialog) -> None:
+        visto["bobina"] = cartao._bobina
+        visto["colunas"] = [c for c, b in cartao._botoes_colunas.items() if b.property("selecionada")]
+        visto["grossa"] = cartao._botoes_espessura[Espessura.GROSSA].property("selecionada")
+        visto["resumo"] = cartao._resumo.texto_completo()
+        _clicar(cartao._botao_cancelar)
+
+    view._selecionar_por_id(gravada.id)
+    assert _encenar(view, view._editar, conferir) == []
+    assert visto == {
+        "bobina": Bobina.MM58,
+        "colunas": [48],
+        "grossa": True,
+        "resumo": "Caixa 01 · Arquivo · 58mm · 48 col. · letra grossa",
     }

@@ -35,6 +35,25 @@ os construtores nomeados `para_nova`/`para_editar` (a convenção do
    desliga a opção "Recibo do cliente" na mesma hora, para a tela mostrar o que
    vai ser gravado.
 
+## O formato do cupom (§9.22)
+
+A linha da bobina ganhou "Colunas por linha" (32 · 48 · 64 · 80) e a de baixo
+virou "Espessura da letra" ao lado da "Situação". As três decisões do Vitor:
+
+1. **Quatro larguras, e não as três do mockup.** 64 é a bobina de 80mm na fonte
+   condensada, que o driver liga sozinho (`usa_fonte_condensada`). O 80 ficou
+   mesmo depois do aviso de que não cabe na fonte de nenhuma térmica comum: a
+   régua do cupom de teste é quem diz se a impressora dele imprime;
+2. **A bobina é gravada** (`Impressora.bobina_mm`), e não deduzida das colunas:
+   "58mm + 48 col." reabre como foi salva. As colunas são livres em qualquer
+   bobina. Trocar de bobina só SUGERE: cada bobina lembra as colunas que tinha
+   enquanto o cartão está aberto, e a primeira visita sugere 32 na de 58mm e 48
+   na de 80mm (`COLUNAS_SUGERIDAS`). Voltar à bobina de partida devolve as
+   colunas cadastradas — inclusive uma largura antiga sem botão, como 42;
+3. **Letra grossa é a ênfase do ESC/POS no cupom inteiro** (`letra_grossa`).
+
+O resumo diz as cinco coisas: `Caixa 01 · USB · 80mm · 80 col. · letra grossa`.
+
 ## O que este diálogo NÃO faz
 
 Não grava nada sozinho e não conhece `CardapioService`. Ele monta
@@ -77,7 +96,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 
-from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPaintEvent, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QComboBox,
@@ -95,10 +114,14 @@ from PySide6.QtWidgets import (
 from gestor_comercial.core.resilience import logger_do_app, nao_deixa_escapar
 from gestor_comercial.domain.enums import TipoConexaoImpressora
 from gestor_comercial.domain.impressora import (
+    BOBINA_58MM,
+    BOBINA_80MM,
+    BOBINAS_MM,
     COLUNAS_58MM,
     COLUNAS_PADRAO,
     PORTA_REDE_PADRAO,
     Impressora,
+    bobina_mm_das_colunas,
 )
 from gestor_comercial.services.cardapio_service import PORTA_REDE_MAXIMA
 from gestor_comercial.services.impressao_service import DestinoLocal
@@ -107,8 +130,11 @@ from gestor_comercial.ui.theme.cores import cor_do_token
 from gestor_comercial.ui.widgets import cartao_modal
 from gestor_comercial.ui.widgets.cardapio_cartoes import (
     GLIFO_ARQUIVO_TEXTO,
+    GLIFO_COLUNAS,
     GLIFO_IMPRESSORA,
+    GLIFO_LETRAS,
     GLIFO_MAIS,
+    GLIFO_NEGRITO,
     GLIFO_REDE,
     GLIFO_SETA_BAIXO,
     GLIFO_SINAL,
@@ -131,10 +157,19 @@ LIMITE_NOME = 40
 # impressora nenhuma na hora de escolher para onde vai a categoria.
 MINIMO_NOME = 2
 
-# Até quantas colunas a largura cadastrada é lida como bobina de 58mm. As de
-# 58mm têm 32 colunas na fonte normal; 42 é o caso ambíguo, e o pedido o põe na
-# de 80mm ("80mm = 48/42 colunas").
-TETO_COLUNAS_58MM = 40
+# As larguras do seletor "Colunas por linha" (§9.22). Ver o cabeçalho: 64 é a
+# de 80mm na fonte condensada, e 80 ficou por decisão do Vitor.
+COLUNAS_POR_LINHA = (32, 48, 64, 80)
+
+_DICA_DAS_COLUNAS = {
+    32: "Bobina de 58mm na fonte normal.",
+    48: "Bobina de 80mm na fonte normal.",
+    64: "Bobina de 80mm na fonte condensada, que a impressão liga sozinha.",
+    80: (
+        "Só para impressora que imprime 80 colunas: nem a fonte condensada de uma "
+        "térmica comum chega lá. Confira com a régua do cupom de teste."
+    ),
+}
 
 # De quanto em quanto tempo o cartão olha se a lista do Windows chegou, e até
 # quando espera. O teto não mata a thread (thread não se mata em Python): só
@@ -146,6 +181,7 @@ USO_RECIBO = "Recibo do cliente"
 USO_PRODUCAO = "Produção (por categoria)"
 
 _SECAO = "SAÍDA E PRODUÇÃO"
+_TAG_AJUSTE_VISUAL = "AJUSTE VISUAL"
 _SEM_NOME = "Sem nome"
 _ROTULO_RESUMO = "RESUMO DA CONFIGURAÇÃO"
 _ROTULO_ERRO_SERVICO = "NÃO FOI POSSÍVEL SALVAR"
@@ -190,8 +226,51 @@ class Bobina(Enum):
     MM58 = "58mm"
     MM80 = "80mm"
 
+    @property
+    def mm(self) -> int:
+        """O número que vai para `Impressora.bobina_mm`."""
+        return BOBINA_58MM if self is Bobina.MM58 else BOBINA_80MM
 
-COLUNAS_DA_BOBINA: dict[Bobina, int] = {Bobina.MM58: COLUNAS_58MM, Bobina.MM80: COLUNAS_PADRAO}
+    @classmethod
+    def de_mm(cls, mm: int) -> "Bobina":
+        return cls.MM58 if mm == BOBINA_58MM else cls.MM80
+
+
+# A primeira sugestão de cada bobina, na primeira vez que o gerente a escolhe
+# com o cartão aberto (o pedido: 58mm sugere 32, 80mm sugere 48).
+COLUNAS_SUGERIDAS: dict[Bobina, int] = {Bobina.MM58: COLUNAS_58MM, Bobina.MM80: COLUNAS_PADRAO}
+
+
+class Espessura(Enum):
+    FINA = "fina"
+    GROSSA = "grossa"
+
+
+@dataclass(frozen=True, slots=True)
+class _OpcaoDeEspessura:
+    """O que separa "Letras finas" de "Letras grossas": o glifo, as palavras e a dica."""
+
+    glifo: str
+    rotulo: str
+    no_resumo: str
+    dica: str
+
+
+ESPESSURAS: dict[Espessura, _OpcaoDeEspessura] = {
+    Espessura.FINA: _OpcaoDeEspessura(
+        GLIFO_LETRAS,
+        "Letras finas",
+        "letra fina",
+        "O peso normal da impressora. Os títulos do cupom saem em negrito.",
+    ),
+    Espessura.GROSSA: _OpcaoDeEspessura(
+        GLIFO_NEGRITO,
+        "Letras grossas",
+        "letra grossa",
+        "O cupom inteiro em negrito, mais fácil de ler de longe. Os títulos "
+        "deixam de se destacar do resto.",
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,6 +337,8 @@ class DadosImpressora:
     colunas: int
     ativa: bool
     padrao: bool
+    bobina_mm: int = BOBINA_80MM
+    letra_grossa: bool = False
     vendor_id: str | None = None
     product_id: str | None = None
     porta_serial: str | None = None
@@ -279,6 +360,8 @@ class DadosImpressora:
             "nome_fila": self.nome_fila,
             "caminho_arquivo": self.caminho_arquivo,
             "colunas": self.colunas,
+            "bobina_mm": self.bobina_mm,
+            "letra_grossa": self.letra_grossa,
             "ativa": self.ativa,
             "padrao": self.padrao,
         }
@@ -313,7 +396,20 @@ def conexao_do_tipo(tipo: TipoConexaoImpressora) -> Conexao:
 
 
 def bobina_das_colunas(colunas: int) -> Bobina:
-    return Bobina.MM58 if colunas <= TETO_COLUNAS_58MM else Bobina.MM80
+    """A bobina de quem não a tem gravada: a regra do §9.19, a mesma da migração."""
+    return Bobina.de_mm(bobina_mm_das_colunas(colunas))
+
+
+def bobina_da_impressora(impressora: Impressora) -> Bobina:
+    """A bobina GRAVADA, e só ela (§9.22) — "58mm + 48 col." reabre em 58mm.
+
+    Sem valor válido, a regra das colunas. Do banco ele sempre vem (`NOT NULL`);
+    cai aqui a `Impressora` solta que ainda não foi gravada, e um valor mexido à
+    mão, que sem isso derrubaria a abertura da edição.
+    """
+    if impressora.bobina_mm in BOBINAS_MM:
+        return Bobina.de_mm(impressora.bobina_mm)
+    return bobina_das_colunas(impressora.colunas)
 
 
 def ler_caminho_de_arquivo(texto: str) -> LeituraDaConexao:
@@ -411,6 +507,8 @@ class _Retrato:
     endereco_rede: str = ""
     baudrate: int | None = None
     colunas: int = COLUNAS_PADRAO
+    bobina: Bobina = Bobina.MM80
+    letra_grossa: bool = False
     ativa: bool = True
     padrao: bool = False
 
@@ -440,6 +538,8 @@ class _Retrato:
             endereco_rede=rede,
             baudrate=impressora.baudrate if tipo is TipoConexaoImpressora.SERIAL else None,
             colunas=impressora.colunas,
+            bobina=bobina_da_impressora(impressora),
+            letra_grossa=bool(impressora.letra_grossa),
             ativa=bool(impressora.ativa),
             padrao=bool(impressora.padrao),
         )
@@ -632,6 +732,27 @@ class _CartaoSituacao(QFrame):
         self.interruptor = _Interruptor()
         linha.addWidget(self.interruptor, 0, Qt.AlignmentFlag.AlignVCenter)
 
+    def _com_a_frase_mais_longa(self, medida: QSize) -> QSize:
+        """A medida como se o rótulo mostrasse a frase MAIS LONGA dos dois estados.
+
+        Sem isto o card pedia 242px ligado e 291px desligado: desligar a
+        impressora fazia a linha inteira se redistribuir e os botões de
+        espessura andavam debaixo do dedo — e, no cartão de 600px do §9.19,
+        "Impressora desativada" saía cortada (o teste só media o estado ligado).
+        Vale para o `sizeHint` E para o `minimumSizeHint`: só o primeiro não
+        basta, porque sem espaço sobrando o layout encolhe até o mínimo (medido).
+        A métrica é a do próprio rótulo, que já passou pelo QSS: fonte de QSS
+        vence `setFont`, e medir outra fonte mediria outra coisa (§9.8).
+        """
+        metricas = self._texto.fontMetrics()
+        maior = max(metricas.horizontalAdvance(frase) for frase in (self.ATIVA, self.INATIVA))
+        extra = maior - metricas.horizontalAdvance(self._texto.text())
+        return QSize(medida.width() + extra, medida.height())
+
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 (override Qt)
+        return self._com_a_frase_mais_longa(super().minimumSizeHint())
+
     def definir(self, ativa: bool) -> None:
         self.interruptor.definir(ativa)
         self._texto.setText(self.ATIVA if ativa else self.INATIVA)
@@ -641,6 +762,63 @@ class _CartaoSituacao(QFrame):
         if self.property("ativa") != ativa:
             aplicar_propriedade(self, "ativa", ativa)
             aplicar_propriedade(self._texto, "ativa", ativa)
+
+    @nao_deixa_escapar()
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (override Qt)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicado.emit()
+        super().mousePressEvent(event)
+
+
+class _BotaoDeEspessura(QFrame):
+    """"Letras finas" ou "Letras grossas": o glifo e a palavra, juntos no meio.
+
+    `QFrame` e não `QPushButton`, pelo motivo do `_CartaoConexao`: o glifo tem
+    que andar colado ao texto, e o texto de cada opção tem o PESO que ela
+    promete (a grossa em negrito, a fina no normal), o que o texto único de um
+    botão com glifo pintado numa margem fixa não faz. Sem foco: quem lê o
+    teclado é o diálogo.
+    """
+
+    clicado = Signal()
+
+    LADO_GLIFO_PX = 15
+
+    def __init__(self, espessura: Espessura, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        opcao = ESPESSURAS[espessura]
+        self.espessura = espessura
+        self.setObjectName("impDialogEspessura")
+        self.setProperty("selecionada", False)
+        self.setToolTip(opcao.dica)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        linha = QHBoxLayout(self)
+        linha.setContentsMargins(12, 0, 12, 0)
+        # Espaço zero e o respiro posto à mão: com `setSpacing` o layout põe o
+        # vão também entre as molas e as peças, e são 16px a mais pedidos por
+        # botão — foi o que espremia "Letras grossas" na medição.
+        linha.setSpacing(0)
+        linha.addStretch(1)
+        self._glifo = GlifoSolto(opcao.glifo, self.LADO_GLIFO_PX, "impressora_opcao_glifo")
+        linha.addWidget(self._glifo, 0, Qt.AlignmentFlag.AlignVCenter)
+        linha.addSpacing(8)
+        self._texto = QLabel(opcao.rotulo)
+        self._texto.setObjectName("impDialogEspessuraTexto")
+        self._texto.setProperty("espessura", espessura.value)
+        self._texto.setProperty("selecionada", False)
+        linha.addWidget(self._texto, 0, Qt.AlignmentFlag.AlignVCenter)
+        linha.addStretch(1)
+
+    def selecionar(self, selecionada: bool) -> None:
+        if self.property("selecionada") == selecionada:
+            return
+        aplicar_propriedade(self, "selecionada", selecionada)
+        aplicar_propriedade(self._texto, "selecionada", selecionada)
+        self._glifo.trocar_token(
+            "impressora_opcao_ativa_glifo" if selecionada else "impressora_opcao_glifo"
+        )
 
     @nao_deixa_escapar()
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (override Qt)
@@ -681,16 +859,27 @@ class _SeletorComSeta(QComboBox):
 class ImpressoraDialog(QDialog):
     """Cartão de cadastro/edição de impressora. Ver o cabeçalho do módulo."""
 
-    # "Entre 560 e 620px", pedido. 600 fecha com folga medida: o rodapé de uma
-    # linha e os três cards de conexão lado a lado cabem com a fonte da marca,
-    # ~20% mais larga que a do mockup (o achado do §9.12), sem nada espremido
-    # (`test_nada_fica_espremido`).
-    LARGURA_CARTAO_PX = 600
+    # 720, medido (§9.22). O §9.19 pedia "entre 560 e 620" e ficou em 600; a
+    # linha "Espessura da letra | Situação" não cabe ali com a fonte da marca,
+    # ~20% mais larga que a do mockup (o achado do §9.12): os dois botões de
+    # espessura iguais pedem 171px cada ("Letras grossas" em negrito), e a
+    # Situação 291px ("Impressora desativada"). A 680 nada espreme, mas os dois
+    # botões saem desiguais; a partir de ~707 ficam iguais, e 720 deixa folga.
+    # O próprio mockup mede 768. `test_nada_fica_espremido` mede tudo isso.
+    LARGURA_CARTAO_PX = 720
     LADO_BOTAO_FECHAR_PX = 32
     LADO_BADGE_PX = 44
     LADO_ICONE_RESUMO_PX = 36
     ALTURA_CAMPO_PX = 44
     ALTURA_CONEXAO_PX = 64
+    LADO_GLIFO_ROTULO_PX = 14
+    # Quanto cada coluna das duas linhas do formato leva da largura. As colunas
+    # têm quatro botões e a bobina dois; a espessura tem duas palavras e a
+    # situação uma frase ("Impressora desativada") com o interruptor ao lado.
+    PESO_BOBINA = 2
+    PESO_COLUNAS = 3
+    PESO_ESPESSURA = 5
+    PESO_SITUACAO = 4
 
     def __init__(
         self,
@@ -721,7 +910,14 @@ class ImpressoraDialog(QDialog):
         }
 
         self._conexao = self._retrato.conexao
-        self._bobina = bobina_das_colunas(self._retrato.colunas)
+        self._bobina = self._retrato.bobina
+        self._colunas = self._retrato.colunas
+        # As colunas que cada bobina "lembra" enquanto o cartão está aberto. A
+        # de partida lembra as cadastradas; a outra começa na sugestão dela.
+        # Duas entradas, e morre com o cartão.
+        self._colunas_da_bobina: dict[Bobina, int] = dict(COLUNAS_SUGERIDAS)
+        self._colunas_da_bobina[self._bobina] = self._colunas
+        self._letra_grossa = self._retrato.letra_grossa
         self._ativa = self._retrato.ativa
         # A última escolha EXPLÍCITA de uso. Separada do que o seletor mostra
         # porque desligar a impressora tira o recibo dela à força — e religar
@@ -736,6 +932,8 @@ class ImpressoraDialog(QDialog):
         self._limpo = False
         self._cards: dict[Conexao, _CartaoConexao] = {}
         self._botoes_bobina: dict[Bobina, QPushButton] = {}
+        self._botoes_colunas: dict[int, QPushButton] = {}
+        self._botoes_espessura: dict[Espessura, _BotaoDeEspessura] = {}
 
         self.setObjectName("impDialog")
         self.setWindowTitle(frases.titulo)
@@ -767,6 +965,8 @@ class ImpressoraDialog(QDialog):
 
         self._pintar_conexao()
         self._pintar_bobina()
+        self._pintar_colunas()
+        self._pintar_espessura()
         self._pintar_situacao()
         self._pintar_placeholder_local()
         self._atualizar()
@@ -881,12 +1081,17 @@ class ImpressoraDialog(QDialog):
         faixa = PainelPontilhado()
         faixa.setObjectName("impDialogCorpo")
         coluna = QVBoxLayout(faixa)
-        coluna.setContentsMargins(24, 20, 24, 20)
-        coluna.setSpacing(18)
+        # 18/14 e não os 20/18 do §9.19: são seis faixas agora, e com o erro
+        # mais longo do service aceso (três linhas) o cartão tem que caber nos
+        # 728px úteis de um monitor de 768
+        # (`test_o_erro_do_service_nao_empurra_o_cartao_para_fora`).
+        coluna.setContentsMargins(24, 18, 24, 18)
+        coluna.setSpacing(14)
         coluna.addLayout(self._montar_nome())
         coluna.addLayout(self._montar_conexoes())
         coluna.addLayout(self._montar_destino_e_uso())
-        coluna.addLayout(self._montar_bobina_e_situacao())
+        coluna.addLayout(self._montar_bobina_e_colunas())
+        coluna.addLayout(self._montar_espessura_e_situacao())
         coluna.addWidget(self._montar_resumo())
         return faixa
 
@@ -1007,7 +1212,16 @@ class ImpressoraDialog(QDialog):
         linha.addLayout(direita, 1)
         return linha
 
-    def _montar_bobina_e_situacao(self) -> QHBoxLayout:
+    def _botao_de_segmento(self, texto: str, nome: str) -> QPushButton:
+        """Um botão dos seletores de bobina e de colunas, que têm o mesmo desenho."""
+        botao = QPushButton(texto)
+        botao.setObjectName(nome)
+        botao.setProperty("selecionada", False)
+        botao.setFixedHeight(self.ALTURA_CAMPO_PX)
+        cartao_modal.preparar_botao(botao)
+        return botao
+
+    def _montar_bobina_e_colunas(self) -> QHBoxLayout:
         linha = QHBoxLayout()
         linha.setSpacing(16)
 
@@ -1017,17 +1231,63 @@ class ImpressoraDialog(QDialog):
         botoes = QHBoxLayout()
         botoes.setSpacing(10)
         for bobina in Bobina:
-            botao = QPushButton(bobina.value)
-            botao.setObjectName("impDialogBobina")
+            botao = self._botao_de_segmento(bobina.value, "impDialogBobina")
             botao.setProperty("bobina", bobina.value)
-            botao.setProperty("selecionada", False)
-            botao.setFixedHeight(self.ALTURA_CAMPO_PX)
-            cartao_modal.preparar_botao(botao)
             botao.clicked.connect(self._bobina_clicada)
             botoes.addWidget(botao, 1)
             self._botoes_bobina[bobina] = botao
         esquerda.addLayout(botoes)
-        linha.addLayout(esquerda, 5)
+        linha.addLayout(esquerda, self.PESO_BOBINA)
+
+        direita = QVBoxLayout()
+        direita.setSpacing(8)
+        topo = QHBoxLayout()
+        topo.addWidget(self._rotulo("COLUNAS POR LINHA"))
+        topo.addStretch()
+        topo.addWidget(
+            GlifoSolto(GLIFO_COLUNAS, self.LADO_GLIFO_ROTULO_PX, "impressora_opcao_ativa_glifo"),
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        direita.addLayout(topo)
+        botoes = QHBoxLayout()
+        botoes.setSpacing(8)
+        for colunas in COLUNAS_POR_LINHA:
+            botao = self._botao_de_segmento(str(colunas), "impDialogColunas")
+            botao.setProperty("colunas", colunas)
+            botao.setToolTip(_DICA_DAS_COLUNAS[colunas])
+            botao.clicked.connect(self._colunas_clicadas)
+            botoes.addWidget(botao, 1)
+            self._botoes_colunas[colunas] = botao
+        direita.addLayout(botoes)
+        linha.addLayout(direita, self.PESO_COLUNAS)
+        return linha
+
+    def _montar_espessura_e_situacao(self) -> QHBoxLayout:
+        linha = QHBoxLayout()
+        linha.setSpacing(16)
+
+        esquerda = QVBoxLayout()
+        esquerda.setSpacing(8)
+        topo = QHBoxLayout()
+        topo.addWidget(self._rotulo("ESPESSURA DA LETRA"))
+        topo.addStretch()
+        # A etiqueta diz o que a escolha é: aparência do papel, e nada da
+        # conexão, do uso ou do roteamento muda com ela.
+        tag = QLabel(_TAG_AJUSTE_VISUAL)
+        tag.setObjectName("impDialogTag")
+        topo.addWidget(tag)
+        esquerda.addLayout(topo)
+        botoes = QHBoxLayout()
+        botoes.setSpacing(10)
+        for espessura in Espessura:
+            opcao = _BotaoDeEspessura(espessura)
+            opcao.setFixedHeight(self.ALTURA_CAMPO_PX)
+            opcao.clicado.connect(self._espessura_clicada)
+            botoes.addWidget(opcao, 1)
+            self._botoes_espessura[espessura] = opcao
+        esquerda.addLayout(botoes)
+        linha.addLayout(esquerda, self.PESO_ESPESSURA)
 
         direita = QVBoxLayout()
         direita.setSpacing(8)
@@ -1036,7 +1296,7 @@ class ImpressoraDialog(QDialog):
         self._situacao.setFixedHeight(self.ALTURA_CAMPO_PX)
         self._situacao.clicado.connect(self._situacao_clicada)
         direita.addWidget(self._situacao)
-        linha.addLayout(direita, 4)
+        linha.addLayout(direita, self.PESO_SITUACAO)
         return linha
 
     def _montar_resumo(self) -> QFrame:
@@ -1133,11 +1393,22 @@ class ImpressoraDialog(QDialog):
         self._pilha.setCurrentWidget(self._campos[self._conexao])
 
     def _bobina_clicada(self) -> None:
+        """Troca a bobina e SUGERE as colunas dela — a de antes fica lembrada.
+
+        A bobina que já estava escolhida não faz nada: clicá-la de novo não pode
+        trocar as colunas que o gerente acabou de acertar.
+        """
         botao = self.sender()
         if not isinstance(botao, QPushButton):
             return
-        self._bobina = Bobina(str(botao.property("bobina")))
+        bobina = Bobina(str(botao.property("bobina")))
+        if bobina is self._bobina:
+            return
+        self._colunas_da_bobina[self._bobina] = self._colunas
+        self._bobina = bobina
+        self._colunas = self._colunas_da_bobina[bobina]
         self._pintar_bobina()
+        self._pintar_colunas()
         self._atualizar()
 
     def _pintar_bobina(self) -> None:
@@ -1145,6 +1416,39 @@ class ImpressoraDialog(QDialog):
             selecionada = bobina is self._bobina
             if botao.property("selecionada") != selecionada:
                 aplicar_propriedade(botao, "selecionada", selecionada)
+
+    def _colunas_clicadas(self) -> None:
+        """Qualquer largura em qualquer bobina: é a liberdade que o pedido deu."""
+        botao = self.sender()
+        if not isinstance(botao, QPushButton):
+            return
+        self._colunas = int(botao.property("colunas"))
+        self._pintar_colunas()
+        self._atualizar()
+
+    def _pintar_colunas(self) -> None:
+        # Uma largura antiga fora do seletor (42) acende botão nenhum, e volta
+        # intacta: o resumo diz "42 col." e só um clique a troca.
+        for colunas, botao in self._botoes_colunas.items():
+            selecionada = colunas == self._colunas
+            if botao.property("selecionada") != selecionada:
+                aplicar_propriedade(botao, "selecionada", selecionada)
+
+    def _espessura_clicada(self) -> None:
+        opcao = self.sender()
+        if not isinstance(opcao, _BotaoDeEspessura):
+            return
+        self._letra_grossa = opcao.espessura is Espessura.GROSSA
+        self._pintar_espessura()
+        self._atualizar()
+
+    def _espessura(self) -> Espessura:
+        return Espessura.GROSSA if self._letra_grossa else Espessura.FINA
+
+    def _pintar_espessura(self) -> None:
+        escolhida = self._espessura()
+        for espessura, opcao in self._botoes_espessura.items():
+            opcao.selecionar(espessura is escolhida)
 
     def _situacao_clicada(self) -> None:
         self._ativa = not self._ativa
@@ -1191,20 +1495,31 @@ class ImpressoraDialog(QDialog):
     def _atualizar(self) -> None:
         """Resumo, contador, veredito e botão — tudo a partir do estado atual.
 
-        Uma rotina só para toda mudança: tecla, card, bobina, interruptor, uso e
-        a lista do Windows chegando. Cinco caminhos de atualização separados
-        seriam cinco chances de o resumo contradizer o botão.
+        Uma rotina só para toda mudança: tecla, card, bobina, colunas,
+        espessura, interruptor, uso e a lista do Windows chegando. Oito caminhos
+        de atualização separados seriam oito chances de o resumo contradizer o
+        botão.
         """
         texto = self._campo_nome.text()
         nome = _texto_aparado(texto)
         self._contador.setText(f"{len(texto)}/{LIMITE_NOME}")
         self._esconder_erro_servico()
-        self._resumo.setText(
-            f"{nome or _SEM_NOME} · {CONEXOES[self._conexao].titulo} · {self._bobina.value}"
-        )
+        self._resumo.setText(self._texto_do_resumo(nome))
         mensagem, estado = self._veredito(nome, self._leitura_da_conexao())
         self._dizer_status(mensagem, estado)
         self._botao_confirmar.setEnabled(estado in ("ok", "aviso"))
+
+    def _texto_do_resumo(self, nome: str) -> str:
+        """`Caixa 01 · USB · 80mm · 80 col. · letra grossa` — o exemplo do pedido."""
+        return " · ".join(
+            (
+                nome or _SEM_NOME,
+                CONEXOES[self._conexao].titulo,
+                self._bobina.value,
+                f"{self._colunas} col.",
+                ESPESSURAS[self._espessura()].no_resumo,
+            )
+        )
 
     def _veredito(self, nome: str, leitura: LeituraDaConexao) -> tuple[str, str]:
         """A primeira coisa que falta ou está errada, na ordem em que a tela é lida.
@@ -1246,8 +1561,25 @@ class ImpressoraDialog(QDialog):
         aplicar_propriedade(self._rotulo_resumo, "estado", "erro")
         self._erro_servico.setText(mensagem)
         self._erro_servico.setVisible(True)
-        self.adjustSize()
+        self._dar_altura_ao_erro()
+        self._reacomodar()
         self._campo_nome.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _dar_altura_ao_erro(self) -> None:
+        """A altura das linhas que o erro TEM, e não a de uma.
+
+        `setWordWrap` quebra o texto, mas quem dá a altura é o `adjustSize()`
+        do diálogo, que lê `sizeHint` e não `heightForWidth`: no cartão do
+        §9.19 o rótulo ficava com 20px e a mensagem longa saía cortada na
+        primeira linha (medido: pedia 64px). A largura é a do resumo, que mora
+        na mesma coluna e já está desenhado; a fonte, a do próprio rótulo
+        depois do QSS (§9.8).
+        """
+        largura = self._resumo.width()
+        if largura <= 0:  # pragma: no cover - o cartão só mostra erro depois de aberto
+            return
+        self._erro_servico.ensurePolished()
+        self._erro_servico.setMinimumHeight(self._erro_servico.heightForWidth(largura))
 
     def _esconder_erro_servico(self) -> None:
         # Qualquer mudança apaga o erro: ele falava do formulário anterior, e
@@ -1256,8 +1588,30 @@ class ImpressoraDialog(QDialog):
             return
         self._erro_servico.setText("")
         self._erro_servico.setVisible(False)
+        self._erro_servico.setMinimumHeight(0)
         self._rotulo_resumo.setText(_ROTULO_RESUMO)
         aplicar_propriedade(self._rotulo_resumo, "estado", "resumo")
+        self._reacomodar()
+
+    def _reacomodar(self) -> None:
+        """O cartão do tamanho do que ele mostra AGORA, com ou sem a linha do erro.
+
+        O `adjustSize()` sozinho lia a altura antiga: o rótulo do erro mora
+        quatro widgets abaixo do diálogo, cada um com o seu layout, e o `hide`
+        só chega a eles num `LayoutRequest` posterior. Depois de o erro sumir, o
+        cartão ficava com um vão em branco onde ele esteve (medido no §9.19
+        também). O `activate()` do layout do diálogo não desce aos aninhados, e
+        o `sendPostedEvents` também não resolveu (medido); ativar de dentro para
+        fora resolve.
+        """
+        widget = self._erro_servico.parentWidget()
+        while widget is not None:
+            layout = widget.layout()
+            if layout is not None:
+                layout.activate()
+            if widget is self:
+                break
+            widget = widget.parentWidget()
         self.adjustSize()
 
     def _confirmar(self) -> None:
@@ -1283,18 +1637,15 @@ class ImpressoraDialog(QDialog):
             Conexao.LOCAL: TipoConexaoImpressora.WINDOWS,
             Conexao.REDE: TipoConexaoImpressora.REDE,
         }[self._conexao]
-        colunas = (
-            self._retrato.colunas
-            if self._bobina is bobina_das_colunas(self._retrato.colunas)
-            else COLUNAS_DA_BOBINA[self._bobina]
-        )
         return DadosImpressora(
             nome=_texto_aparado(self._campo_nome.text()),
             tipo_conexao=tipo,
-            # A largura cadastrada volta INTACTA quando a bobina não mudou: uma
-            # de 42 colunas é "80mm" no seletor, e reescrevê-la como 48 a cada
-            # edição mudaria o cupom de quem só foi trocar o nome.
-            colunas=colunas,
+            # As colunas saem do estado, e não de uma conta sobre a bobina: uma
+            # largura antiga sem botão (42) volta INTACTA para quem só foi
+            # trocar o nome, porque nada a tocou.
+            colunas=self._colunas,
+            bobina_mm=self._bobina.mm,
+            letra_grossa=self._letra_grossa,
             ativa=self._ativa,
             padrao=self._padrao_final(),
             **leitura.parametros,  # type: ignore[arg-type]
@@ -1442,7 +1793,7 @@ class ImpressoraDialog(QDialog):
           com os filhos, e explicitá-las é o que impede uma ligação a um objeto
           de FORA do cartão de entrar um dia sem ninguém notar;
         * o **escurecedor**, que é filho da JANELA e o Qt não recolheria junto;
-        * as duas tabelas de widgets.
+        * as quatro tabelas de widgets (cards, bobina, colunas e espessura).
 
         A trava `_limpo` é a do §9.12: o segundo `disconnect` desta versão do
         PySide6 não levanta, imprime `RuntimeWarning` — um por ligação e por
@@ -1463,11 +1814,17 @@ class ImpressoraDialog(QDialog):
             card.clicado.disconnect(self._conexao_clicada)
         for botao in self._botoes_bobina.values():
             botao.clicked.disconnect(self._bobina_clicada)
+        for botao in self._botoes_colunas.values():
+            botao.clicked.disconnect(self._colunas_clicadas)
+        for opcao in self._botoes_espessura.values():
+            opcao.clicado.disconnect(self._espessura_clicada)
         self._situacao.clicado.disconnect(self._situacao_clicada)
         self._botao_fechar.clicked.disconnect(self.reject)
         self._botao_cancelar.clicked.disconnect(self.reject)
         self._botao_confirmar.clicked.disconnect(self._confirmar)
         self._cards.clear()
         self._botoes_bobina.clear()
+        self._botoes_colunas.clear()
+        self._botoes_espessura.clear()
         backdrop, self._backdrop = self._backdrop, None
         cartao_modal.descartar(backdrop)

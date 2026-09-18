@@ -55,6 +55,7 @@ from gestor_comercial.hardware.impressora_escpos import (
     ParametrosImpressora,
     documento_de_json,
     documento_para_json,
+    usa_fonte_condensada,
 )
 from gestor_comercial.hardware.impressora_escpos import abrir_driver as abrir_driver_escpos
 from gestor_comercial.repository.unit_of_work import UnitOfWork
@@ -1025,9 +1026,15 @@ class ImpressaoService:
         return documento
 
     def _documento_teste(self, impressora: Impressora, agora: datetime) -> Documento:
-        """Cupom de teste: prova cabo, papel, acento e largura de uma vez só."""
+        """Cupom de teste: prova cabo, papel, acento e largura de uma vez só.
+
+        Diz também a bobina, a fonte e a letra (§9.22): é no papel que o gerente
+        confere se o que escolheu no cartão chegou à impressora — e, com 64 ou
+        80 colunas, se a fonte condensada fez a régua caber numa linha.
+        """
         largura = cupom.largura_util(impressora.colunas)
         tipo = getattr(impressora.tipo_conexao, "value", impressora.tipo_conexao)
+        condensada = usa_fonte_condensada(largura, impressora.bobina_mm)
 
         documento: Documento = [BlocoTexto("TESTE DE IMPRESSÃO", negrito=True, centralizado=True)]
         # Mesmo motivo do cupom de produção: nome comprido estouraria a bobina.
@@ -1038,6 +1045,13 @@ class ImpressaoService:
             BlocoTexto(cupom.separador(largura)),
             BlocoTexto(cupom.duas_colunas("Conexão", str(tipo), largura)),
             BlocoTexto(cupom.duas_colunas("Largura", f"{largura} colunas", largura)),
+            BlocoTexto(cupom.duas_colunas("Bobina", f"{impressora.bobina_mm}mm", largura)),
+            BlocoTexto(
+                cupom.duas_colunas("Fonte", "condensada" if condensada else "normal", largura)
+            ),
+            BlocoTexto(
+                cupom.duas_colunas("Letra", "grossa" if impressora.letra_grossa else "fina", largura)
+            ),
             BlocoTexto(cupom.duas_colunas("Data", cupom.data_hora(agora), largura)),
             BlocoTexto(cupom.separador(largura)),
             BlocoTexto("Texto normal: ação, pão, café."),

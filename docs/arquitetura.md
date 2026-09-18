@@ -90,7 +90,7 @@ Portado integralmente do Gestor Comercial, **exceto** os itens cortados abaixo (
 - Tela de mesas/comanda mostra um seletor de busca rápida só com `Funcionario` ativos, para setar/trocar `Comanda.atendente_id` a qualquer momento (`ComandaService.definir_atendente`).
 
 ### 3.12 Impressoras e Roteamento
-- **Cadastro de impressora** (`cardapio_service`, tela de Impressoras, tudo ação de Gerente): nome único, largura da bobina em colunas (32 = 58mm, 48 = 80mm), ativa/inativa, padrão, e os parâmetros de **5 tipos de conexão** — `USB` (vendor/product id), `SERIAL` (porta + baudrate), `REDE` (host + porta), `WINDOWS` (nome da fila instalada) e `ARQUIVO`. O tipo `ARQUIVO` grava o cupom num `.txt` legível e é o padrão de quem cadastra sem informar nada: permite rodar o food truck inteiro antes de a impressora física chegar.
+- **Cadastro de impressora** (`cardapio_service`, tela de Impressoras, tudo ação de Gerente): nome único, o formato do cupom — bobina gravada (58 ou 80mm), colunas por linha (32 · 48 · 64 · 80 no seletor, 20 a 96 no service; acima do que a bobina imprime na fonte normal, 32 ou 48, o driver liga a fonte condensada) e letra fina ou grossa (a ênfase ESC/POS no cupom inteiro), §9.22 do `REMASTERIZACAO-V1.md` —, ativa/inativa, padrão, e os parâmetros de **5 tipos de conexão** — `USB` (vendor/product id), `SERIAL` (porta + baudrate), `REDE` (host + porta), `WINDOWS` (nome da fila instalada) e `ARQUIVO`. O tipo `ARQUIVO` grava o cupom num `.txt` legível e é o padrão de quem cadastra sem informar nada: permite rodar o food truck inteiro antes de a impressora física chegar.
 - **Impressora padrão**: é quem recebe o recibo do cliente, o fechamento de caixa e o fallback de roteamento. O sistema mantém a invariante "havendo impressora ativa, uma delas é a padrão" nos quatro caminhos que podem quebrá-la — criar (a primeira nasce padrão), editar (desativar tira a marca), excluir (elege a próxima ativa) e a própria migration de dados.
 - **Roteamento da comanda de produção** (porte de `RoteamentoImpressaoService.java`): os itens são agrupados por `item.produto.categoria.impressora`, preservando a ordem de lançamento — a cozinha lê o cupom na sequência em que o atendente digitou. Sai um cupom por impressora.
   - **A categoria é o ÚNICO eixo de roteamento.** A subcategoria do produto (§3.2) é organização de catálogo e não abre fila: dois itens da mesma categoria em subcategorias diferentes saem no mesmo cupom, e a subcategoria não é impressa. `tests/unit/test_impressao_service.py` prova o agrupamento e ainda varre o código-fonte do `impressao_service` para reprovar a menção à `subcategoria`.
@@ -190,10 +190,15 @@ gestor-comercial-python/
 ├── migrations/versions/
 │
 ├── resources/
-│   ├── qss/ · icons/app.ico · fonts/ArchivoBlack-Regular.ttf
+│   ├── qss/ · icons/app_icon.ico · fonts/ArchivoBlack-Regular.ttf
 │
 ├── src/gestor_comercial/
-│   ├── main.py                    # migrations + seed + tema + MainWindow
+│   ├── main.py                    # semente (1º boot) + migrations + seed + tema + MainWindow
+│   │
+│   ├── core/                      # só stdlib, abaixo de todas as camadas
+│   │   ├── caminhos.py            # recursos (repo ou _MEIPASS) e dados (~/.gestor_comercial ou %APPDATA%\GestorComercial_V2)
+│   │   ├── banco_semente.py       # 1º boot do .exe: fotos e banco copiados da semente embutida
+│   │   └── resilience.py          # caixa-preta + escudo anti-crash
 │   │
 │   ├── domain/                    # Model — entidades SQLAlchemy puras
 │   │   ├── usuario.py · funcionario.py · loja_config.py
@@ -206,6 +211,7 @@ gestor-comercial-python/
 │   ├── repository/                # único lugar com Session SQLAlchemy
 │   │   ├── base.py · unit_of_work.py · seed.py
 │   │   ├── backup.py              # VACUUM INTO + wal_checkpoint (§8, 2026-09-06)
+│   │   ├── preparo_da_semente.py  # build: banco de trabalho → semente (recusa venda e foto faltando)
 │   │   └── 13 repositories, um por entidade
 │   │
 │   ├── services/                  # regras de negócio
@@ -241,7 +247,11 @@ gestor-comercial-python/
 │   ├── comparar_telas.py          # paridade visual das telas, em PNG
 │   └── comparar_cupons.py         # paridade da impressão ESC/POS, em .txt
 │
-└── packaging/                     # build.spec (PyInstaller) · instalador.iss (Inno Setup)
+└── packaging/                     # ver DEPLOYMENT.md
+    ├── gerar_exe.py               # fluxo completo: testes → build → prova de fumaça do .exe
+    ├── app.spec                   # PyInstaller: semente + poda do Qt não usado
+    ├── preparar_semente.py · gerar_icone.py · app_icon_fonte.png
+    └── instalador.iss             # Inno Setup
 ```
 
 ### Responsabilidade das camadas

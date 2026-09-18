@@ -410,3 +410,152 @@ def test_falha_ao_finalizar_o_job_do_windows_vira_erro_de_impressao(monkeypatch)
 
     assert "spooler" in str(erro.value).lower()
     assert "2ª via" in str(erro.value)
+
+
+# ----------------------------------------------------------------------
+# Letra grossa e fonte condensada (§9.22)
+# ----------------------------------------------------------------------
+
+# ESC E n — ênfase. ESC M 1 — fonte B (condensada). São os bytes que o pedido
+# escreveu (`\x1b\x45\x01` e `\x1b\x45\x00`) e o da fonte que o 64 exige.
+ENFASE_LIGA = b"\x1bE\x01"
+ENFASE_DESLIGA = b"\x1bE\x00"
+FONTE_CONDENSADA = b"\x1bM\x01"
+
+
+def _bytes_com(documento, **opcoes):
+    from escpos.printer import Dummy
+
+    dummy = Dummy()
+    impressora_escpos._DriverEscpos(dummy, "Caixa 01", **opcoes).imprimir(documento)
+    return dummy.output
+
+
+def _pedacos_por_texto(saida: bytes, textos: list[str]) -> list[bytes]:
+    """Os comandos que antecedem cada linha de texto, linha por linha."""
+    pedacos, inicio = [], 0
+    for texto in textos:
+        fim = saida.index(texto.encode("cp437", errors="replace"), inicio)
+        pedacos.append(saida[inicio:fim])
+        inicio = fim
+    return pedacos
+
+
+def test_letra_grossa_liga_a_enfase_em_todo_bloco_e_desliga_no_fim():
+    """Um `ESC E 1` só no cabeçalho morreria na primeira linha comum: o
+    `bold=False` dela manda `ESC E 0`, e o `ESC ! 0` do tamanho também zera a
+    ênfase. Por isso ela vai antes de CADA linha — e o `ESC E 0` sai no fim,
+    para o cupom seguinte (de outra impressora, ou fino) não herdar."""
+    textos = ["Comanda 12", "2x X-Burger", "TOTAL 46,00"]
+    saida = _bytes_com(
+        [BlocoTexto(textos[0], negrito=True), BlocoTexto(textos[1]), BlocoTexto(textos[2])],
+        letra_grossa=True,
+    )
+
+    for pedaco in _pedacos_por_texto(saida, textos):
+        assert pedaco.rfind(ENFASE_LIGA) > pedaco.rfind(ENFASE_DESLIGA), pedaco
+    assert saida.rfind(ENFASE_DESLIGA) > saida.rfind(ENFASE_LIGA)
+
+
+def test_letra_fina_so_enfatiza_o_que_e_negrito():
+    textos = ["Comanda 12", "2x X-Burger"]
+    saida = _bytes_com([BlocoTexto(textos[0], negrito=True), BlocoTexto(textos[1])])
+
+    titulo, item = _pedacos_por_texto(saida, textos)
+    assert ENFASE_LIGA in titulo
+    assert ENFASE_LIGA not in item
+
+
+def test_sem_letra_grossa_nem_condensada_os_bytes_sao_os_de_sempre():
+    """A não-regressão do papel: quem não mexeu no formato imprime exatamente
+    os mesmos bytes de antes do §9.22 — nenhum comando de fonte a mais."""
+    documento = [
+        BlocoTexto("Comanda 12", negrito=True, centralizado=True),
+        BlocoTexto("MESA 7", dobro=True, centralizado=True),
+        BlocoTexto("2x X-Burger"),
+    ]
+
+    assert _bytes_com(documento) == _bytes_com(documento, letra_grossa=False, condensada=False)
+    assert b"\x1bM" not in _bytes_com(documento)
+
+
+def test_condensada_escolhe_a_fonte_b_depois_de_cada_tamanho():
+    """O `ESC ! 0` que cada bloco manda volta à fonte A. A fonte B tem que vir
+    DEPOIS dele, em toda linha, inclusive a do número da mesa em dobro."""
+    textos = ["Comanda 12", "MESA 7", "2x X-Burger"]
+    saida = _bytes_com(
+        [BlocoTexto(textos[0], negrito=True), BlocoTexto(textos[1], dobro=True), BlocoTexto(textos[2])],
+        condensada=True,
+    )
+
+    for pedaco in _pedacos_por_texto(saida, textos):
+        assert pedaco.rfind(FONTE_CONDENSADA) > pedaco.rfind(TAMANHO_NORMAL), pedaco
+
+
+def test_o_cupom_condensado_termina_na_fonte_normal():
+    """O reset do fim (`ESC ! 0`) devolve a fonte A: a impressora guarda o
+    estado entre trabalhos, e o próximo cupom de outra largura herdaria a B."""
+    saida = _bytes_com([BlocoTexto("2x X-Burger")], condensada=True)
+
+    assert saida.rfind(TAMANHO_NORMAL) > saida.rfind(FONTE_CONDENSADA)
+
+
+@pytest.mark.parametrize(
+    ("colunas", "bobina_mm", "condensada"),
+    [(32, 58, False), (42, 58, True), (48, 58, True), (32, 80, False), (48, 80, False), (64, 80, True), (80, 80, True)],
+)
+def test_a_fonte_condensada_entra_quando_passa_da_fonte_normal_da_bobina(colunas, bobina_mm, condensada):
+    assert impressora_escpos.usa_fonte_condensada(colunas, bobina_mm) is condensada
+
+
+def test_os_parametros_da_thread_levam_bobina_e_letra():
+    """O retrato que atravessa para a thread de impressão tem que levar os dois:
+    sem eles, a impressão fora da thread da UI sairia fina e na fonte A."""
+    parametros = impressora_escpos.ParametrosImpressora.de(
+        impressora_falsa(colunas=64, bobina_mm=80, letra_grossa=True)
+    )
+
+    assert (parametros.colunas, parametros.bobina_mm, parametros.letra_grossa) == (64, 80, True)
+
+
+@pytest.mark.parametrize("bobina_mm", [None, 76, "58"])
+def test_sem_bobina_valida_os_parametros_ficam_na_de_80mm(bobina_mm):
+    """Do banco ela sempre vem. Um objeto solto, ou um valor mexido à mão,
+    cai na de 80mm — que nunca liga a condensada para quem cabe em 48."""
+    campos = {} if bobina_mm is None else {"bobina_mm": bobina_mm}
+    parametros = impressora_escpos.ParametrosImpressora.de(impressora_falsa(**campos))
+
+    assert (parametros.bobina_mm, parametros.letra_grossa) == (80, False)
+
+
+def test_a_sessao_de_impressao_entrega_o_formato_ao_driver(monkeypatch):
+    """Do cadastro ao papel: `abrir_driver` lê bobina, colunas e letra da
+    impressora e o driver manda a ênfase e a fonte B."""
+    from escpos.printer import Dummy
+
+    dummy = Dummy()
+    dummy.close = lambda: None
+    monkeypatch.setattr(impressora_escpos, "_abrir_conexao_escpos", lambda *args: dummy)
+    impressora = impressora_falsa(tipo_conexao="REDE", host="10.0.0.9", colunas=64, bobina_mm=80, letra_grossa=True)
+
+    with abrir_driver(impressora) as driver:
+        driver.imprimir([BlocoTexto("2x X-Burger")])
+
+    assert ENFASE_LIGA in dummy.output
+    assert FONTE_CONDENSADA in dummy.output
+
+
+def test_arquivo_em_letra_grossa_sai_todo_em_maiuscula(tmp_path):
+    """A simulação de sempre: negrito vira MAIÚSCULA no .txt. Com a letra
+    grossa, o cupom inteiro é negrito — e os títulos deixam de se destacar,
+    como no papel."""
+    destino = tmp_path / "caixa.txt"
+    impressora = impressora_falsa(caminho_arquivo=str(destino), letra_grossa=True)
+
+    with abrir_driver(impressora) as driver:
+        driver.imprimir([BlocoTexto("Comanda 12", negrito=True), BlocoTexto("2x X-Burger")])
+
+    conteudo = destino.read_text(encoding="utf-8")
+    assert "COMANDA 12" in conteudo
+    assert "2X X-BURGER" in conteudo
+    assert "2x X-Burger" not in conteudo

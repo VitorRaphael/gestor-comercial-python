@@ -119,6 +119,13 @@ GLIFO_ARQUIVO_TEXTO = "arquivo_texto"
 GLIFO_USB = "usb"
 GLIFO_REDE = "rede"
 GLIFO_SINAL = "sinal"
+# Os três do formato do cupom (§9.22): a grade de colunas ao lado de "Colunas
+# por linha" e as duas espessuras da letra. O "Aa" e o "B" do mockup até
+# existem na fonte, mas sairiam com o peso e a altura dela — e o "B" de "letra
+# grossa" tem que ser o mesmo desenho nos dois temas, não a letra da vez.
+GLIFO_COLUNAS = "colunas"
+GLIFO_LETRAS = "letras"
+GLIFO_NEGRITO = "negrito"
 
 # Os glifos são traçados numa grade de 24x24 e escalados para o tamanho pedido,
 # então um desenho só serve a insígnia de 40px e a seta de 12px.
@@ -373,6 +380,38 @@ def _caminho_do_glifo(nome: str) -> QPainterPath:
         p.quadTo(-1.2, 12.0, 5.2, 5.2)
         p.moveTo(18.8, 5.2)
         p.quadTo(25.2, 12.0, 18.8, 18.8)
+    elif nome == GLIFO_COLUNAS:
+        # A folha com duas divisórias: três colunas lado a lado.
+        p.addRoundedRect(QRectF(3.5, 3.5, 17.0, 17.0), 2.5, 2.5)
+        p.moveTo(9.2, 3.5)
+        p.lineTo(9.2, 20.5)
+        p.moveTo(14.8, 3.5)
+        p.lineTo(14.8, 20.5)
+    elif nome == GLIFO_LETRAS:
+        # "Aa": o A maiúsculo com a travessa e o a minúsculo em arco. O arco vai
+        # de 180° a 0° no sentido horário (varredura negativa), por cima.
+        p.moveTo(3.0, 17.0)
+        p.lineTo(7.5, 7.0)
+        p.lineTo(12.0, 17.0)
+        p.moveTo(4.7, 13.2)
+        p.lineTo(10.3, 13.2)
+        p.moveTo(15.5, 17.0)
+        p.lineTo(15.5, 13.0)
+        p.arcTo(QRectF(15.5, 10.5, 5.0, 5.0), 180.0, -180.0)
+        p.lineTo(20.5, 17.0)
+        p.moveTo(20.5, 14.6)
+        p.lineTo(15.5, 14.6)
+    elif nome == GLIFO_NEGRITO:
+        # O B de negrito: a haste e as duas barrigas, a de baixo mais larga.
+        p.moveTo(6.5, 12.0)
+        p.lineTo(14.5, 12.0)
+        p.arcTo(QRectF(10.5, 12.0, 8.0, 8.0), 90.0, -180.0)
+        p.lineTo(7.5, 20.0)
+        p.quadTo(6.5, 20.0, 6.5, 19.0)
+        p.lineTo(6.5, 5.0)
+        p.quadTo(6.5, 4.0, 7.5, 4.0)
+        p.lineTo(13.5, 4.0)
+        p.arcTo(QRectF(9.5, 4.0, 8.0, 8.0), 90.0, -180.0)
     return p
 
 

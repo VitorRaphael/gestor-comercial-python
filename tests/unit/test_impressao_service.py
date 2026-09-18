@@ -1141,6 +1141,69 @@ def test_imprimir_teste_mostra_conexao_e_regua(uow, impressao, driver, gerente):
     assert "32 colunas" in texto
 
 
+@pytest.mark.parametrize(
+    ("colunas", "bobina_mm", "letra_grossa", "fonte", "letra"),
+    [
+        (32, 58, False, "normal", "fina"),
+        (48, 80, True, "normal", "grossa"),
+        (64, 80, False, "condensada", "fina"),
+        (80, 80, True, "condensada", "grossa"),
+        (48, 58, False, "condensada", "fina"),
+    ],
+)
+def test_o_cupom_de_teste_diz_bobina_fonte_e_letra(
+    uow, impressao, driver, gerente, colunas, bobina_mm, letra_grossa, fonte, letra
+):
+    """§9.22: é no papel que o gerente confere se o que escolheu no cartão chegou
+    à impressora. A fonte é a que o driver vai usar — a mesma regra
+    (`usa_fonte_condensada`), e não uma cópia dela."""
+    impressora = nova_impressora(uow, "Caixa 01", padrao=True, colunas=colunas)
+    impressora.bobina_mm = bobina_mm
+    impressora.letra_grossa = letra_grossa
+    uow.commit()
+
+    impressao.imprimir_teste(impressora.id)
+    linhas = [bloco.texto for bloco in driver.blocos_de("Caixa 01")]
+
+    assert cupom.duas_colunas("Bobina", f"{bobina_mm}mm", colunas) in linhas
+    assert cupom.duas_colunas("Fonte", fonte, colunas) in linhas
+    assert cupom.duas_colunas("Letra", letra, colunas) in linhas
+
+
+@pytest.mark.parametrize("colunas", [32, 48, 64, 80])
+def test_divisores_regua_e_valores_seguem_as_colunas(uow, impressao, driver, gerente, colunas):
+    """As réguas, os tracejados e o valor encostado na direita contam as colunas
+    CADASTRADAS, em cada uma das quatro larguras do seletor (§9.22)."""
+    impressora = nova_impressora(uow, "Caixa 01", padrao=True, colunas=colunas)
+
+    impressao.imprimir_teste(impressora.id)
+    linhas = [bloco.texto for bloco in driver.blocos_de("Caixa 01")]
+
+    tracejados = [linha for linha in linhas if linha and set(linha) == {"-"}]
+    assert tracejados and all(len(linha) == colunas for linha in tracejados)
+    assert cupom.regua(colunas) in linhas and len(cupom.regua(colunas)) == colunas
+    conexao = next(linha for linha in linhas if linha.startswith("Conexão"))
+    assert len(conexao) == colunas and conexao.endswith("ARQUIVO")
+
+
+@pytest.mark.parametrize("colunas", [32, 48, 64, 80])
+def test_o_recibo_encosta_o_preco_na_coluna_cadastrada(uow, impressao, driver, gerente, caixa_aberto, colunas):
+    """O espaço entre o nome do produto e o valor vem das colunas: o preço
+    termina exatamente na última coluna da bobina, e o tracejado tem o mesmo tamanho."""
+    nova_impressora(uow, "Balcão", padrao=True, colunas=colunas)
+    lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger", "20.00", None)
+    comanda = nova_comanda(uow, caixa_aberto, gerente)
+    novo_item(uow, comanda, lanche, quantidade=2)
+
+    impressao.imprimir_recibo(comanda.id)
+    linhas = [bloco.texto for bloco in driver.blocos_de("Balcão") if not bloco.dobro]
+
+    item = next(linha for linha in linhas if linha.startswith("2x X-Burger"))
+    assert len(item) == colunas and item.endswith("40,00")
+    assert all(len(linha) == colunas for linha in linhas if linha and set(linha) == {"-"})
+    assert all(len(linha) <= colunas for linha in linhas)
+
+
 def test_imprimir_teste_funciona_em_impressora_desativada(uow, impressao, driver, gerente):
     """O teste existe pra conferir o cabo ANTES de reativar a impressora."""
     desligada = nova_impressora(uow, "Chapa", ativa=False)
