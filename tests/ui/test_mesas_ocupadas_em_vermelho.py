@@ -63,8 +63,9 @@ def tema(qapp):
 # precisar decidir o que fazer com a sobra. Com uma mesa só, o card ganha toda
 # a folga do painel e o corte não acontece — o teste passaria verde sem ter
 # olhado o defeito, que é justamente o que o §9.2 manda conferir. O food truck
-# tem sessenta; vinte e quatro (três fileiras de oito) já é mais que o dobro do
-# que cabe na altura usada aqui.
+# tem sessenta; vinte e quatro (cinco fileiras na largura usada aqui, que é a
+# largura que decide as colunas desde o §9.24) já é mais que o dobro do que
+# cabe na altura usada aqui.
 MESAS_DO_SALAO = 24
 ALTURA_DO_PAINEL_PX = 420
 

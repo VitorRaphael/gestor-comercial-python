@@ -18,7 +18,6 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -40,11 +39,15 @@ from gestor_comercial.services.exceptions import (
 )
 from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.widgets.flow_layout import GradeFluida
 from gestor_comercial.ui.widgets.layout_utils import limpar_layout
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 
-_COLUNAS_GRADE = 8
 _ESPACAMENTO = 14
+# O respiro entre os cartões e as bordas da área de rolagem. São os 9px que o
+# `QGridLayout` de antes herdava do estilo sem ninguém pedir: sem eles o
+# cartão da última coluna encosta na barra de rolagem vertical.
+_MARGEM_GRADE = 9
 
 _FILTROS = ("todas", "livres", "ocupadas", "fechando")
 _ROTULOS_FILTRO = {"todas": "TODAS", "livres": "LIVRES", "ocupadas": "OCUPADAS", "fechando": "FECHANDO"}
@@ -251,15 +254,20 @@ class MesasView(QWidget):
         layout_container = QVBoxLayout(container)
         layout_container.setContentsMargins(20, 20, 20, 20)
 
-        self._grade = QGridLayout()
-        self._grade.setSpacing(_ESPACAMENTO)
-
+        # O número de colunas sai da largura (§9.24). Com 8 colunas fixas a
+        # grade pedia 884px e a 1366px a área só tem 710: a última coluna e
+        # meia ficava atrás de uma barra de rolagem horizontal.
         conteudo_scroll = QWidget()
-        conteudo_scroll.setLayout(self._grade)
+        self._grade = GradeFluida(conteudo_scroll, margin=_MARGEM_GRADE, spacing=_ESPACAMENTO)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # A grade nunca fica mais larga que a área (o mínimo dela é um cartão
+        # só), então a barra horizontal não teria o que rolar. Ela fica
+        # desligada, e se um dia um cartão passar da borda, quem avisa é
+        # `test_grade_de_mesas_fluida.py`, e não o operador rolando para o lado.
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(conteudo_scroll)
         layout_container.addWidget(scroll)
         return container
@@ -486,13 +494,13 @@ class MesasView(QWidget):
         return self._resumos
 
     def _reorganizar_grade(self) -> None:
-        limpar_layout(self._grade)
-
-        for indice, resumo in enumerate(self._resumos_filtrados()):
-            linha, coluna = divmod(indice, _COLUNAS_GRADE)
+        # Linha e coluna quem decide é a `GradeFluida`, pela largura do momento.
+        cartoes = []
+        for resumo in self._resumos_filtrados():
             cartao = _CartaoMesa(resumo)
             cartao.clicado.connect(lambda m=resumo.mesa: self._abrir_mesa(m))
-            self._grade.addWidget(cartao, linha, coluna)
+            cartoes.append(cartao)
+        self._grade.repovoar(cartoes)
 
     # ------------------------------------------------------------------
     # Ações
