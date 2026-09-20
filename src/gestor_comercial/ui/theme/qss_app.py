@@ -1487,6 +1487,360 @@ def construir_qss_app(t: dict[str, str]) -> str:
       color: {t['exclusao_acao_desligada_texto']};
     }}
 
+    /* ---- Receber Pagamento (`views/pagamento_view.py`, §9.25) ----
+       A tela que substituiu o ultimo dialogo de fabrica do fluxo de venda. Dois
+       cartoes pontilhados lado a lado; o que e proprio daqui sao os cards de
+       forma de pagamento, o bloco do total, o visor de troco e o card da
+       comissao do garcom. */
+
+    QLabel#pagEyebrow {{
+      color: {t['pagamento_badge_glifo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.6px;
+      background: transparent;
+    }}
+    QLabel#pagTitulo {{
+      color: {t['texto']};
+      font-size: 22px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#pagSubtitulo {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QFrame#pagCartao {{
+      background: {t['pagamento_cartao_bg']};
+      border: 1px solid {t['pagamento_cartao_borda']};
+      border-radius: 16px;
+    }}
+    QFrame#pagBadge {{
+      background: {t['pagamento_badge_bg']};
+      border: 1px solid {t['pagamento_badge_borda']};
+      border-radius: 11px;
+    }}
+    QLabel#pagCartaoRotulo {{
+      color: {t['pagamento_rotulo']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1.4px;
+      background: transparent;
+    }}
+    QLabel#pagCartaoTitulo {{
+      color: {t['texto']};
+      font-size: 16px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#pagCartaoSubtitulo {{
+      color: {t['texto_fraco']};
+      font-size: 11px;
+      background: transparent;
+    }}
+
+    QScrollArea#pagColunaRolagem {{ background: transparent; border: none; }}
+    QScrollArea#pagColunaRolagem > QWidget > QWidget {{ background: transparent; }}
+    QScrollArea#pagListaRolagem {{ background: transparent; border: none; }}
+    QScrollArea#pagListaRolagem > QWidget > QWidget {{ background: transparent; }}
+    QWidget#pagListaConteudo {{ background: transparent; }}
+    /* A linha do item e separada por uma borda de baixo, como no mockup: sem
+       widget divisor entre uma linha e outra. */
+    QFrame#pagItemLinha {{
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid {t['pagamento_divisor']};
+    }}
+    QLabel#pagItemQuantidade {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QLabel#pagItemDescricao {{
+      color: {t['texto']};
+      font-size: 12px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel#pagItemValor {{
+      color: {t['texto']};
+      font-size: 12px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel#pagResumoRotulo {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QLabel#pagResumoValor {{
+      color: {t['texto']};
+      font-size: 12px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QFrame#pagTotalCard {{
+      background: {t['pagamento_total_bg']};
+      border: 1px solid {t['pagamento_total_borda']};
+      border-radius: 12px;
+    }}
+    QLabel#pagTotalRotulo {{
+      color: {t['texto']};
+      font-size: 14px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#pagTotalValor {{
+      color: {t['pagamento_total_texto']};
+      font-size: 22px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QPushButton#pagPilulaPessoas {{
+      padding: 0;
+      background: {t['pagamento_opcao_bg']};
+      border: 1px solid {t['pagamento_opcao_borda']};
+      border-radius: 15px;
+      color: {t['pagamento_opcao_texto']};
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    QPushButton#pagPilulaPessoas:hover {{ color: {t['texto']}; }}
+    QPushButton#pagPilulaPessoas[ativa="true"] {{
+      background: {t['acento']};
+      border-color: {t['acento']};
+      color: {t['acento_texto']};
+    }}
+
+    QFrame#pagFormaCard {{
+      background: {t['pagamento_opcao_bg']};
+      border: 1px solid {t['pagamento_opcao_borda']};
+      border-radius: 12px;
+    }}
+    QFrame#pagFormaCard[ativa="true"] {{
+      background: {t['pagamento_opcao_ativa_bg']};
+      border-color: {t['pagamento_opcao_ativa_borda']};
+    }}
+    QLabel#pagFormaRotulo {{
+      color: {t['pagamento_opcao_texto']};
+      font-size: 12px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel#pagFormaRotulo[ativa="true"] {{ color: {t['pagamento_opcao_ativa_glifo']}; }}
+    QComboBox#pagFuncionario {{
+      background: {t['pagamento_campo_bg']};
+      border: 1px solid {t['pagamento_opcao_borda']};
+      border-radius: 10px;
+      padding: 8px 12px;
+      color: {t['texto']};
+      font-size: 12px;
+    }}
+    /* O campo de dinheiro e um QLineEdit (§9.20): o "R$" e um filho na margem,
+       entao o padding da esquerda reserva o espaco dele. */
+    QLineEdit#pagValorRecebido {{
+      background: {t['pagamento_campo_bg']};
+      border: 1px solid {t['pagamento_opcao_borda']};
+      border-radius: 12px;
+      padding: 12px 16px 12px 44px;
+      color: {t['texto']};
+      font-size: 20px;
+      font-weight: 800;
+    }}
+    QLineEdit#pagValorRecebido:focus {{ border-color: {t['acento']}; }}
+    QFrame#pagTrocoCard {{
+      background: {t['pagamento_troco_bg']};
+      border: 1px solid {t['pagamento_opcao_borda']};
+      border-radius: 12px;
+    }}
+    QLabel#pagTrocoValor {{
+      color: {t['pagamento_troco_texto']};
+      font-size: 18px;
+      font-weight: 800;
+      background: transparent;
+    }}
+
+    QFrame#pagComissaoCard {{
+      background: {t['pagamento_comissao_bg']};
+      border: 1px solid {t['pagamento_comissao_borda']};
+      border-radius: 12px;
+    }}
+    QFrame#pagComissaoAvatar {{
+      background: {t['pagamento_avatar_bg']};
+      border: none;
+      border-radius: 10px;
+    }}
+    QLabel#pagComissaoTitulo {{
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#pagComissaoDetalhe {{
+      color: {t['texto_fraco']};
+      font-size: 11px;
+      background: transparent;
+    }}
+    /* Os dois botoes sao um SELETOR: o aceso tem fundo tingido e borda da
+       familia; o apagado fica na superficie neutra. O `padding-left` reserva o
+       glifo que `BotaoComGlifo` pinta (x=16, 13px de lado). */
+    QPushButton#pagComissaoPaga, QPushButton#pagComissaoNaoPaga {{
+      padding: 9px 14px 9px 38px;
+      background: {t['pagamento_opcao_bg']};
+      border: 1px solid {t['pagamento_opcao_borda']};
+      border-radius: 10px;
+      color: {t['texto_fraco']};
+      font-size: 11px;
+      font-weight: 700;
+      text-align: left;
+    }}
+    QPushButton#pagComissaoPaga[ativa="true"] {{
+      background: {t['pagamento_comissao_paga_bg']};
+      border-color: {t['pagamento_comissao_paga_borda']};
+      color: {t['pagamento_comissao_paga_texto']};
+    }}
+    QPushButton#pagComissaoNaoPaga[ativa="true"] {{
+      background: {t['pagamento_comissao_pendente_bg']};
+      border-color: {t['pagamento_comissao_pendente_borda']};
+      color: {t['pagamento_comissao_pendente_texto']};
+    }}
+
+    QPushButton#pagBotaoRegistrar {{
+      padding: 11px 20px 11px 44px;
+      background: {t['acento']};
+      border: 1px solid {t['acento']};
+      border-radius: 12px;
+      color: {t['acento_texto']};
+      font-size: 13px;
+      font-weight: 800;
+    }}
+    QPushButton#pagBotaoRegistrar:hover {{
+      background: {t['acento_hover']};
+      border-color: {t['acento_hover']};
+    }}
+    QPushButton#pagBotaoRegistrarImprimir {{
+      padding: 10px 20px 10px 44px;
+      background: {t['pagamento_opcao_bg']};
+      border: 1px solid {t['pagamento_opcao_borda']};
+      border-radius: 12px;
+      color: {t['texto']};
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    QPushButton#pagBotaoRegistrarImprimir:hover {{ background: {t['botao_circular_hover']}; }}
+
+    /* ---- Conferencia da mesa (`conferencia_dialog.py`, §9.23) ----
+       Decimo segundo modal em cartao. Cabecalho, cartao e rodape seguem o
+       desenho dos outros; o que e proprio daqui sao os dois cartoes de valor, o
+       card da taxa (a caixinha e pintada pelo widget) e o aviso do cadeado. O
+       fechar, o Cancelar e o "Fechar e imprimir" entram nas familias
+       compartilhadas mais abaixo. */
+
+    QDialog#confDialog {{ background: transparent; }}
+    QFrame#confDialogCard {{
+      background: {t['superficie']};
+      border: 1px solid {t['borda']};
+      border-radius: 16px;
+    }}
+    QWidget#confDialogCabecalho, QWidget#confDialogRodape {{ background: transparent; }}
+    QFrame#confDialogCorpo {{ background: transparent; border: none; }}
+    QFrame#confDialogDivisor {{
+      background: {t['conferencia_mesa_divisor']};
+      border: none;
+    }}
+    QFrame#confDialogBadge {{
+      background: {t['conferencia_mesa_badge_bg']};
+      border: 1px solid {t['conferencia_mesa_badge_borda']};
+      border-radius: 13px;
+    }}
+    QLabel#confDialogSecao {{
+      color: {t['conferencia_mesa_secao']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.6px;
+      background: transparent;
+    }}
+    QLabel#confDialogTitulo {{
+      color: {t['texto']};
+      font-size: 18px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#confDialogSubtitulo {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QFrame#confDialogSubtotal, QFrame#confDialogTaxa {{
+      background: {t['conferencia_mesa_valor_bg']};
+      border: 1px solid {t['conferencia_mesa_valor_borda']};
+      border-radius: 12px;
+    }}
+    QFrame#confDialogTaxa:hover {{ border-color: {t['conferencia_mesa_taxa_hover_borda']}; }}
+    QFrame#confDialogTotal {{
+      background: {t['conferencia_mesa_total_bg']};
+      border: 1px solid {t['conferencia_mesa_total_borda']};
+      border-radius: 12px;
+    }}
+    QLabel#confDialogSubtotalRotulo, QLabel#confDialogTotalRotulo {{
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1.4px;
+      background: transparent;
+    }}
+    QLabel#confDialogSubtotalRotulo {{ color: {t['conferencia_mesa_rotulo']}; }}
+    QLabel#confDialogTotalRotulo {{ color: {t['conferencia_mesa_total_texto']}; }}
+    QLabel#confDialogValor, QLabel#confDialogValorTotal {{
+      font-size: 22px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#confDialogValor {{ color: {t['texto']}; }}
+    QLabel#confDialogValorTotal {{ color: {t['conferencia_mesa_total_texto']}; }}
+    QLabel#confDialogTaxaTitulo {{
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#confDialogTaxaDescricao {{
+      color: {t['texto_fraco']};
+      font-size: 11px;
+      background: transparent;
+    }}
+    /* O valor da taxa fica a vista desmarcado, apagado: e o que o garcom diz
+       ao cliente antes de marcar. Cobrado, acende na cor do total. */
+    QLabel#confDialogTaxaValor {{
+      color: {t['texto_fraquissimo']};
+      font-size: 13px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#confDialogTaxaValor[cobrada="true"] {{ color: {t['conferencia_mesa_taxa_valor']}; }}
+    QFrame#confDialogAviso {{
+      background: {t['conferencia_mesa_aviso_bg']};
+      border: 1px solid {t['conferencia_mesa_aviso_borda']};
+      border-radius: 12px;
+    }}
+    QLabel#confDialogAvisoTitulo {{
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#confDialogAvisoTexto {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QLabel#confDialogSeguro {{
+      color: {t['conferencia_mesa_seguro_texto']};
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      background: transparent;
+    }}
     /* ---- Modal "Confirmar identidade" (`cpf_dono_dialog.py`) e o olho de
        "Senhas e Acesso" (`icone_olho.py`) ----
        Oitavo modal em cartao. Cabecalho, cartao e rodape seguem o mesmo
@@ -1791,6 +2145,14 @@ def construir_qss_app(t: dict[str, str]) -> str:
       border: 1px solid {t['borda']};
       border-radius: 14px;
     }}
+    /* O titulo de um cartao liga/desliga da Configuracoes (§9.23). */
+    QLabel#configOpcaoTitulo {{
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QWidget#interruptor {{ background: transparent; }}
     QScrollArea#configRolagem {{ background: transparent; border: none; }}
     QScrollArea#configRolagem > QWidget > QWidget {{ background: transparent; }}
 
@@ -1951,7 +2313,8 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QPushButton#addItemFechar, QPushButton#addItemPasso, QPushButton#funcDialogFechar,
     QPushButton#movCaixaFechar, QPushButton#turnoFechar, QPushButton#orgDialogFechar,
     QPushButton#cpfDialogFechar, QPushButton#comboDialogFechar,
-    QPushButton#exclusaoDialogFechar, QPushButton#impDialogFechar {{
+    QPushButton#exclusaoDialogFechar, QPushButton#impDialogFechar,
+    QPushButton#confDialogFechar {{
       padding: 0;
       background: {t['botao_circular_bg']};
       border: 1px solid {t['botao_circular_borda']};
@@ -1963,13 +2326,15 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QPushButton#orgDialogFechar, QPushButton#cpfDialogFechar,
     QPushButton#comboDialogFechar,
     QPushButton#exclusaoDialogFechar,
-    QPushButton#impDialogFechar {{ border-radius: 16px; font-size: 13px; }}
+    QPushButton#impDialogFechar,
+    QPushButton#confDialogFechar {{ border-radius: 16px; font-size: 13px; }}
     QPushButton#addItemPasso {{ border-radius: 17px; font-size: 18px; }}
     QPushButton#addItemFechar:hover, QPushButton#addItemPasso:hover,
     QPushButton#funcDialogFechar:hover, QPushButton#movCaixaFechar:hover,
     QPushButton#turnoFechar:hover, QPushButton#orgDialogFechar:hover,
     QPushButton#cpfDialogFechar:hover, QPushButton#comboDialogFechar:hover,
-    QPushButton#exclusaoDialogFechar:hover, QPushButton#impDialogFechar:hover {{
+    QPushButton#exclusaoDialogFechar:hover, QPushButton#impDialogFechar:hover,
+    QPushButton#confDialogFechar:hover {{
       background: {t['botao_circular_hover']};
       color: {t['texto']};
     }}
@@ -2113,7 +2478,8 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QPushButton#orgDialogCancelar, QPushButton#impDialogCancelar,
     QPushButton#cpfDialogCancelar, QPushButton#exclusaoDialogCancelar,
     QPushButton#addItemCancelar, QPushButton#funcDialogCancelar,
-    QPushButton#movCaixaCancelar, QPushButton#turnoCancelar {{
+    QPushButton#movCaixaCancelar, QPushButton#turnoCancelar,
+    QPushButton#confDialogCancelar {{
       padding: 9px 20px;
       background: {t['superficie_2']};
       border: 1px solid {t['borda']};
@@ -2125,12 +2491,12 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QPushButton#orgDialogCancelar:hover, QPushButton#impDialogCancelar:hover,
     QPushButton#cpfDialogCancelar:hover, QPushButton#exclusaoDialogCancelar:hover,
     QPushButton#addItemCancelar:hover, QPushButton#funcDialogCancelar:hover,
-    QPushButton#movCaixaCancelar:hover,
-    QPushButton#turnoCancelar:hover {{ background: {t['botao_circular_hover']}; }}
+    QPushButton#movCaixaCancelar:hover, QPushButton#turnoCancelar:hover,
+    QPushButton#confDialogCancelar:hover {{ background: {t['botao_circular_hover']}; }}
 
     QPushButton#addItemConfirmar, QPushButton#funcDialogConfirmar,
     QPushButton#orgDialogConfirmar,
-    QPushButton#cpfDialogConfirmar {{
+    QPushButton#cpfDialogConfirmar, QPushButton#confDialogConfirmar {{
       padding: 9px 22px;
       background: {t['acento']};
       border: 1px solid {t['acento']};
@@ -2141,17 +2507,21 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
     QPushButton#addItemConfirmar:hover, QPushButton#funcDialogConfirmar:hover,
     QPushButton#orgDialogConfirmar:hover,
-    QPushButton#cpfDialogConfirmar:hover {{
+    QPushButton#cpfDialogConfirmar:hover, QPushButton#confDialogConfirmar:hover {{
       background: {t['acento_hover']};
       border-color: {t['acento_hover']};
     }}
     QPushButton#addItemConfirmar:disabled, QPushButton#funcDialogConfirmar:disabled,
     QPushButton#orgDialogConfirmar:disabled,
-    QPushButton#cpfDialogConfirmar:disabled {{
+    QPushButton#cpfDialogConfirmar:disabled, QPushButton#confDialogConfirmar:disabled {{
       background: {t['pilula_disabled_bg']};
       border-color: {t['pilula_disabled_bg']};
       color: {t['pilula_disabled_texto']};
     }}
+    /* Depois da familia, e nao antes: com a mesma especificidade vence a regra
+       de baixo, e o `padding` da familia apagaria este. Os 38px sao o espaco da
+       impressora que `BotaoComGlifo` pinta (x=16, 13px de lado). */
+    QPushButton#confDialogConfirmar {{ padding-left: 38px; }}
 
     /* ---------- Modal "Novo funcionario" (`widgets/funcionario_dialog.py`) ----
        Terceiro modal em cartao do app, e por isso o terceiro a NAO poder

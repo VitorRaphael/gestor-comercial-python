@@ -162,6 +162,11 @@ class PinPadDialog(QDialog):
         # valor atual, sem precisar de sinal nem de recarga.
         self._piso_de_dots = self._piso_valido(tamanho_esperado)
         self._pin = ""
+        # O que passou pelo validador, para o ÚNICO caminho que precisa do PIN
+        # de volta: o consumo interno (§9.25), onde o `PagamentoService` exige a
+        # credencial na chamada e a reconfere antes de gravar. Fica preso a esta
+        # instância, que `executar_modal` destrói logo depois de a tela ler.
+        self._pin_confirmado: str | None = None
         self._backdrop: Backdrop | None = None
         self._dots: list[QFrame] = []
 
@@ -219,6 +224,28 @@ class PinPadDialog(QDialog):
             parent,
             tamanho_esperado=auth.tamanho_do_pin_nivel(2),
         )
+
+    @classmethod
+    def para_consumo_interno(cls, auth: AuthService, parent: QWidget | None = None) -> "PinPadDialog":
+        """Nível 2 (§3.13), o mesmo do Caixa: o consumo interno vira dívida de
+        um funcionário, e quem autoriza é o gerente do turno.
+
+        Diferente de `para_caixa` só no que a tela diz — e em guardar o PIN
+        aceito (`pin_confirmado`), porque quem grava é o `PagamentoService` e
+        ele exige a credencial na chamada.
+        """
+        return cls(
+            "Consumo interno",
+            "PIN DE AUTORIZAÇÃO",
+            auth.validar_pin_gerente,
+            parent,
+            tamanho_esperado=auth.tamanho_do_pin_nivel(2),
+        )
+
+    @property
+    def pin_confirmado(self) -> str | None:
+        """O PIN que passou pelo validador, ou `None` se nenhum passou."""
+        return self._pin_confirmado
 
     @classmethod
     def para_loja(cls, auth: AuthService, parent: QWidget | None = None) -> "PinPadDialog":
@@ -446,6 +473,9 @@ class PinPadDialog(QDialog):
         except (AcessoNegadoError, NaoAutorizadoError) as erro:
             self._recusar(str(erro))
             return
+        # Guardado só depois de passar, e só nesta instância: é o que o consumo
+        # interno (§9.25) repassa ao service, que reconfere antes de gravar.
+        self._pin_confirmado = self._pin
         self.accept()
 
     # ------------------------------------------------------------------

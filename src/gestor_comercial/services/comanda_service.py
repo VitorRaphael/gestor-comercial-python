@@ -8,6 +8,7 @@ vivem no mesmo arquivo porque toda regra de item depende do status da comanda
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
@@ -23,6 +24,73 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 from gestor_comercial.services.transacao import transacional
+
+# O percentual que a loja cobra quando cobra a taxa de serviço (§9.23). Um só, e
+# não um campo livre: digitar o percentual a cada conta seria a fonte de erro de
+# digitação no balcão que o diálogo antigo já evitava. Morava no `comanda_view`;
+# veio para cá porque a tela e o service precisam do MESMO número.
+TAXA_SERVICO_PADRAO = Decimal("10")
+
+
+def valor_da_taxa_de_servico(subtotal: Decimal, percentual: Decimal | None) -> Decimal:
+    """O acréscimo da taxa sobre o subtotal, arredondado como todo dinheiro.
+
+    A única conta de taxa do sistema: o total a pagar, a linha da taxa no cupom
+    de pré-conta e a prévia do cartão de conferência passam por aqui. Três
+    cópias da mesma multiplicação divergiriam no primeiro ajuste de
+    arredondamento — e o cartão diria R$ 13,15 com o cupom dizendo R$ 13,16.
+    """
+    if not percentual:
+        return ZERO
+    return dinheiro(dinheiro(subtotal) * dinheiro(percentual) / Decimal("100"))
+
+
+@dataclass(frozen=True, slots=True)
+class PreviaDeConferencia:
+    """O que o cartão "Fechar conta para conferência" mostra antes de fechar.
+
+    Instantâneo imutável, e não a `Comanda`: ler a comanda na tela voltaria ao
+    banco a cada leitura, porque todo commit expira as instâncias do SQLAlchemy
+    (a lição do §9.4). A conta mora AQUI, no service, e o cartão só a mostra:
+    `total` é a conta de `calcular_total_a_pagar` (sem desconto, que o cartão
+    não oferece), e um teste fecha a comanda de verdade para conferir que as
+    duas dão o mesmo número.
+    """
+
+    # `None` na comanda de balcão.
+    mesa_numero: int | None
+    subtotal: Decimal
+    # `None` quando a loja não cobra taxa (interruptor da Central de Loja): o
+    # cartão nem monta o bloco da taxa, e o total da pré-conta é o subtotal.
+    taxa_percentual: Decimal | None
+
+    @property
+    def oferece_taxa(self) -> bool:
+        return self.taxa_percentual is not None
+
+    @property
+    def valor_da_taxa(self) -> Decimal:
+        return valor_da_taxa_de_servico(self.subtotal, self.taxa_percentual)
+
+    @property
+    def total(self) -> Decimal:
+        """O que vai sair na pré-conta: subtotal mais a taxa, quando há taxa.
+
+        Sem "se cobrar" desde o §9.25: quem decide é a Central de Loja, e o
+        cartão de conferência só confirma. Enquanto a escolha existiu, este
+        método recebia um `bool` — e o operador respondia a mesma pergunta em
+        toda mesa, todo dia.
+        """
+        return dinheiro(self.subtotal + self.valor_da_taxa)
+
+    @property
+    def percentual_a_gravar(self) -> Decimal | None:
+        """O que o cartão devolve para `fechar_para_conferencia` congelar.
+
+        Loja sem taxa é `None` — e não zero: é assim que a comanda aberta já
+        nascia, e o cupom só imprime a linha da taxa quando há percentual.
+        """
+        return self.taxa_percentual
 
 
 @transacional
@@ -174,16 +242,17 @@ class ComandaService:
     def calcular_total_a_pagar(self, comanda_id: int) -> Decimal:
         """Subtotal dos itens, com taxa de serviço somada e desconto subtraído.
 
-        Antes da conferência (`taxa_servico_percentual` ainda `None` e
-        `valor_desconto` ainda zero, valores padrão da comanda aberta) é igual
-        a `calcular_total` — a conta só passa a ter taxa/desconto a partir de
-        `fechar_para_conferencia`.
+        Antes da conferência (`valor_taxa_servico` e `valor_desconto` ainda
+        zero, valores padrão da comanda aberta) é igual a `calcular_total` — a
+        conta só passa a ter taxa/desconto a partir de `fechar_para_conferencia`.
         """
         comanda = self.buscar(comanda_id)
         subtotal = self._calcular_subtotal(comanda_id)
-        acrescimo = ZERO
-        if comanda.taxa_servico_percentual:
-            acrescimo = dinheiro(subtotal * dinheiro(comanda.taxa_servico_percentual) / Decimal("100"))
+        # A taxa GRAVADA (§9.23), e não refeita a partir do percentual: é o
+        # mesmo número que o cupom imprime e que o fechamento do dia soma. Os
+        # itens não mudam depois da conferência (`_exigir_aberta`), então
+        # gravado e refeito dariam o mesmo — mas só um deles é a fonte.
+        acrescimo = dinheiro(comanda.valor_taxa_servico or ZERO)
         desconto = dinheiro(comanda.valor_desconto or ZERO)
         # Nunca negativo: um desconto maior que a conta não pode virar crédito.
         return dinheiro(max(subtotal + acrescimo - desconto, ZERO))
@@ -308,6 +377,25 @@ class ComandaService:
     # Conferência / pré-conta (fechamento do lançamento de itens)
     # ------------------------------------------------------------------
 
+    def aceita_taxa_servico(self) -> bool:
+        """A loja cobra a taxa de serviço? A chave da Central de Loja (§9.23)."""
+        return self.auth.loja_config.aceita_taxa_servico()
+
+    def previa_de_conferencia(self, comanda_id: int) -> PreviaDeConferencia:
+        """O instantâneo do cartão "Fechar conta para conferência".
+
+        A regra da loja é lida AQUI, na abertura do cartão, e o cartão não volta
+        ao banco depois disso — cada clique na taxa é conta sobre o instantâneo.
+        Não grava nada: quem fecha a conta continua sendo
+        `fechar_para_conferencia`, que confere a regra outra vez.
+        """
+        comanda = self.buscar(comanda_id)
+        return PreviaDeConferencia(
+            mesa_numero=comanda.mesa.numero if comanda.mesa else None,
+            subtotal=self._calcular_subtotal(comanda_id),
+            taxa_percentual=TAXA_SERVICO_PADRAO if self.aceita_taxa_servico() else None,
+        )
+
     def fechar_para_conferencia(
         self,
         comanda_id: int,
@@ -333,7 +421,24 @@ class ComandaService:
                 f"A comanda {comanda_id} {situacao} e não pode ser enviada para conferência."
             )
 
-        comanda.taxa_servico_percentual = self._validar_taxa_servico(taxa_servico_percentual)
+        taxa = self._validar_taxa_servico(taxa_servico_percentual)
+        # A regra da Central de Loja (§9.23), conferida ANTES de mexer na
+        # comanda. É aqui, e não só na tela, porque a tela é uma foto tirada na
+        # abertura do cartão: se o dono desligar a taxa com o cartão aberto em
+        # outra ponta, o que vale é a regra de agora. Zero passa — não é taxa.
+        if taxa and not self.aceita_taxa_servico():
+            raise RegraDeNegocioError(
+                "A loja não cobra taxa de serviço (desligada na Central de Loja). "
+                "Feche a conta sem a taxa."
+            )
+
+        comanda.taxa_servico_percentual = taxa
+        # O valor em reais vai no MESMO commit que o percentual e a troca de
+        # status: uma comanda em conferência com percentual e sem valor faria o
+        # cupom cobrar a taxa e o fechamento do dia não enxergá-la.
+        comanda.valor_taxa_servico = valor_da_taxa_de_servico(
+            self._calcular_subtotal(comanda_id), taxa
+        )
         comanda.valor_desconto = self._validar_desconto(desconto, comanda_id)
         comanda.status = StatusComanda.EM_CONFERENCIA
         comanda.em_conferencia_em = datetime.now()
@@ -360,6 +465,7 @@ class ComandaService:
         comanda.status = StatusComanda.ABERTA
         comanda.em_conferencia_em = None
         comanda.taxa_servico_percentual = None
+        comanda.valor_taxa_servico = ZERO
         comanda.valor_desconto = ZERO
         self.uow.comandas.salvar(comanda)
         self.uow.commit()

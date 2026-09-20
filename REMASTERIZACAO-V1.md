@@ -1892,6 +1892,7 @@ manda conferir antes de fechar.
   largura útil do monitor de 1366px: a última coluna fica atrás da barra de
   rolagem horizontal. É anterior a este item e independente da cor — mas
   aparece nas renderizações acima, e por isso fica registrado aqui.
+  **Resolvido no §9.24** (a grade decide as colunas pela largura).
 - **O `BuscaProdutoWidget`** e o modal "Adicionar componente" do Cardápio
   continuam como estavam (§9.4).
 
@@ -4658,6 +4659,444 @@ repetição às cegas.
 - **Onedir em vez de arquivo único**: o `.exe` único extrai tudo em `%TEMP%` a
   cada abertura; uma pasta instalada abriria mais rápido no Celeron. Mantido o
   formato já decidido (e o do instalador), com a poda reduzindo o que é extraído.
+
+### 9.23 A conferência da mesa em cartão, e a taxa de serviço contada à parte ✅ CONCLUÍDO — 2026-09-19
+
+Pedido do Vitor, com o mockup "Fechar conta para conferência": trocar o diálogo
+de fábrica do botão "Fechar conta" por um cartão que diz quanto a mesa vai
+pagar antes de imprimir a pré-conta, com a taxa de 10% que se marca e desmarca
+e o total recalculado na hora; e pôr na Central de Loja a chave que liga e
+desliga a taxa da loja inteira. No meio do trabalho vieram mais duas mensagens:
+gravar a taxa em reais **isolada** na comanda, e mostrá-la separada no
+fechamento do dia e nos relatórios.
+
+#### Antes
+
+`_FecharConferenciaDialog`, dentro de `comanda_view.py`: moldura do Windows, um
+parágrafo, um `QCheckBox` "Cobrar taxa de serviço (10%)" e OK/Cancelar. O garçom
+marcava a caixa às cegas — a tela não dizia o total — e descobria o número no
+papel. A taxa só existia como percentual na comanda
+(`taxa_servico_percentual`); o valor em reais era refeito a cada leitura, e o
+cupom de pré-conta o deduzia **de trás para frente** (total − subtotal +
+desconto). Nenhum relatório sabia quanto do faturamento era taxa.
+
+#### Decisões do Vitor
+
+1. **Caixinha desmarcada ao abrir.** Perguntado antes de começar, ele respondeu
+   "marcada, como no mockup (R$ 144,65)"; no meio do trabalho, trocou: "a
+   caixinha deve iniciar desmarcada — o operador marca apenas caso o cliente vá
+   pagar a taxa". Vale a segunda. O valor da taxa fica à vista, apagado, para o
+   garçom dizer ao cliente quanto é antes de marcar.
+2. **"Caixinha ativável"**, e não o disco do mockup: virou um quadradinho de
+   cantos arredondados, que qualquer operador lê como checkbox sem explicação.
+3. **Valor isolado** (`valor_taxa_servico`) e **taxa separada no fechamento do
+   dia e nos relatórios** — as duas mensagens do meio do trabalho.
+
+#### O desenho
+
+- **Uma conta só.** `comanda_service.valor_da_taxa_de_servico(subtotal,
+  percentual)` é a ÚNICA multiplicação de taxa do sistema, meio centavo para
+  cima. `fechar_para_conferencia` a usa para gravar `comandas.valor_taxa_servico`
+  **no mesmo commit** do percentual e do status; `calcular_total_a_pagar` e o
+  cupom passaram a LER o valor gravado (a dedução de trás para frente saiu);
+  `reabrir` zera os dois. Os itens não mudam em conferência (`_exigir_aberta`),
+  então gravado e refeito dão o mesmo número — mas só um é a fonte.
+- **A regra da loja mora no service.** `loja_config.aceita_taxa_servico` (e não
+  `preferencias`, que por definição é o que nenhuma regra consulta), lida por
+  `LojaConfigService.aceita_taxa_servico()`. `fechar_para_conferencia` recusa
+  percentual diferente de zero com a loja desligada, ANTES de mexer na comanda:
+  o cartão é uma foto tirada na abertura, e o dono pode desligar a taxa com o
+  cartão aberto em outra ponta. `definir_aceita_taxa_servico` exige `bool` de
+  verdade (`"0"` é verdadeiro em Python) e grava num commit só. Conta já em
+  conferência não muda quando a loja desliga — o percentual e o valor estão
+  congelados nela, como o preço do item.
+- **Migração `e4b8c2a6d913`** (as duas colunas, `NOT NULL`, `server_default`
+  `1` e `0`), com o `BEGIN` explícito da `b9d2f5a31c47`: queda no meio não deixa
+  coluna nenhuma. Preenche `valor_taxa_servico` de toda comanda que já passou
+  pela conferência com taxa, pela regra do app COPIADA (itens não cancelados,
+  meio centavo para cima), em `Decimal` no Python — o `ROUND` do SQLite opera em
+  `REAL`, e `131.50 * 10 / 100` em ponto flutuante é `13.149999999999999`. O
+  domain ganhou os mesmos `server_default`, para o banco do `create_all` (a
+  suíte) ter o schema da migração.
+- **O cartão** (`ui/widgets/conferencia_dialog.py`, `ConferenciaMesaDialog`, o
+  12º modal em cartão, 576px como a imagem). Recebe `PreviaDeConferencia` —
+  instantâneo imutável montado por `ComandaService.previa_de_conferencia` com
+  subtotal, mesa e percentual (ou `None`, loja sem taxa) — e só mostra as contas
+  dele: cem cliques na taxa, zero SQL. Clique no card inteiro ou Espaço
+  alternam; Enter fecha e imprime; Esc cancela. Loja sem taxa: o bloco **não é
+  criado** (a forma do §9.15). Balcão diz "A comanda ficará em conferência". Os
+  glifos novos (`GLIFO_DOCUMENTO_VISTO`, `GLIFO_CADEADO`, `GLIFO_ESCUDO`) são
+  desenhados, pela armadilha do emoji (§9.10); `_tracar_folha` saiu de dentro do
+  `GLIFO_ARQUIVO_TEXTO` porque a folha agora serve dois glifos. Tokens
+  `conferencia_mesa_*` nos dois temas: âmbar no escuro, azul no claro — as cores
+  da mesa em conferência (`mesa_fechando_*`) em cada tema. O ✕, o Cancelar e o
+  "Fechar e imprimir" entraram nas famílias compartilhadas de QSS.
+- **A Central de Loja.** "Taxa de serviço" é a segunda seção da tela de
+  Configurações, um card inteiro clicável com o interruptor. O `_Interruptor` do
+  cartão de impressora (§9.19) saiu para `ui/widgets/interruptor.py` e os tokens
+  `impressora_interruptor_*` viraram `interruptor_*` — a segunda cópia da
+  pintura seria a repetição que a suíte reprova. O interruptor só muda depois de
+  o service gravar, relendo o banco.
+- **O fechamento do dia.** `ComandaRepository.fechadas_do_caixa` devolve a
+  contagem de comandas FECHADAS e a soma da taxa delas **na mesma consulta** que
+  já existia para a contagem (o resumo roda uma vez por turno no Dashboard,
+  §3.6). `ResumoCaixa.total_taxa_servico` e `FechamentoGaveta.total_taxa_servico`
+  levam o número para: o card "Recebimentos" do Caixa (turno ao vivo), a seção
+  "TAXA DE SERVIÇO" do comprovante digital, a linha "Taxa de serviço inclusa" do
+  fechamento impresso e o painel "Fechamento da Gaveta" — que é o mesmo nos dois
+  relatórios (Histórico Diário e Dashboard Mensal). Em todo lugar a taxa é
+  **fatia** do faturamento, com "inclusa" no rótulo: o cliente pagou a conta com
+  ela dentro, e quem somasse as duas linhas contaria a taxa duas vezes. Comanda
+  em conferência não entra (ainda pode ser reaberta e perder a taxa).
+- **O cupom de pré-conta** imprime Subtotal, "Taxa de serviço (10%)" e TOTAL A
+  PAGAR. Antes saía "(10,00%)" — o percentual formatado como dinheiro;
+  `formatador_cupom.percentual` tira as casas mortas, e o cartão usa a mesma
+  função para o "10% sobre o consumo da mesa".
+
+#### Não seguido ao pé da letra
+
+- **`destroy()`, unbind de atalhos**: idioma de Tkinter. Quem destrói é
+  `executar_modal` (§3.2); atalho nenhum é registrado (quem lê Enter, Esc e
+  Espaço é o `keyPressEvent` do cartão); as quatro ligações de sinal saem
+  nominalmente em `_soltar_recursos()`, com a trava `_limpo`.
+- **"Tela onde é inserido o valor recebido"**: a última mensagem chamou assim o
+  cartão de conferência, mas o valor recebido é digitado no `PagamentoDialog`,
+  que ficou intocado — a taxa é decidida na pré-conta, que é o papel que o
+  cliente confere; mudar a conta de novo na hora de receber faria o recibo
+  divergir da pré-conta.
+- **Fontes do mockup**: o cartão usa a Archivo Black da marca, como os outros
+  onze.
+
+#### Achados no caminho
+
+- `test_caos::test_todo_override_virtual_esta_blindado` **já falhava no HEAD**
+  (`831aa88`): o `minimumSizeHint` de `_CartaoSituacao` (§9.22) ficou sem
+  `@nao_deixa_escapar`. Ganhou o decorador, com `QSize(0, 0)` de retorno.
+- `test_migracao_bobina_e_letra_grossa` cravava a `b9d2f5a31c47` como head;
+  passou a conferir que o banco chegou à head com ela no caminho.
+
+#### Conferência
+
+- suíte **2388** (de 2286), 0 falhas, **102 testes novos**:
+  `tests/unit/test_taxa_de_servico.py` (53: chave da loja, regra no service,
+  valor isolado, arredondamento, prévia = total gravado em 12 combinações,
+  cupom, fechamento do dia, período, comprovante, uma consulta só),
+  `tests/unit/test_migracao_taxa_de_servico.py` (8), `tests/ui/test_conferencia_dialog.py`
+  (31) e `tests/ui/test_taxa_de_servico_nas_telas.py` (9: o botão "Fechar conta"
+  de verdade até o banco, a loja desligada no meio, a Configurações e o Caixa);
+- **29 mutações, as 29 reprovam** (regra da loja, gravação, reabrir, fonte do
+  total, arredondamento, prévia, filtro de FECHADA, período, cupom, comprovante,
+  três na migração, nove no cartão, view, interruptor, painel e Caixa);
+- renderização nativa com a fonte da marca: 576×487 com taxa, 576×409 sem,
+  nos dois temas; Configurações e Caixa conferidos na bancada;
+- cupons da bancada: cozinha e pré-conta sem mudança (o cenário fecha sem
+  taxa); o fechamento impresso ganhou uma linha, "Taxa de serviço inclusa".
+
+#### Ficou de fora
+
+- **Rateio da taxa por garçom**: o dado está gravado por comanda, com o
+  atendente ao lado (`atendente_id`), para quando for pedido.
+- **Taxa num KPI do Dashboard Mensal**: o painel "Fechamento da Gaveta" do mesmo
+  relatório já mostra o total do período.
+- **Percentual configurável**: continua fixo em 10% (`TAXA_SERVICO_PADRAO`);
+  a Central de Loja liga e desliga, não escolhe o número.
+
+### 9.24 A grade de mesas cabe na largura: nenhuma rolagem para o lado ✅ CONCLUÍDO — 2026-09-19
+
+Pedido do Vitor: o grid de mesas transbordava na horizontal e o operador tinha
+que usar uma barra de rolagem lateral para ver as mesas da direita. A grade tem
+que se ajustar à largura útil (entre a sidebar e o painel do salão), sem barra
+horizontal nenhuma, com a rolagem vertical funcionando para as 60 mesas, sem
+laço pesado no redimensionamento (Celeron, 4 GB) e com layout flexível (DRY).
+O defeito estava registrado desde o §9.5 ("Ficou de fora").
+
+#### Antes
+
+`QGridLayout` com `_COLUNAS_GRADE = 8` e o cartão no mínimo de 96px: a grade
+pedia **884px** (8 × 96 + 7 × 14 de vão + 2 × 9 de margem). Medido na
+`MainWindow` de verdade, com o layout assentado:
+
+| Janela | Área da grade | Grade pedia | Rolagem lateral | Mesas cortadas |
+|---|---|---|---|---|
+| 1280 | 624px | 884px | 260px | 21 de 60 |
+| 1366 | 710px | 884px | 174px | 14 de 60 |
+| 1600 | 944px | 884px | — | 0 |
+
+A 1366 a sétima coluna saía cortada ao meio e a oitava ficava inteira atrás da
+barra: mesa 8, 16, 24... só rolando para o lado.
+
+#### O desenho
+
+- **`GradeFluida`** (`ui/widgets/flow_layout.py`), filha do `FlowLayout`: os
+  itens correm e quebram linha como lá, mas toda célula tem a mesma largura e a
+  fileira estica até a borda. Colunas = `(largura + vão) // (mínimo + vão)`, o
+  maior número que cabe sem espremer a célula; a sobra da divisão vai 1px para
+  cada uma das primeiras colunas, então a última termina **exatamente** na
+  margem direita e o vão é sempre 14px. Respeita as margens (o `FlowLayout`
+  ignora, e nenhum uso dele tem margem).
+- **A rolagem horizontal ficou impossível, e não só escondida.** O mínimo da
+  grade é UMA célula mais as margens (114px); a `QScrollArea` só rola para o
+  lado quando o mínimo do conteúdo passa da área, e com 8 colunas fixas o
+  mínimo eram oito cartões. A barra fica em `ScrollBarAlwaysOff` por cima
+  disso, e o teste confere as duas coisas: a política desligada E a faixa da
+  barra em zero (máximo zero é o conteúdo sem nada para rolar, e não a barra
+  escondida em cima de um corte).
+- **A célula vem do mínimo do cartão, e não do conteúdo.** Se seguisse o
+  `sizeHint`, uma comanda de R$ 1.000 tiraria uma coluna da grade inteira e a
+  mesa 7, que estava embaixo da 1, pularia para o lado da 6: o operador acha a
+  mesa pela posição, e a posição não pode depender do que tem dentro dela. A
+  célula também não depende de quantos itens há: filtrar para duas mesas não
+  faz dois cartões gigantes.
+- **Custo.** A medida da célula fica guardada até o Qt invalidar o layout
+  (`invalidate`, `addItem`, `takeAt` a esquecem). O `heightForWidth`, que a
+  `QScrollArea` chama em laço a cada redimensionamento para decidir a barra
+  vertical (até ~17 vezes), virou aritmética pura; o `minimumSize` herdado do
+  `FlowLayout` percorria os 60 itens e o Qt o pede 8 vezes por
+  redimensionamento (0,74ms de cada um no perfil) — a grade responde pela
+  medida guardada. Redimensionar só reposiciona: os 60 cartões são os mesmos
+  objetos antes e depois (teste).
+- **`repovoar(widgets)`**, o achado de desempenho do item (abaixo): troca o
+  conteúdo inteiro com um relayout só.
+- Na view: `_COLUNAS_GRADE` e o `divmod` saíram; `_MARGEM_GRADE = 9` agora é
+  explícita (eram os 9px que o `QGridLayout` herdava do estilo sem ninguém
+  pedir, e que separam o cartão da última coluna da barra vertical). A
+  rolagem vertical é a mesma de antes.
+
+| Janela | Colunas | Cartão | Mesas cortadas |
+|---|---|---|---|
+| 1280 | 5 | 110px | 0 |
+| 1366 | 6 | 104px | 0 |
+| 1440 | 7 | 98px | 0 |
+| 1600 | 8 | 104px | 0 |
+| 1920 | 11 | 101px | 0 |
+
+#### Achados no caminho
+
+- **Cada recarga da grade fazia 61 relayouts completos, um por cartão.**
+  Widget novo num pai visível ganha um `show()` agendado, e cada `show()` refaz
+  NA HORA o layout do pai (`QWidgetPrivate::setVisible` ativa o layout dos
+  ancestrais). Com o `QGridLayout` isso já acontecia, em C++; com a grade em
+  Python a recarga passou de 46 para 56ms, e o perfil mostrou 3.600
+  posicionamentos para pôr 60 cartões no lugar. O `repovoar` desliga o layout
+  (`QLayout.setEnabled(False)`: "age como se não existisse", `activate()` não
+  faz nada), exibe os cartões ali dentro — o `show()` agendado pelo Qt os
+  encontra já visíveis e não faz nada — e religa: **1 relayout**. Isso explica
+  também o PNG de Mesas da bancada, que mostrava cartões sobrepostos: a
+  `tools/comparar_telas.py` fotografa depois de UM `processEvents`, no meio
+  daqueles 61 relayouts. Agora a foto sai assentada.
+- **O corte de texto dentro do cartão ocupado é anterior e dependia da
+  resolução** (medido com a fonte da marca, área de texto = cartão − 20px):
+  `R$ 150,00` e `R$ 999,99` pedem 81px, `R$ 1.234,56` pede 96, `Turno - Manhã`
+  86 e `Turno - Tarde` 80. Antes, a 1366, o cartão ficava no mínimo (96px →
+  76 de texto) e **todo valor a partir de R$ 100,00** saía cortado, junto com
+  os dois nomes de turno. Com a grade fluida o cartão nunca é mais estreito do
+  que era (é ≥ 96 em toda largura): a 1366, com 104px, valores até R$ 999,99 e
+  `Turno - Tarde` passaram a caber; seguem cortados R$ 1.000 para cima (82 de
+  96px) e `Turno - Manhã` (82 de 86px). Resolver de vez é escolher o
+  `LARGURA_MINIMA_PX` — decisão de produto, levada ao Vitor (ver "Ficou de
+  fora").
+- **O HEAD (`831aa88`) não importa sozinho**: `hardware/impressora_escpos.py`
+  commitado já importa `core/caminhos.py`, que ainda não foi commitado (é do
+  §9.21). Some quando o §9.21 entrar num commit — com o `caminhos.py` junto.
+
+#### Não seguido ao pé da letra
+
+- **Rolagem vertical "suave"**: ficou a do Qt, sem animação — a roda do mouse
+  anda 60px por dente (3 × 20px), a mesma de antes. Animar a rolagem seria uma
+  animação por evento de roda, CPU gasta na máquina fraca por um efeito que o
+  pedido não mediu. O que o pedido media — a barra vertical sem piscar e a
+  última mesa alcançável — está nos testes.
+- **"Tamanho dos cards ou número de colunas"**: faz os dois. As colunas saem da
+  largura; a sobra estica as células, que ficam entre o mínimo e pouco mais
+  (98 a 110px nas resoluções comuns).
+
+#### Conferência
+
+- suíte **2408** (de 2388), 0 falhas, **20 testes novos** em
+  `tests/ui/test_grade_de_mesas_fluida.py`: 12 do layout sozinho, varrendo 227
+  larguras de 118 a 1700px (borda direita exata, vãos iguais, células iguais,
+  o maior número de colunas que cabe, altura pedida = altura ocupada, mínimo de
+  uma célula, célula independente do conteúdo e da quantidade, a medida
+  acompanhando item que muda / entra / sai, 1 relayout no `repovoar`) e 8 da
+  tela de Mesas com as 60 mesas nas páginas de 1280, 1366, 1440, 1600 e 1920
+  (nenhuma mesa atrás da borda, colunas crescendo com a largura, cartões não
+  recriados no redimensionamento, mesa 60 alcançada pela rolagem vertical);
+- **16 mutações, 15 reprovam** (a volta do `QGridLayout` de 8 colunas, o
+  `repovoar` sem desligar e sem exibir, a sobra, o vão, a fórmula das colunas
+  duas vezes, a altura duas vezes, as margens, a célula pelo `sizeHint`, a
+  barra horizontal, a medida esquecida no `invalidate`/`addItem`/`takeAt`).
+  Duas sobreviveram na primeira passada e viraram teste (a sobra ia para o
+  vão sem mudar a borda direita; a célula pelo `sizeHint` passava porque
+  nenhum item pedia mais que o mínimo). A que sobra é declarada: o
+  `minimumSize` da grade devolve o MESMO valor do herdado, só que sem
+  percorrer os itens — é desempenho puro, medido acima;
+- desempenho, `MainWindow` real com 60 mesas (mediana de 3 execuções):
+
+| | Antes | Depois |
+|---|---|---|
+| Relayouts da grade por recarga | 61 | **1** |
+| `carregar_mesas` + ciclo de eventos | 46ms | **43ms** |
+| Redimensionar a janela, com repintura | 7,5ms | 7,9ms |
+| Widgets vivos após 280 redimensionamentos | 1353 | 1353 |
+
+  O redimensionamento é quase todo repintura da janela; o 0,4ms a mais é o
+  trabalho que antes não existia — abaixo de 1600px a grade antiga não
+  redimensionava cartão nenhum, só transbordava;
+- bancada visual: **22 das 24 telas idênticas byte a byte** a 1280×800 e a
+  1366×738, diferindo só as duas de Mesas, e só dentro da área da grade.
+
+#### Ficou de fora
+
+- **O mínimo do cartão (`LARGURA_MINIMA_PX = 96`)** continua o de antes; o
+  corte de R$ 1.000+ e de `Turno - Manhã` descrito acima é decisão do Vitor
+  (mais colunas ou texto inteiro). É uma constante e um teste.
+- **Janela abaixo de ~1040px**: a tela de Mesas pede 825px (cabeçalho, pílulas
+  de filtro e o painel do salão de 320px) e a página não tem isso. Não é a
+  grade, e não é a classe de máquina do food truck.
+
+### 9.25 O fechamento de mesa sem pergunta, e o recebimento em tela cheia ✅ CONCLUÍDO — 2026-09-20
+
+Pedido do Vitor no dia seguinte ao §9.23, em duas partes: **tirar a etapa de
+escolha da taxa** (a caixinha que ele mesmo tinha pedido na véspera) e trocar o
+último diálogo de fábrica do fluxo de venda — o `PagamentoDialog` — pela tela
+"Receber Pagamento" do mockup, com o consumo à esquerda, as formas em cards, o
+troco ao vivo e o card da comissão do garçom.
+
+#### Antes
+
+- **Fechar conta**: o cartão do §9.23 perguntava, em toda mesa, se a taxa
+  entrava. A resposta era sempre a mesma, e a pergunta era onde a taxa era
+  esquecida (ou cobrada por engano).
+- **Receber pagamento**: um `QDialog` com `QFormLayout` — combo de forma, campo
+  de texto do valor, campo de PIN e um resumo de três linhas. Quem recebia não
+  via o que o cliente estava pagando (a lista de itens ficava na tela de trás), e
+  o troco só aparecia depois de registrar.
+- **Comissão**: não existia. A taxa de serviço entrava no caixa e o acerto com o
+  garçom acontecia fora do sistema, na mão.
+
+#### Decisões do Vitor
+
+1. **O cartão de conferência continua, sem caixinha** — perguntado antes de
+   começar, entre "um clique, sem tela nenhuma" e "o cartão só confirma": ele
+   escolheu confirmar. Um clique errado tranca a mesa e só o PIN de gerente
+   reabre; a confirmação custa meio segundo e evita isso.
+2. **Comissão paga / Comissão não paga**, os dois nomes dele (o segundo era
+   "Pagar depois" no mockup). Paga grava o repasse e, quando a conta entrou em
+   dinheiro, tira o valor da gaveta; não paga deixa pendente, numa lista por
+   garçom.
+3. **"Vale" virou "Consumo"** e é o consumo interno de sempre: PIN de gerente,
+   escolha do funcionário e saldo devedor dele.
+4. **"Dividir por" só mostra** quanto dá por pessoa; o pagamento continua sendo
+   lançado por valor recebido.
+
+#### O desenho
+
+- **A taxa saiu da tela e virou regra.** `PreviaDeConferencia.total` e
+  `percentual_a_gravar` viraram propriedades sem parâmetro — quem decide é a
+  Central de Loja (§9.23), e o cartão só mostra. A caixinha virou selo, o Espaço
+  não alterna mais nada, e o cartão passou a ter três ligações de sinal em vez
+  de quatro. A impressão da pré-conta continua saindo no mesmo gesto, com
+  Subtotal, "Taxa de serviço (10%)" e TOTAL A PAGAR.
+- **`views/pagamento_view.py`** é uma TELA no `QStackedWidget`, não um modal:
+  entra pelo "Receber pagamento" da comanda e sai pelo "← Voltar à mesa" ou pela
+  conta quitada. Ela recebe um `ContaParaPagamento` imutável
+  (`PagamentoService.conta_para_pagamento`) e não lê `Comanda` nenhuma na
+  pintura — a lição do §9.4. O campo de valor é o `CampoMoeda` do §9.20, então
+  "12,5abc" não existe; o troco é recalculado na tecla e **só em dinheiro**,
+  porque é a única forma que o service aceita acima do restante.
+- **A comissão é a taxa.** Não há coluna de valor: a comissão de uma conta É o
+  `valor_taxa_servico` dela (§9.23), e uma segunda cópia do mesmo número
+  divergiria. O que a migração `f6a1d3b78c42` acrescenta é o controle do
+  repasse — `comandas.comissao_paga` e `comissao_paga_em` —, com **o passado
+  entrando como acertado**: nascer pendente abriria uma lista de dívidas de
+  todas as vendas antigas, que ninguém tem.
+- **O repasse e a marca viajam juntos.** `registrar(..., comissao_paga=True)`
+  grava a marca e chama `CaixaService.registrar_repasse_comissao` no MESMO
+  commit que fecha a conta: marcada sem saída faz o turno sobrar dinheiro, saída
+  sem marca paga o garçom duas vezes. A saída só existe quando a conta entrou em
+  dinheiro — no cartão ou no PIX aquele dinheiro não está na gaveta.
+  `TipoMovimento.COMISSAO` entrou em `TIPOS_QUE_SAEM_DA_GAVETA` (sem ele o saldo
+  esperado mandaria contar dinheiro que não está mais lá) e em
+  `TIPOS_FORA_DO_LANCAMENTO_MANUAL`, ao lado do consumo de funcionário: uma
+  comissão digitada à mão não teria comanda do outro lado. A coluna
+  `movimentos_caixa.tipo` é `VARCHAR` sem `CHECK`, então o tipo novo não pediu
+  migração.
+- **Onde o repasse aparece**: card "Ajustes do turno" do Caixa, seção de saídas
+  do comprovante, linha "Comissões repassadas" no fechamento impresso, e o
+  `ResumoCaixa.comissoes` que os três leem. Em Funcionários entrou o KPI
+  "Comissão a repassar", o card "COMISSÃO A REPASSAR" no perfil do garçom e o
+  botão que acerta tudo dele de uma vez (`pagar_comissoes_do_funcionario`), com
+  UM movimento de gaveta pela parte que entrou em dinheiro.
+- **PIN**: `PinPadDialog.para_consumo_interno` (Nível 2, o mesmo do Caixa) e a
+  propriedade `pin_confirmado`, o único caminho que devolve o PIN digitado —
+  porque quem grava é o `PagamentoService`, e ele reconfere a credencial antes
+  de lançar. A tela coleta; ela não autoriza nada.
+- **Glifos novos** (`cardapio_cartoes.py`): cédula, cartão, celular e pessoa,
+  desenhados pelo motivo de sempre — 💵 💳 📱 👤 sairiam coloridos e chapados.
+  Família de tokens `pagamento_*` nos dois temas, pela lição do §9.5.
+
+#### Não seguido ao pé da letra
+
+- **"Extinção da tela intermediária"**: o cartão continua, sem a escolha. É a
+  decisão 1 acima, perguntada antes de começar.
+- **Comissão paga como padrão** (o mockup mostra o botão verde aceso): a tela
+  abre em "não paga". Dinheiro não sai da gaveta sem alguém dizer que saiu, e o
+  clique que muda isso é um só.
+- **Sidebar do mockup** (Visão Geral, Delivery, Estoque, Fechamento): telas que
+  não existem. Mesma decisão do §9.9 — o pedido era sobre a tela, não sobre a
+  navegação.
+
+#### Conferência
+
+- suíte **2453**, 0 falhas, **50 testes novos**: `tests/unit/test_comissao.py`
+  (25: a conta que a tela mostra, quando existe comissão, o repasse no
+  recebimento, a lista de pendentes e a gaveta), `tests/unit/test_migracao_comissao.py`
+  (6) e `tests/ui/test_pagamento_view.py` (19), mais os do §9.23 reescritos para
+  o cartão sem escolha;
+- **32 mutações, as 32 reprovam**. Três sobreviveram à primeira passada e
+  viraram teste (ou constante): a lista de pendentes sem o filtro de FECHADA
+  (faltava a conta em conferência no cenário), o "por pessoa" arredondando como
+  dinheiro em vez de para cima (nenhum caso do parametrize distinguia os dois) e
+  a comissão abrindo marcada — esta última porque o valor do `__init__` é
+  **morto**: quem manda é o `carregar()`. Virou a constante
+  `COMISSAO_PAGA_PADRAO`, lida nos dois lugares, com teste de que cada conta
+  recomeça dela;
+- renderização da tela nova com a fonte da marca, nos dois temas, a 1366x738 —
+  e foi ela que pegou o defeito que os testes não pegavam: a coluna da direita
+  não cabia na altura útil, e o Qt **espremia** os cards de forma de pagamento a
+  20px, deixando de desenhar "Dinheiro", "Pix" e "Crédito". Corrigido com piso
+  de altura nos cards, margens um degrau menores e rolagem na coluna; o teste de
+  aperto passou a medir ALTURA também, que era o eixo que escapava.
+
+#### A suíte, de quebra
+
+Perseguir uma lentidão de suíte (2,5 min → 20 min, nesta máquina) achou três
+coisas, e nenhuma delas era do app:
+
+1. **o spooler de verdade na suíte** — a fixture do cartão de impressora deixava
+   `listar=None`, então cada um dos ~140 testes perguntava ao Windows pelas
+   impressoras e esperava até 3s. Agora a lista falsa é o padrão (quem testa o
+   caminho real passa a própria função), e aquele arquivo caiu para ~67s;
+2. **janela de teste esquecida aberta** — os testes de aperto mostravam uma
+   janela 1366x738 e não a destruíam: ela seguia ATIVA, roubava o foco do
+   diálogo do teste seguinte e continuava repintando. Medido: o teste de foco do
+   cartão de impressora ia de 0,2s para ~6 minutos e falhava. Fechada com
+   `close()` + `assentar()`;
+3. **relógio de 0 ms esquecido** — os helpers que respondem a diálogos viraram
+   gerenciadores de contexto, que param o `QTimer` no `finally`.
+
+E o teste de foco daquele cartão lia o foco num instante fixo (30 ms depois do
+`exec()`), quando o `FocusIn` "de Tab" do `QDialog::setVisible` (§9.19) pode
+chegar depois sob carga: passou a esperar a condição.
+
+#### Ficou de fora
+
+- **Dividir a conta em pagamentos separados** (um por pessoa): o "dividir por" é
+  só a conta de cabeça, por decisão do Vitor.
+- **Percentual de comissão diferente da taxa**: a comissão é a taxa inteira.
+- **Histórico de repasses por turno**: o que existe é a marca por conta e o
+  movimento de gaveta; um relatório de comissões pagas por período não foi
+  pedido.
 
 ---
 

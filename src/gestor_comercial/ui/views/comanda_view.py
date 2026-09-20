@@ -3,7 +3,7 @@ cancelamento de item/comanda com PIN de gerente — porte visual de
 `.comanda-detalhe`/`.tabela` e dos modais `+ Item`/`Cancelar` do front-end
 web (`GESTOR COMERCIAL/.../desktop/index.html` + `js/app.js`).
 
-Não conhece `PagamentoDialog` nem navegação: emite `pagamento_solicitado`,
+Não conhece a tela de pagamento nem navegação: emite `pagamento_solicitado`,
 `voltar` e `comanda_cancelada` e deixa a janela principal decidir o que
 fazer com cada um (o mesmo padrão de `MesasView.comanda_aberta`).
 """
@@ -17,10 +17,8 @@ from decimal import Decimal
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -53,6 +51,7 @@ from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 from gestor_comercial.ui.widgets.adicionar_item_dialog import AdicionarItemDialog
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
+from gestor_comercial.ui.widgets.conferencia_dialog import ConferenciaMesaDialog
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 from gestor_comercial.ui.widgets.modais import executar_modal
 from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
@@ -743,18 +742,29 @@ class ComandaView(QWidget):
         ao_sair()
 
     def _fechar_para_conferencia(self) -> None:
-        """Trava os itens, decide taxa/desconto e emite a pré-conta na impressora padrão."""
+        """Mostra a prévia da pré-conta, trava os itens e a imprime na impressora padrão.
+
+        O cartão (§9.23) só mostra e devolve o percentual escolhido; quem grava
+        percentual, valor da taxa e status num commit só, e quem recusa a taxa
+        com a loja desligada, é o `fechar_para_conferencia` do service.
+        """
         if self._comanda is None:
             return
-        modal = _FecharConferenciaDialog(self)
+        comanda_id = self._comanda.id
+        self._label_erro.setText("")
+        try:
+            previa = self._comanda_service.previa_de_conferencia(comanda_id)
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+            return
+
+        modal = ConferenciaMesaDialog(previa, self)
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-        taxa, desconto = modal.resultado()
+        taxa = modal.resultado()
 
-        self._label_erro.setText("")
-        comanda_id = self._comanda.id
         try:
-            self._comanda_service.fechar_para_conferencia(comanda_id, taxa, desconto)
+            self._comanda_service.fechar_para_conferencia(comanda_id, taxa)
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return
@@ -831,44 +841,3 @@ class ComandaView(QWidget):
         self._comanda_service.lancar_item(self._comanda.id, produto_id, quantidade, observacao)
         self.atualizar()
 
-
-_TAXA_SERVICO_PADRAO = Decimal("10")
-
-
-class _FecharConferenciaDialog(QDialog):
-    """Modal do botão "Fechar conta": taxa de serviço fixa de 10%, opcional.
-
-    Sem campo de desconto e sem valor livre de taxa — o food truck só cobra
-    os 10% padrão de gorjeta/serviço quando o garçom decide marcar a caixa,
-    então não há por que dar espaço pra digitar um percentual ou desconto
-    arbitrário a cada fechamento (fonte de erro de digitação no balcão).
-    """
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Fechar conta para conferência")
-        self.setMinimumWidth(360)
-
-        layout = QVBoxLayout(self)
-        aviso = QLabel(
-            "Isto trava novos itens e imprime a pré-conta. "
-            "Use 'Reabrir' (com PIN de gerente) para desfazer."
-        )
-        aviso.setWordWrap(True)
-        aviso.setObjectName("dicaFraca")
-        layout.addWidget(aviso)
-
-        self._marcar_taxa_servico = QCheckBox(f"Cobrar taxa de serviço ({_TAXA_SERVICO_PADRAO:g}%)")
-        layout.addWidget(self._marcar_taxa_servico)
-
-        botoes = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        botoes.button(QDialogButtonBox.StandardButton.Ok).setText("Fechar e imprimir")
-        botoes.accepted.connect(self.accept)
-        botoes.rejected.connect(self.reject)
-        layout.addWidget(botoes)
-
-    def resultado(self) -> tuple[Decimal | None, Decimal | None]:
-        taxa = _TAXA_SERVICO_PADRAO if self._marcar_taxa_servico.isChecked() else None
-        return taxa, None

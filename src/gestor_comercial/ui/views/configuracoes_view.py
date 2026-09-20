@@ -15,6 +15,10 @@ A terceira é "Cópia de Segurança": gera um backup do banco sob demanda, além
 do automático que roda a cada fechamento de caixa. Existe porque, com
 `journal_mode=WAL`, copiar o arquivo do banco à mão com o programa aberto deixa
 as últimas vendas para trás — ver `repository/backup.py`.
+
+A quarta (§9.23) é "Taxa de serviço": o interruptor que diz se a loja cobra os
+10% nas mesas. Desligado, o cartão de conferência da mesa nem mostra o bloco da
+taxa, e o `ComandaService` recusa a taxa se ela chegar por outro caminho.
 """
 
 from __future__ import annotations
@@ -22,8 +26,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from functools import partial
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QHideEvent
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QHideEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -62,6 +66,7 @@ from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.cpf_dono_dialog import CpfDonoDialog
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 from gestor_comercial.ui.widgets.icone_olho import BotaoOlho
+from gestor_comercial.ui.widgets.interruptor import Interruptor
 from gestor_comercial.ui.widgets.modais import executar_modal
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
@@ -135,6 +140,8 @@ class ConfiguracoesView(QWidget):
         layout.addWidget(self._label_erro)
 
         layout.addWidget(self._montar_card_tema())
+        layout.addSpacing(20)
+        layout.addWidget(self._montar_card_taxa_servico())
         layout.addSpacing(20)
         layout.addWidget(self._montar_card_senhas())
         layout.addSpacing(20)
@@ -221,6 +228,49 @@ class ConfiguracoesView(QWidget):
         desfeita e seguraria esta tela junto.
         """
         self._botao_tema_claro.setChecked(ThemeController.instancia().claro)
+
+    # ------------------------------------------------------------------
+    # Seção "Taxa de serviço" (§9.23)
+    # ------------------------------------------------------------------
+
+    def _montar_card_taxa_servico(self) -> QWidget:
+        bloco = QWidget()
+        bloco_layout = QVBoxLayout(bloco)
+        bloco_layout.setContentsMargins(0, 0, 0, 0)
+        bloco_layout.setSpacing(10)
+
+        secao_titulo = QLabel("TAXA DE SERVIÇO")
+        secao_titulo.setObjectName("configSecaoTitulo")
+        bloco_layout.addWidget(secao_titulo)
+
+        self._cartao_taxa_servico = _CartaoInterruptor(
+            "Cobrar taxa de serviço (10%)",
+            "Habilita ou desabilita o cálculo e a exibição da taxa de 10% nas "
+            "pré-contas e fechamentos de mesa.",
+        )
+        self._cartao_taxa_servico.clicado.connect(self._alternar_taxa_servico)
+        bloco_layout.addWidget(self._cartao_taxa_servico)
+        self._mostrar_taxa_servico()
+        return bloco
+
+    def _mostrar_taxa_servico(self) -> None:
+        self._cartao_taxa_servico.interruptor.definir(self._loja_config.aceita_taxa_servico())
+
+    def _alternar_taxa_servico(self) -> None:
+        """Grava o contrário do que está na tela e redesenha a partir do banco.
+
+        O interruptor só muda DEPOIS de o service aceitar, e lendo de volta o
+        que foi gravado: se a gravação falhar, a tela continua mostrando o que
+        vale de verdade, e não o que o dono tentou.
+        """
+        self._label_erro.setText("")
+        try:
+            self._loja_config.definir_aceita_taxa_servico(
+                not self._cartao_taxa_servico.interruptor.ligado
+            )
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+        self._mostrar_taxa_servico()
 
     # ------------------------------------------------------------------
     # Seção "Cópia de Segurança"
@@ -600,6 +650,47 @@ class ConfiguracoesView(QWidget):
             self._label_erro.setText(str(erro))
             return
         self._atualizar_secao_senhas()
+
+
+class _CartaoInterruptor(QFrame):
+    """Um cartão de preferência liga/desliga: título, explicação e o interruptor.
+
+    O cartão inteiro é o alvo do clique, e não só o interruptor de 38px — a
+    mesma escolha do "Impressora ativa" (§9.19). O interruptor não recebe
+    clique (`Interruptor` é transparente ao mouse) e não decide nada: quem
+    decide é a tela, depois de o service gravar.
+    """
+
+    clicado = Signal()
+
+    def __init__(self, titulo: str, descricao: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("configCard")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        linha = QHBoxLayout(self)
+        linha.setContentsMargins(20, 18, 20, 18)
+        linha.setSpacing(16)
+
+        textos = QVBoxLayout()
+        textos.setSpacing(4)
+        rotulo = QLabel(titulo)
+        rotulo.setObjectName("configOpcaoTitulo")
+        textos.addWidget(rotulo)
+        explicacao = QLabel(descricao)
+        explicacao.setProperty("variante", "fraco")
+        explicacao.setWordWrap(True)
+        textos.addWidget(explicacao)
+        linha.addLayout(textos, 1)
+
+        self.interruptor = Interruptor()
+        linha.addWidget(self.interruptor, 0, Qt.AlignmentFlag.AlignVCenter)
+
+    @nao_deixa_escapar()
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (override Qt)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicado.emit()
+        super().mousePressEvent(event)
 
 
 class _AlterarSegredoDialog(QDialog):

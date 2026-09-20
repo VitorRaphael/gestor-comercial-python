@@ -474,14 +474,101 @@ TEMA_ESCURO: dict[str, str] = {
     "impressora_situacao_inativa_bg": "#141413",
     "impressora_situacao_inativa_borda": "rgba(255, 255, 255, 0.06)",
     "impressora_situacao_inativa_texto": "#71717A",
-    "impressora_interruptor_ligado": "#22C55E",
-    "impressora_interruptor_desligado": "#3F3F46",
-    "impressora_interruptor_botao_ligado": "#0B0B0A",
-    "impressora_interruptor_botao_desligado": "#A1A1AA",
+    # O interruptor desenhado (`interruptor.py`). Chamava-se
+    # `impressora_interruptor_*` enquanto só "Impressora ativa" o usava; o §9.23
+    # levou o mesmo desenho para "Cobrar taxa de serviço" na Configurações, e o
+    # nome passou a ser o papel — o critério de `botao_circular_*` (§9.4).
+    "interruptor_ligado": "#22C55E",
+    "interruptor_desligado": "#3F3F46",
+    "interruptor_botao_ligado": "#0B0B0A",
+    "interruptor_botao_desligado": "#A1A1AA",
     # O veredito curto do formulário, à direita do resumo: âmbar é aviso que
     # não impede salvar ("o recibo ficará sem impressora"), coral é o que impede.
     "impressora_aviso": "#F59E0B",
     "impressora_erro": "#F87171",
+    # ---- Conferência da mesa (`conferencia_dialog.py`, §9.23) ----
+    # Família PRÓPRIA, pela lição do §9.5: metade destes hex coincide com
+    # `impressora_badge_*`, `visor_valor_bg` e `mesa_fechando_*`, e cada um veste
+    # outra coisa. O cartão que diz quanto a mesa vai pagar não pode mudar de
+    # cor porque alguém ajustou o badge da impressora.
+    #
+    # Âmbar no escuro porque é o âmbar da mesa em conferência (`mesa_fechando_*`):
+    # o garçom fecha a conta aqui e reencontra a mesma cor no card da mesa. O
+    # botão "Fechar e imprimir" NÃO está aqui — ele é o `acento` da família
+    # compartilhada de confirmação dos modais em cartão.
+    "conferencia_mesa_badge_bg": "#1F1A13",
+    "conferencia_mesa_badge_borda": "rgba(229, 169, 60, 0.2)",
+    "conferencia_mesa_badge_glifo": "#E5A93C",
+    "conferencia_mesa_secao": "#E5A93C",
+    "conferencia_mesa_divisor": "rgba(255, 255, 255, 0.06)",
+    # O subtotal, a taxa e o aviso são REBAIXADOS em relação ao cartão, como o
+    # visor de valor: é o que se confere, não mais um cartão por cima.
+    "conferencia_mesa_valor_bg": "#111110",
+    "conferencia_mesa_valor_borda": "rgba(255, 255, 255, 0.07)",
+    "conferencia_mesa_rotulo": "#A1A1AA",
+    # O total da pré-conta: a moldura âmbar do mockup, e o único valor da tela
+    # na cor — é o número que vai para o papel.
+    "conferencia_mesa_total_bg": "#1E1912",
+    "conferencia_mesa_total_borda": "rgba(229, 169, 60, 0.45)",
+    "conferencia_mesa_total_texto": "#E5A93C",
+    "conferencia_mesa_taxa_hover_borda": "rgba(229, 169, 60, 0.35)",
+    # A marca da taxa: disco âmbar com o visto escuro quando cobrada, só o
+    # anel quando não.
+    "conferencia_mesa_marca_bg": "#E5A93C",
+    "conferencia_mesa_marca_glifo": "#0C0E12",
+    "conferencia_mesa_marca_vazia": "rgba(255, 255, 255, 0.28)",
+    "conferencia_mesa_taxa_valor": "#E5A93C",
+    # O aviso do cadeado: petróleo, e não âmbar nem vermelho — não é alerta de
+    # erro, é a regra dita antes ("os itens vão travar").
+    "conferencia_mesa_aviso_bg": "#132226",
+    "conferencia_mesa_aviso_borda": "rgba(45, 212, 191, 0.22)",
+    "conferencia_mesa_aviso_glifo": "#5EEAD4",
+    "conferencia_mesa_seguro_glifo": "#22C55E",
+    "conferencia_mesa_seguro_texto": "#71717A",
+    # ---- Receber Pagamento (`views/pagamento_view.py`, §9.25) ----
+    # Família PRÓPRIA, pela lição do §9.5, e aqui ela pesa: metade destes hex
+    # coincide com `conferencia_mesa_*` e `impressora_opcao_*`, porque as três
+    # telas são do mesmo desenho. A tela que recebe dinheiro não pode mudar de
+    # cor porque alguém ajustou o cartão de impressora.
+    "pagamento_cartao_bg": "#161615",
+    "pagamento_cartao_borda": "rgba(255, 255, 255, 0.08)",
+    "pagamento_badge_bg": "#1F1A13",
+    "pagamento_badge_borda": "rgba(229, 169, 60, 0.2)",
+    "pagamento_badge_glifo": "#E5A93C",
+    "pagamento_rotulo": "#A1A1AA",
+    "pagamento_divisor": "rgba(255, 255, 255, 0.06)",
+    # O bloco do total, o único valor da tela na cor da marca.
+    "pagamento_total_bg": "#1E1912",
+    "pagamento_total_borda": "rgba(229, 169, 60, 0.45)",
+    "pagamento_total_texto": "#E5A93C",
+    # Os cards de forma de pagamento: o escolhido e os outros.
+    "pagamento_opcao_bg": "#141413",
+    "pagamento_opcao_borda": "rgba(255, 255, 255, 0.06)",
+    "pagamento_opcao_texto": "#A1A1AA",
+    "pagamento_opcao_glifo": "#A1A1AA",
+    "pagamento_opcao_ativa_bg": "#1C1914",
+    "pagamento_opcao_ativa_borda": "#E5A93C",
+    "pagamento_opcao_ativa_glifo": "#E5A93C",
+    # O campo do valor e o visor do troco são REBAIXADOS, como o visor de
+    # dinheiro dos modais de gaveta: é o que se lê, não mais um cartão por cima.
+    "pagamento_campo_bg": "#111110",
+    "pagamento_troco_bg": "#111110",
+    # O troco em coral: é dinheiro que SAI da gaveta, e o operador precisa achar
+    # esse número de longe quando o cliente estende a nota.
+    "pagamento_troco_texto": "#F87171",
+    # O card do garçom. O "paga" é o verde de repasse feito; o "não paga" é o
+    # âmbar de pendência — e não vermelho, que é erro: deixar para depois é uma
+    # escolha legítima, não um defeito.
+    "pagamento_comissao_bg": "#141413",
+    "pagamento_comissao_borda": "rgba(255, 255, 255, 0.06)",
+    "pagamento_avatar_bg": "#2B2113",
+    "pagamento_avatar_glifo": "#E5A93C",
+    "pagamento_comissao_paga_bg": "#0E1A12",
+    "pagamento_comissao_paga_borda": "rgba(34, 197, 94, 0.35)",
+    "pagamento_comissao_paga_texto": "#22C55E",
+    "pagamento_comissao_pendente_bg": "#201911",
+    "pagamento_comissao_pendente_borda": "rgba(245, 158, 11, 0.35)",
+    "pagamento_comissao_pendente_texto": "#F59E0B",
 }
 
 TEMA_CLARO: dict[str, str] = {
@@ -779,10 +866,69 @@ TEMA_CLARO: dict[str, str] = {
     "impressora_situacao_inativa_bg": "#FAF9F5",
     "impressora_situacao_inativa_borda": "#E2E1D9",
     "impressora_situacao_inativa_texto": "#94A3B8",
-    "impressora_interruptor_ligado": "#16A34A",
-    "impressora_interruptor_desligado": "#CBD5E1",
-    "impressora_interruptor_botao_ligado": "#FFFFFF",
-    "impressora_interruptor_botao_desligado": "#FFFFFF",
+    "interruptor_ligado": "#16A34A",
+    "interruptor_desligado": "#CBD5E1",
+    "interruptor_botao_ligado": "#FFFFFF",
+    "interruptor_botao_desligado": "#FFFFFF",
     "impressora_aviso": "#B45309",
     "impressora_erro": "#DC2626",
+    # ---- Conferência da mesa (`conferencia_dialog.py`, §9.23) ----
+    # Ver o comentário gêmeo em TEMA_ESCURO. No claro a mesa em conferência é
+    # AZUL (`mesa_fechando_*`), e o botão de confirmar é o `acento` azul desta
+    # paleta: o cartão segue os dois, com o arranjo pastel do tema claro.
+    "conferencia_mesa_badge_bg": "#DBEAFE",
+    "conferencia_mesa_badge_borda": "#BFDBFE",
+    "conferencia_mesa_badge_glifo": "#1D4ED8",
+    "conferencia_mesa_secao": "#1D4ED8",
+    "conferencia_mesa_divisor": "#EFEEE8",
+    "conferencia_mesa_valor_bg": "#FAF9F5",
+    "conferencia_mesa_valor_borda": "#E2E1D9",
+    "conferencia_mesa_rotulo": "#64748B",
+    "conferencia_mesa_total_bg": "#EFF4FF",
+    "conferencia_mesa_total_borda": "#93B4FF",
+    "conferencia_mesa_total_texto": "#0043CC",
+    "conferencia_mesa_taxa_hover_borda": "#93B4FF",
+    "conferencia_mesa_marca_bg": "#0055FF",
+    "conferencia_mesa_marca_glifo": "#FFFFFF",
+    "conferencia_mesa_marca_vazia": "#CBD5E1",
+    "conferencia_mesa_taxa_valor": "#0043CC",
+    "conferencia_mesa_aviso_bg": "#F0FDFA",
+    "conferencia_mesa_aviso_borda": "#99F6E4",
+    "conferencia_mesa_aviso_glifo": "#0F766E",
+    "conferencia_mesa_seguro_glifo": "#16A34A",
+    "conferencia_mesa_seguro_texto": "#94A3B8",
+    # ---- Receber Pagamento (`views/pagamento_view.py`, §9.25) ----
+    # Ver o comentário gêmeo em TEMA_ESCURO. No claro o arranjo é o pastel com o
+    # glifo escuro, e o card escolhido segue o `acento` desta paleta (azul), como
+    # o cartão de impressora.
+    "pagamento_cartao_bg": "#FFFFFF",
+    "pagamento_cartao_borda": "#E2E1D9",
+    "pagamento_badge_bg": "#FEF3C7",
+    "pagamento_badge_borda": "#FDE68A",
+    "pagamento_badge_glifo": "#B45309",
+    "pagamento_rotulo": "#64748B",
+    "pagamento_divisor": "#EFEEE8",
+    "pagamento_total_bg": "#FFFBEB",
+    "pagamento_total_borda": "#FDE68A",
+    "pagamento_total_texto": "#B45309",
+    "pagamento_opcao_bg": "#FAF9F5",
+    "pagamento_opcao_borda": "#E2E1D9",
+    "pagamento_opcao_texto": "#64748B",
+    "pagamento_opcao_glifo": "#64748B",
+    "pagamento_opcao_ativa_bg": "#EFF4FF",
+    "pagamento_opcao_ativa_borda": "#0055FF",
+    "pagamento_opcao_ativa_glifo": "#0055FF",
+    "pagamento_campo_bg": "#FAF9F5",
+    "pagamento_troco_bg": "#FAF9F5",
+    "pagamento_troco_texto": "#DC2626",
+    "pagamento_comissao_bg": "#FAF9F5",
+    "pagamento_comissao_borda": "#E2E1D9",
+    "pagamento_avatar_bg": "#FEF3C7",
+    "pagamento_avatar_glifo": "#B45309",
+    "pagamento_comissao_paga_bg": "#F0FDF4",
+    "pagamento_comissao_paga_borda": "#BBF7D0",
+    "pagamento_comissao_paga_texto": "#15803D",
+    "pagamento_comissao_pendente_bg": "#FFFBEB",
+    "pagamento_comissao_pendente_borda": "#FDE68A",
+    "pagamento_comissao_pendente_texto": "#B45309",
 }

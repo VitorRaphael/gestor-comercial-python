@@ -39,7 +39,29 @@ FORMAS_MAQUININHA = (FormaPagamento.CREDITO, FormaPagamento.DEBITO, FormaPagamen
 # Sangria e despesa tiram dinheiro da gaveta, então passam pelo gerente; reforço
 # não trava a operação do balcão.
 TIPOS_QUE_EXIGEM_GERENTE = (TipoMovimento.SANGRIA, TipoMovimento.DESPESA)
-TIPOS_QUE_SAEM_DA_GAVETA = (TipoMovimento.SANGRIA, TipoMovimento.DESPESA)
+# O repasse de comissão (§9.25) sai da gaveta como os outros dois: é dinheiro
+# que estava lá e foi para a mão do garçom. Fora desta tupla, o saldo esperado
+# mandaria contar um dinheiro que não está mais na gaveta.
+TIPOS_QUE_SAEM_DA_GAVETA = (
+    TipoMovimento.SANGRIA,
+    TipoMovimento.DESPESA,
+    TipoMovimento.COMISSAO,
+)
+
+# Quem lança o repasse é a tela de pagamento, por `registrar_repasse_comissao`.
+# Pelo lançamento manual ele não entra: uma comissão digitada à mão na gaveta
+# não teria comanda nenhuma do outro lado, e o total de comissões do turno
+# deixaria de bater com o das contas.
+TIPOS_FORA_DO_LANCAMENTO_MANUAL = {
+    TipoMovimento.CONSUMO_FUNCIONARIO: (
+        "Consumo de funcionário é registrado como pagamento da comanda "
+        "(forma Consumo Interno), não como movimento de caixa."
+    ),
+    TipoMovimento.COMISSAO: (
+        "O repasse de comissão é registrado no recebimento da conta, "
+        "no card do garçom — não como movimento de caixa."
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -54,12 +76,19 @@ class ResumoCaixa:
     reforcos: Decimal
     sangrias: Decimal
     despesas: Decimal
+    # O que saiu da gaveta como repasse de comissão ao garçom (§9.25).
+    comissoes: Decimal
     saldo_esperado: Decimal
     valor_contado_dinheiro: Decimal | None
     diferenca_dinheiro: Decimal | None
     valor_contado_maquininha: Decimal | None
     diferenca_maquininha: Decimal | None
     quantidade_comandas: int
+    # Quanto das comandas fechadas no turno foi taxa de serviço (§9.23). Já está
+    # DENTRO de `total_dinheiro`/`total_maquininha` — o cliente pagou a conta
+    # com a taxa junto —, então é uma fatia do faturamento, nunca uma parcela a
+    # somar por cima dele.
+    total_taxa_servico: Decimal
 
     @property
     def diferenca_total(self) -> Decimal | None:
@@ -222,6 +251,8 @@ class FechamentoGaveta:
     total_faturado: Decimal
     saldo_apurado: Decimal
     diferenca: Decimal | None
+    # A fatia do `total_faturado` que foi taxa de serviço (§9.23).
+    total_taxa_servico: Decimal
 
 
 @dataclass(frozen=True)
@@ -551,15 +582,14 @@ class CaixaService:
     ) -> MovimentoCaixa:
         if not isinstance(tipo, TipoMovimento):
             raise RegraDeNegocioError("Selecione o tipo do movimento: sangria, reforço ou despesa.")
-        if tipo is TipoMovimento.CONSUMO_FUNCIONARIO:
-            # Consumo interno já é rastreado inteiro por PagamentoService.registrar
-            # (forma=CONSUMO_INTERNO): cria o Pagamento, soma em saldo_devedor e
-            # nunca mexe na gaveta, porque nunca foi dinheiro. Um MovimentoCaixa
-            # manual deste tipo descontaria a mesma dívida uma segunda vez.
-            raise RegraDeNegocioError(
-                "Consumo de funcionário é registrado como pagamento da comanda "
-                "(forma Consumo Interno), não como movimento de caixa."
-            )
+        # Consumo interno já é rastreado inteiro por PagamentoService.registrar
+        # (forma=CONSUMO_INTERNO): cria o Pagamento, soma em saldo_devedor e
+        # nunca mexe na gaveta, porque nunca foi dinheiro. Um MovimentoCaixa
+        # manual deste tipo descontaria a mesma dívida uma segunda vez. O
+        # repasse de comissão tem dono parecido: a conta que o gerou.
+        recusa = TIPOS_FORA_DO_LANCAMENTO_MANUAL.get(tipo)
+        if recusa is not None:
+            raise RegraDeNegocioError(recusa)
         if tipo in TIPOS_QUE_EXIGEM_GERENTE:
             usuario = self.auth.exigir_gerente()
         else:
@@ -580,6 +610,39 @@ class CaixaService:
         )
         self.uow.movimentos.salvar(movimento)
         self.uow.commit()
+        return movimento
+
+    def registrar_repasse_comissao(self, valor: Decimal, descricao: str) -> MovimentoCaixa:
+        """A saída da gaveta quando a comissão do garçom é paga na hora (§9.25).
+
+        Não passa por `registrar_movimento` de propósito, e não por ser parecido:
+        o lançamento manual exige GERENTE para tudo que sai da gaveta, e este
+        aqui é consequência de um recebimento que o próprio operador acabou de
+        fazer — pedir a senha do gerente a cada mesa paga em dinheiro é o tipo
+        de barreira que faz o balcão parar de usar o sistema. Quem decide se o
+        repasse acontece é o `PagamentoService`, que só chama aqui quando a
+        conta entrou em dinheiro e a comissão foi marcada como paga.
+
+        Sem commit: quem chama grava a marca da comissão e o movimento no MESMO
+        commit — uma comissão marcada como paga sem a saída da gaveta faria o
+        fechamento do turno sobrar dinheiro, e a saída sem a marca faria o
+        garçom ser pago duas vezes.
+        """
+        usuario = self.auth.usuario_atual()
+        montante = self._valor_monetario(valor, "valor da comissão")
+        if montante <= ZERO:
+            raise RegraDeNegocioError("O valor da comissão deve ser maior que zero.")
+
+        caixa = self.buscar_aberto()
+        movimento = MovimentoCaixa(
+            tipo=TipoMovimento.COMISSAO,
+            valor=montante,
+            descricao=self._texto_ou_nulo(descricao),
+            registrado_em=datetime.now(),
+            caixa_id=caixa.id,
+            usuario_id=usuario.id,
+        )
+        self.uow.movimentos.salvar(movimento)
         return movimento
 
     def listar_movimentos(self, caixa_id: int) -> list[MovimentoCaixa]:
@@ -643,7 +706,7 @@ class CaixaService:
         movimentos = self.uow.movimentos.listar_por_caixa(caixa_id)
         pagamentos = self.uow.pagamentos.listar_por_caixa(caixa_id)
 
-        reforcos = sangrias = despesas = ZERO
+        reforcos = sangrias = despesas = comissoes = ZERO
         for movimento in movimentos:
             if movimento.tipo is TipoMovimento.REFORCO:
                 reforcos += dinheiro(movimento.valor)
@@ -651,6 +714,8 @@ class CaixaService:
                 sangrias += dinheiro(movimento.valor)
             elif movimento.tipo is TipoMovimento.DESPESA:
                 despesas += dinheiro(movimento.valor)
+            elif movimento.tipo is TipoMovimento.COMISSAO:
+                comissoes += dinheiro(movimento.valor)
 
         em_dinheiro = self._da_forma(pagamentos, FormaPagamento.DINHEIRO)
         valor_contado_dinheiro = (
@@ -663,6 +728,12 @@ class CaixaService:
         )
         saldo_esperado = self._saldo_esperado(caixa, movimentos, em_dinheiro)
         total_maquininha = self._somar(self._da_forma(pagamentos, *FORMAS_MAQUININHA))
+        # Comandas efetivamente fechadas (pagas) no turno — mesma métrica que o
+        # dashboard financeiro mostra como "COMANDAS" ao lado do saldo esperado
+        # — e a taxa de serviço delas, na mesma consulta (§9.23). Comandas
+        # ainda abertas/em conferência não contam porque não são venda
+        # concluída.
+        quantidade_comandas, taxa_servico = self.uow.comandas.fechadas_do_caixa(caixa_id)
 
         return ResumoCaixa(
             caixa_id=caixa.id,
@@ -678,6 +749,7 @@ class CaixaService:
             reforcos=reforcos,
             sangrias=sangrias,
             despesas=despesas,
+            comissoes=comissoes,
             saldo_esperado=saldo_esperado,
             valor_contado_dinheiro=valor_contado_dinheiro,
             diferenca_dinheiro=(
@@ -691,13 +763,8 @@ class CaixaService:
                 if valor_contado_maquininha is None
                 else dinheiro(valor_contado_maquininha - total_maquininha)
             ),
-            # Comandas efetivamente fechadas (pagas) no turno — mesma métrica
-            # que o dashboard financeiro mostra como "COMANDAS" ao lado do
-            # saldo esperado. Comandas ainda abertas/em conferência não contam
-            # porque não representam venda concluída.
-            quantidade_comandas=self.uow.comandas.contar_por_caixa_e_status(
-                caixa_id, StatusComanda.FECHADA
-            ),
+            quantidade_comandas=quantidade_comandas,
+            total_taxa_servico=dinheiro(taxa_servico),
         )
 
     # ------------------------------------------------------------------
@@ -1008,6 +1075,7 @@ class CaixaService:
             total_faturado=_faturamento_total_de(resumo),
             saldo_apurado=dinheiro(saldo_apurado),
             diferenca=resumo.diferenca_total,
+            total_taxa_servico=resumo.total_taxa_servico,
         )
 
     def fechamento_da_gaveta_do_periodo(self, caixa_ids: Iterable[int]) -> FechamentoGaveta:
@@ -1018,6 +1086,7 @@ class CaixaService:
         ids = list(caixa_ids)
         total_faturado = ZERO
         saldo_apurado = ZERO
+        taxa_servico = ZERO
         diferenca_acumulada = ZERO
         diferenca_valida = bool(ids)
 
@@ -1025,6 +1094,7 @@ class CaixaService:
         for gaveta in gavetas:
             total_faturado += gaveta.total_faturado
             saldo_apurado += gaveta.saldo_apurado
+            taxa_servico += gaveta.total_taxa_servico
             if gaveta.diferenca is None:
                 diferenca_valida = False
             else:
@@ -1045,6 +1115,7 @@ class CaixaService:
             total_faturado=dinheiro(total_faturado),
             saldo_apurado=dinheiro(saldo_apurado),
             diferenca=dinheiro(diferenca_acumulada) if diferenca_valida else None,
+            total_taxa_servico=dinheiro(taxa_servico),
         )
 
     def ranking_por_atendente(self, caixa_ids: Iterable[int]) -> list[ItemRankingAtendente]:

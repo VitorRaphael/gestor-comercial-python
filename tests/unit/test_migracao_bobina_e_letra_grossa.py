@@ -259,14 +259,21 @@ def test_banco_novo_chega_a_head_com_as_colunas(tmp_path, monkeypatch):
     transação já pode vir aberta por uma revisão anterior, e o `BEGIN` da
     migração não pode tentar abrir uma segunda."""
     from alembic import command
+    from alembic.script import ScriptDirectory
 
     arquivo = tmp_path / "novo.db"
     config = _config(arquivo, monkeypatch)
     command.upgrade(config, "head")
 
+    # A head muda a cada migração nova (a `e4b8c2a6d913` do §9.23 veio depois
+    # desta): o que se cobra é o banco ter chegado ao fim do caminho, com esta
+    # revisão DENTRO dele.
+    roteiro = ScriptDirectory.from_config(config)
+    cabeca = roteiro.get_current_head()
     engine = sa.create_engine(f"sqlite:///{arquivo}")
     try:
         assert {"colunas", "bobina_mm", "letra_grossa"} <= _colunas(engine)
-        assert _versao(engine) == REVISAO
+        assert _versao(engine) == cabeca
+        assert REVISAO in {revisao.revision for revisao in roteiro.walk_revisions("base", cabeca)}
     finally:
         engine.dispose()

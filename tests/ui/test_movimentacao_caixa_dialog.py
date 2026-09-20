@@ -31,6 +31,7 @@ from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QDialog, QWidget
 
 from gestor_comercial.domain.enums import TipoMovimento
+from gestor_comercial.services.caixa_service import TIPOS_FORA_DO_LANCAMENTO_MANUAL
 from gestor_comercial.services.dinheiro import LIMITE, dinheiro
 from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.theme import tokens
@@ -94,12 +95,16 @@ def _clicar(modal: MovimentacaoCaixaDialog, rotulo: str) -> None:
 
 
 def test_as_movimentacoes_manuais_sao_exatamente_as_do_enum_menos_consumo():
-    """`CONSUMO_FUNCIONARIO` fica de fora porque `registrar_movimento` o recusa:
-    consumo interno já é rastreado como pagamento da comanda, e um movimento
-    manual descontaria a mesma dívida uma segunda vez. Oferecer o botão seria
-    oferecer um erro — e é este teste que segura o dia em que alguém "completar"
-    a lista com o quarto membro do enum."""
-    esperado = set(TipoMovimento) - {TipoMovimento.CONSUMO_FUNCIONARIO}
+    """Dois tipos ficam de fora porque `registrar_movimento` os recusa, e a
+    lista de recusas do service é a MESMA que decide os botões daqui.
+
+    `CONSUMO_FUNCIONARIO` porque o consumo interno já é rastreado como pagamento
+    da comanda, e um movimento manual descontaria a mesma dívida uma segunda
+    vez; `COMISSAO` (§9.25) porque o repasse nasce no recebimento da conta, e um
+    lançado à mão não teria comanda nenhuma do outro lado. Oferecer o botão
+    seria oferecer um erro — e é este teste que segura o dia em que alguém
+    "completar" a lista com um membro novo do enum."""
+    esperado = set(TipoMovimento) - set(TIPOS_FORA_DO_LANCAMENTO_MANUAL)
 
     assert set(OPERACOES) == esperado
 

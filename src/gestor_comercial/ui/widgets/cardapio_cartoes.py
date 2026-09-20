@@ -126,10 +126,46 @@ GLIFO_SINAL = "sinal"
 GLIFO_COLUNAS = "colunas"
 GLIFO_LETRAS = "letras"
 GLIFO_NEGRITO = "negrito"
+# Os três do cartão de conferência da mesa (§9.23): a folha com o visto do
+# cabeçalho, o cadeado do aviso de itens travados e o escudo de "AÇÃO SEGURA".
+# O `🔒` e o `🛡` do pedido moram no bloco de emoji: sairiam coloridos, chapados
+# e fora do tema, a mesma armadilha do cadeado do PIN (§9.10).
+GLIFO_DOCUMENTO_VISTO = "documento_visto"
+GLIFO_CADEADO = "cadeado"
+GLIFO_ESCUDO = "escudo"
+# Os quatro da tela "Receber Pagamento" (§9.25): as formas de pagamento e o
+# avatar do garçom no card de comissão. Os emojis equivalentes (💵 💳 📱 👤)
+# sairiam coloridos e chapados, como sempre.
+GLIFO_CEDULA = "cedula"
+GLIFO_CARTAO = "cartao"
+GLIFO_CELULAR = "celular"
+GLIFO_PESSOA = "pessoa"
 
 # Os glifos são traçados numa grade de 24x24 e escalados para o tamanho pedido,
 # então um desenho só serve a insígnia de 40px e a seta de 12px.
 _GRADE = 24.0
+
+
+def _tracar_folha(p: QPainterPath) -> None:
+    """A folha com a orelha dobrada, sem nada dentro.
+
+    Dois glifos a usam (as linhas de texto e o visto da conferência), e cada um
+    monta o PRÓPRIO caminho com ela: o `lru_cache` devolve o mesmo
+    `QPainterPath` a cada chamada, então acrescentar o visto ao caminho da folha
+    de texto acenderia o visto também no badge da impressora.
+    """
+    p.moveTo(14.0, 2.5)
+    p.lineTo(6.5, 2.5)
+    p.quadTo(4.5, 2.5, 4.5, 4.5)
+    p.lineTo(4.5, 19.5)
+    p.quadTo(4.5, 21.5, 6.5, 21.5)
+    p.lineTo(17.5, 21.5)
+    p.quadTo(19.5, 21.5, 19.5, 19.5)
+    p.lineTo(19.5, 8.0)
+    p.closeSubpath()
+    p.moveTo(14.0, 2.5)
+    p.lineTo(14.0, 8.0)
+    p.lineTo(19.5, 8.0)
 
 
 @lru_cache(maxsize=None)
@@ -318,18 +354,7 @@ def _caminho_do_glifo(nome: str) -> QPainterPath:
         p.addRect(QRectF(6.5, 14.0, 11.0, 6.5))
     elif nome == GLIFO_ARQUIVO_TEXTO:
         # A folha com a orelha dobrada e três linhas de texto.
-        p.moveTo(14.0, 2.5)
-        p.lineTo(6.5, 2.5)
-        p.quadTo(4.5, 2.5, 4.5, 4.5)
-        p.lineTo(4.5, 19.5)
-        p.quadTo(4.5, 21.5, 6.5, 21.5)
-        p.lineTo(17.5, 21.5)
-        p.quadTo(19.5, 21.5, 19.5, 19.5)
-        p.lineTo(19.5, 8.0)
-        p.closeSubpath()
-        p.moveTo(14.0, 2.5)
-        p.lineTo(14.0, 8.0)
-        p.lineTo(19.5, 8.0)
+        _tracar_folha(p)
         p.moveTo(8.5, 9.5)
         p.lineTo(10.5, 9.5)
         p.moveTo(8.5, 13.5)
@@ -412,6 +437,62 @@ def _caminho_do_glifo(nome: str) -> QPainterPath:
         p.quadTo(6.5, 4.0, 7.5, 4.0)
         p.lineTo(13.5, 4.0)
         p.arcTo(QRectF(9.5, 4.0, 8.0, 8.0), 90.0, -180.0)
+    elif nome == GLIFO_DOCUMENTO_VISTO:
+        # A mesma folha, com o visto no lugar do texto: "conta conferida".
+        _tracar_folha(p)
+        p.moveTo(8.5, 14.5)
+        p.lineTo(11.0, 17.0)
+        p.lineTo(15.5, 12.0)
+    elif nome == GLIFO_CADEADO:
+        # O corpo, a alça em arco por cima e o buraco da chave. O arco vai de
+        # 180° a 0° com varredura negativa: passa por cima, como no `GLIFO_LETRAS`.
+        p.addRoundedRect(QRectF(5.0, 10.5, 14.0, 10.5), 2.5, 2.5)
+        p.moveTo(8.0, 10.5)
+        p.lineTo(8.0, 7.5)
+        p.arcTo(QRectF(8.0, 3.5, 8.0, 8.0), 180.0, -180.0)
+        p.lineTo(16.0, 10.5)
+        p.moveTo(12.0, 14.5)
+        p.lineTo(12.0, 17.0)
+    elif nome == GLIFO_CEDULA:
+        # A nota com o valor no meio e as duas marcas d'água nas pontas.
+        p.addRoundedRect(QRectF(2.5, 6.5, 19.0, 11.0), 2.0, 2.0)
+        p.addEllipse(QPointF(12.0, 12.0), 2.6, 2.6)
+        p.moveTo(6.0, 10.5)
+        p.lineTo(6.0, 13.5)
+        p.moveTo(18.0, 10.5)
+        p.lineTo(18.0, 13.5)
+    elif nome == GLIFO_CARTAO:
+        # O plástico com a tarja e o retângulo do chip.
+        p.addRoundedRect(QRectF(2.5, 5.0, 19.0, 14.0), 2.5, 2.5)
+        p.moveTo(2.5, 9.5)
+        p.lineTo(21.5, 9.5)
+        p.addRoundedRect(QRectF(6.0, 13.0, 5.0, 3.0), 0.8, 0.8)
+    elif nome == GLIFO_CELULAR:
+        # O aparelho do PIX: corpo, alto-falante e a barra de baixo.
+        p.addRoundedRect(QRectF(6.5, 2.5, 11.0, 19.0), 2.5, 2.5)
+        p.moveTo(10.5, 5.5)
+        p.lineTo(13.5, 5.5)
+        p.moveTo(10.0, 18.5)
+        p.lineTo(14.0, 18.5)
+    elif nome == GLIFO_PESSOA:
+        # Cabeça e ombros: o funcionário do consumo interno e o avatar do
+        # garçom no card de comissão.
+        p.addEllipse(QPointF(12.0, 8.0), 3.4, 3.4)
+        p.moveTo(4.8, 20.5)
+        p.quadTo(4.8, 14.0, 12.0, 14.0)
+        p.quadTo(19.2, 14.0, 19.2, 20.5)
+    elif nome == GLIFO_ESCUDO:
+        # O escudo de ombros retos que afina até a ponta, com o visto dentro.
+        p.moveTo(12.0, 2.5)
+        p.lineTo(19.5, 5.5)
+        p.lineTo(19.5, 11.0)
+        p.quadTo(19.5, 18.0, 12.0, 21.5)
+        p.quadTo(4.5, 18.0, 4.5, 11.0)
+        p.lineTo(4.5, 5.5)
+        p.closeSubpath()
+        p.moveTo(8.8, 12.0)
+        p.lineTo(11.0, 14.2)
+        p.lineTo(15.2, 9.8)
     return p
 
 

@@ -765,8 +765,13 @@ class ImpressaoService:
         documento.append(BlocoTexto(cupom.linha_de_valor("Subtotal", subtotal, largura)))
 
         if comanda.taxa_servico_percentual:
-            valor_taxa = dinheiro(total_a_pagar - subtotal + dinheiro(comanda.valor_desconto or ZERO))
-            rotulo = f"Taxa de serviço ({cupom.moeda(comanda.taxa_servico_percentual)}%)"
+            # A taxa GRAVADA na comanda (§9.23) — o mesmo número que o total a
+            # pagar soma e que o fechamento do dia conta —, e não deduzida de
+            # trás para frente a partir do total: a dedução dependia de o
+            # desconto nunca zerar a conta, e uma segunda conta dentro do cupom
+            # é o que faria o papel divergir da tela.
+            valor_taxa = dinheiro(comanda.valor_taxa_servico or ZERO)
+            rotulo = f"Taxa de serviço ({cupom.percentual(comanda.taxa_servico_percentual)}%)"
             documento.append(BlocoTexto(cupom.linha_de_valor(rotulo, valor_taxa, largura)))
         if comanda.valor_desconto:
             documento.append(BlocoTexto(cupom.linha_de_valor("Desconto", -dinheiro(comanda.valor_desconto), largura)))
@@ -854,11 +859,22 @@ class ImpressaoService:
                 )
             )
         )
+        # A fatia do total que foi taxa de serviço (§9.23) — "inclusa" no
+        # rótulo porque ela já está nas linhas acima, e o gerente que repassa a
+        # taxa aos garçons não pode somá-la de novo.
+        documento.append(
+            BlocoTexto(
+                cupom.linha_de_valor("Taxa de serviço inclusa", resumo.total_taxa_servico, largura)
+            )
+        )
 
         documento.append(BlocoTexto(cupom.separador(largura, titulo="GAVETA")))
         documento.append(BlocoTexto(cupom.linha_de_valor("Reforços", resumo.reforcos, largura)))
         documento.append(BlocoTexto(cupom.linha_de_valor("Sangrias", resumo.sangrias, largura)))
         documento.append(BlocoTexto(cupom.linha_de_valor("Despesas", resumo.despesas, largura)))
+        documento.append(
+            BlocoTexto(cupom.linha_de_valor("Comissões repassadas", resumo.comissoes, largura))
+        )
 
         documento.append(BlocoTexto(cupom.separador(largura)))
         documento.append(

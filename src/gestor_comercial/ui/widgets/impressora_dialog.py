@@ -96,8 +96,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 
-from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QPaintEvent, QResizeEvent, QShowEvent
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QKeyEvent, QMouseEvent, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -125,8 +125,6 @@ from gestor_comercial.domain.impressora import (
 )
 from gestor_comercial.services.cardapio_service import PORTA_REDE_MAXIMA
 from gestor_comercial.services.impressao_service import DestinoLocal
-from gestor_comercial.ui.theme.controller import ThemeController
-from gestor_comercial.ui.theme.cores import cor_do_token
 from gestor_comercial.ui.widgets import cartao_modal
 from gestor_comercial.ui.widgets.cardapio_cartoes import (
     GLIFO_ARQUIVO_TEXTO,
@@ -146,6 +144,7 @@ from gestor_comercial.ui.widgets.cardapio_cartoes import (
 )
 from gestor_comercial.ui.widgets.cartao_modal import Backdrop
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
+from gestor_comercial.ui.widgets.interruptor import Interruptor
 from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
 
 # O teto do nome. A coluna é `String(80)`; o mockup pede 40, que é o que cabe
@@ -651,55 +650,6 @@ class _CartaoConexao(QFrame):
         super().mousePressEvent(event)
 
 
-class _Interruptor(QWidget):
-    """O desenho do interruptor. Não recebe clique: quem recebe é o card inteiro.
-
-    Pintado, e não um `QCheckBox` com QSS: o indicador de check do Qt não faz
-    trilho com bolinha, e a imagem de um interruptor por tema viraria arquivo a
-    trocar a cada alternância (§3.15). A cor é lida a cada pintura.
-    """
-
-    LARGURA_PX = 38
-    ALTURA_PX = 22
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("impDialogInterruptor")
-        self.setFixedSize(self.LARGURA_PX, self.ALTURA_PX)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._ligado = True
-
-    @property
-    def ligado(self) -> bool:
-        return self._ligado
-
-    def definir(self, ligado: bool) -> None:
-        if ligado != self._ligado:
-            self._ligado = ligado
-            self.update()
-
-    @nao_deixa_escapar()
-    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
-        tokens = ThemeController.instancia().tokens_atuais
-        sufixo = "ligado" if self._ligado else "desligado"
-        trilho = cor_do_token(tokens[f"impressora_interruptor_{sufixo}"])
-        botao = cor_do_token(tokens[f"impressora_interruptor_botao_{sufixo}"])
-        area = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        raio = area.height() / 2.0
-        folga = 3.0
-        lado = area.height() - 2 * folga
-        x = area.right() - folga - lado if self._ligado else area.left() + folga
-
-        pintor = QPainter(self)
-        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pintor.setPen(Qt.PenStyle.NoPen)
-        pintor.setBrush(trilho)
-        pintor.drawRoundedRect(area, raio, raio)
-        pintor.setBrush(botao)
-        pintor.drawEllipse(QRectF(x, area.top() + folga, lado, lado))
-        pintor.end()
-
-
 class _CartaoSituacao(QFrame):
     """"Impressora ativa" com o sinal e o interruptor. O card inteiro é o alvo.
 
@@ -729,29 +679,29 @@ class _CartaoSituacao(QFrame):
         self._texto.setObjectName("impDialogSituacaoTexto")
         self._texto.setProperty("ativa", True)
         linha.addWidget(self._texto, 1)
-        self.interruptor = _Interruptor()
+        self.interruptor = Interruptor()
         linha.addWidget(self.interruptor, 0, Qt.AlignmentFlag.AlignVCenter)
 
-    def _com_a_frase_mais_longa(self, medida: QSize) -> QSize:
-        """A medida como se o rótulo mostrasse a frase MAIS LONGA dos dois estados.
+    @nao_deixa_escapar(retorno=QSize(0, 0))
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 (override Qt)
+        """O mínimo como se o rótulo mostrasse a frase MAIS LONGA dos dois estados.
 
         Sem isto o card pedia 242px ligado e 291px desligado: desligar a
         impressora fazia a linha inteira se redistribuir e os botões de
-        espessura andavam debaixo do dedo — e, no cartão de 600px do §9.19,
-        "Impressora desativada" saía cortada (o teste só media o estado ligado).
-        Vale para o `sizeHint` E para o `minimumSizeHint`: só o primeiro não
-        basta, porque sem espaço sobrando o layout encolhe até o mínimo (medido).
-        A métrica é a do próprio rótulo, que já passou pelo QSS: fonte de QSS
-        vence `setFont`, e medir outra fonte mediria outra coisa (§9.8).
+        espessura andavam debaixo do dedo (160 → 142px, medido) — e, no cartão
+        de 600px do §9.19, "Impressora desativada" saía cortada (o teste só
+        media o estado ligado). Basta o MÍNIMO, e não o `sizeHint` junto: o
+        layout usa como tamanho preferido o maior dos dois, então um mínimo fixo
+        fixa os dois (a checagem por mutação mostrou que o `sizeHint` ao lado
+        não mudava nada, e ele saiu). A métrica é a do próprio rótulo, que já
+        passou pelo QSS: fonte de QSS vence `setFont`, e medir outra fonte
+        mediria outra coisa (§9.8).
         """
+        medida = super().minimumSizeHint()
         metricas = self._texto.fontMetrics()
         maior = max(metricas.horizontalAdvance(frase) for frase in (self.ATIVA, self.INATIVA))
         extra = maior - metricas.horizontalAdvance(self._texto.text())
         return QSize(medida.width() + extra, medida.height())
-
-
-    def minimumSizeHint(self) -> QSize:  # noqa: N802 (override Qt)
-        return self._com_a_frase_mais_longa(super().minimumSizeHint())
 
     def definir(self, ativa: bool) -> None:
         self.interruptor.definir(ativa)
@@ -1395,15 +1345,14 @@ class ImpressoraDialog(QDialog):
     def _bobina_clicada(self) -> None:
         """Troca a bobina e SUGERE as colunas dela — a de antes fica lembrada.
 
-        A bobina que já estava escolhida não faz nada: clicá-la de novo não pode
-        trocar as colunas que o gerente acabou de acertar.
+        Clicar a bobina que já estava escolhida guarda e devolve as mesmas
+        colunas: não troca nada, sem precisar de um `if` para isso (a checagem
+        por mutação mostrou o `if` redundante, e ele saiu).
         """
         botao = self.sender()
         if not isinstance(botao, QPushButton):
             return
         bobina = Bobina(str(botao.property("bobina")))
-        if bobina is self._bobina:
-            return
         self._colunas_da_bobina[self._bobina] = self._colunas
         self._bobina = bobina
         self._colunas = self._colunas_da_bobina[bobina]

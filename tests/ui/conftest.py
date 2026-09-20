@@ -39,6 +39,7 @@ from gestor_comercial.ui.views.impressoras_view import ImpressorasView
 from gestor_comercial.ui.views.loja_hub_view import LojaHubView
 from gestor_comercial.ui.views.login_view import LoginView
 from gestor_comercial.ui.views.mesas_view import MesasView
+from gestor_comercial.ui.views.pagamento_view import PagamentoView
 from gestor_comercial.ui.views.relatorios_view import RelatoriosView
 
 
@@ -122,6 +123,7 @@ def todas_as_telas(
         "Login": LoginView(auth),
         "Mesas": MesasView(comandas),
         "Comanda": ComandaView(comandas, cardapio, impressao, funcionarios),
+        "Pagamento": PagamentoView(pagamentos, impressao),
         "Caixa": CaixaView(caixas_service, impressao),
         "Histórico de Caixa": HistoricoCaixaView(caixas_service, auth, impressao, funcionarios),
         "Dashboard Mensal": DashboardMensalView(caixas_service, funcionarios),

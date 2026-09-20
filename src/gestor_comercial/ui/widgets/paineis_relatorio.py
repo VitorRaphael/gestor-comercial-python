@@ -31,6 +31,11 @@ from gestor_comercial.ui.formatacao import formatar_reais, formatar_reais_com_si
 from gestor_comercial.ui.widgets.layout_utils import limpar_layout
 
 _SEM_VALOR = "—"
+
+# O rótulo da taxa de serviço onde ela aparece como fatia do faturamento
+# (§9.23): o painel dos dois relatórios e o card "Recebimentos" do Caixa. Uma
+# constante só, para "inclusa" nunca sumir de um lado e ficar no outro.
+ROTULO_TAXA_INCLUSA = "Taxa de serviço (inclusa)"
 _MENSAGEM_SEM_ATENDENTE = "Nenhuma venda vinculada a atendente neste período."
 
 
@@ -69,8 +74,12 @@ def linha_barra_proporcao(nome: str, valor: Decimal, percentual: Decimal) -> QVB
 
 
 class PainelGaveta(QFrame):
-    """"FECHAMENTO DA GAVETA": identificação do período, total faturado, saldo
-    apurado e a diferença (quebra/sobra) com sinal."""
+    """"FECHAMENTO DA GAVETA": identificação do período, total faturado, a taxa
+    de serviço dentro dele, saldo apurado e a diferença (quebra/sobra) com sinal.
+
+    A taxa (§9.23) vem logo abaixo do faturado e diz "inclusa" no rótulo: ela é
+    uma FATIA do total, e quem somasse as duas linhas contaria a taxa duas vezes.
+    """
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -89,9 +98,11 @@ class PainelGaveta(QFrame):
         layout.addWidget(self._label_identificacao)
 
         linha_faturado, self._label_faturado = _linha_rotulo_valor("Total faturado")
+        linha_taxa, self._label_taxa = _linha_rotulo_valor(ROTULO_TAXA_INCLUSA)
         linha_saldo, self._label_saldo = _linha_rotulo_valor("Saldo apurado")
         linha_diferenca, self._label_diferenca = _linha_rotulo_valor("Diferença (quebra/sobra)")
         layout.addLayout(linha_faturado)
+        layout.addLayout(linha_taxa)
         layout.addLayout(linha_saldo)
         layout.addLayout(linha_diferenca)
         layout.addStretch()
@@ -99,6 +110,7 @@ class PainelGaveta(QFrame):
     def preencher(self, gaveta: FechamentoGaveta) -> None:
         self._label_identificacao.setText(gaveta.identificacao)
         self._label_faturado.setText(formatar_reais(gaveta.total_faturado))
+        self._label_taxa.setText(formatar_reais(gaveta.total_taxa_servico))
         self._label_saldo.setText(formatar_reais(gaveta.saldo_apurado))
         # Diferença é `None` quando o turno não teve as duas contagens da
         # conferência: aí não existe quebra nem sobra para afirmar, e o traço

@@ -107,6 +107,16 @@ def _impressora(tipo: TipoConexaoImpressora = TipoConexaoImpressora.WINDOWS, **c
 
 @pytest.fixture
 def abrir(qapp):
+    """Abre o cartão com a lista de destinos FALSA (`_listar`) por padrão.
+
+    Sem isto, cada cartão aberto manda o `ImpressoraDialog` perguntar ao
+    Windows de verdade (`ImpressaoService.listar_destinos_locais`) numa thread,
+    e o teste espera o spooler responder — o teto é de 3s por espera. Medido
+    nesta máquina, a suíte de UI inteira passou de ~2,5 min para mais de 20 só
+    por causa disso, e o resultado ainda dependia de quais impressoras estavam
+    ligadas no dia. Quem testa o caminho real passa a própria função em
+    `listar=`.
+    """
     criados: list[ImpressoraDialog] = []
 
     def _abrir(
@@ -115,7 +125,7 @@ def abrir(qapp):
         nomes=("Balcão", "Caixa 01"),
         outra_padrao_ativa: bool = False,
         salvar=None,
-        listar=None,
+        listar=_listar,
         pai: QWidget | None = None,
     ) -> ImpressoraDialog:
         if impressora is None:
@@ -1127,6 +1137,14 @@ def test_abre_com_o_foco_no_nome_sem_selecionar(abrir, qapp):
     estado: dict[str, object] = {}
 
     def ler() -> None:
+        # Espera o foco ASSENTAR, em vez de ler num instante fixo: o
+        # `QDialog::setVisible` manda um `FocusIn` "de Tab" depois do
+        # `showEvent` (§9.19), e sob carga esse evento chega depois dos 30ms do
+        # disparo — o teste piscava vermelho na suíte cheia e passava sozinho.
+        for _ in range(200):
+            if modal._campo_nome.hasFocus():
+                break
+            qapp.processEvents()
         estado["foco"] = modal._campo_nome.hasFocus()
         estado["selecionado"] = modal._campo_nome.hasSelectedText()
         estado["cursor"] = modal._campo_nome.cursorPosition()
@@ -1219,10 +1237,18 @@ def test_nada_fica_espremido(qapp, com_fonte, claro, modo, conexao, ativa):
     assert max(larguras_espessura) - min(larguras_espessura) <= 1, larguras_espessura
 
 
-def test_desligar_a_impressora_nao_mexe_na_linha_da_espessura(qapp, com_fonte):
-    """O card de Situação pede a largura da frase mais longa nos dois estados.
-    Sem isso, desligar redistribuía a linha e os botões de espessura andavam
-    debaixo do dedo (160 → 142px, medido)."""
+@pytest.mark.parametrize("largura", [ImpressoraDialog.LARGURA_CARTAO_PX, 680])
+def test_desligar_a_impressora_nao_mexe_na_linha_da_espessura(qapp, com_fonte, monkeypatch, largura):
+    """O card de Situação pede, como MÍNIMO, a largura da frase mais longa nos
+    dois estados. Sem isso, desligar redistribuía a linha e os botões de
+    espessura andavam debaixo do dedo (160 → 142px, medido a 680px).
+
+    Roda também a 680px porque a 720 a divisão 5:4 da linha já dá à Situação
+    292px, 1px acima da frase longa: ali o mínimo não é o que segura, e a
+    checagem por mutação mostrou que o teste só a 720 passava sem ele. É com a
+    folga acabando (outra fonte, outra escala do Windows, um cartão mais
+    estreito) que o mínimo trabalha."""
+    monkeypatch.setattr(ImpressoraDialog, "LARGURA_CARTAO_PX", largura)
     janela = QWidget()
     janela.resize(1366, 738)
     janela.show()

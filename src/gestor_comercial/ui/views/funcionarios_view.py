@@ -102,6 +102,7 @@ class FuncionariosView(QWidget):
         self._caixa_service = caixa_service
         self._funcionarios: list[Funcionario] = []
         self._saldos: dict[int, Decimal] = {}
+        self._comissoes: dict[int, Decimal] = {}
         self._filtro_status = _FILTRO_TODOS
         self._termo_busca = ""
         self._selecionado_id: int | None = None
@@ -170,8 +171,16 @@ class FuncionariosView(QWidget):
         self._kpi_cadastrados = _CardKpiFuncionarios("👥", "Cadastrados")
         self._kpi_ativos = _CardKpiFuncionarios("🪪", "Ativos")
         self._kpi_consumo = _CardKpiFuncionarios("💰", "Consumo em aberto")
+        # A contrapartida do consumo: o que a loja DEVE aos garçons (§9.25).
+        self._kpi_comissao = _CardKpiFuncionarios("🤝", "Comissão a repassar")
         self._kpi_pendencia = _CardKpiFuncionarios("⚠️", "Com pendência")
-        for card in (self._kpi_cadastrados, self._kpi_ativos, self._kpi_consumo, self._kpi_pendencia):
+        for card in (
+            self._kpi_cadastrados,
+            self._kpi_ativos,
+            self._kpi_consumo,
+            self._kpi_comissao,
+            self._kpi_pendencia,
+        ):
             grade.addWidget(card)
         return grade
 
@@ -214,6 +223,7 @@ class FuncionariosView(QWidget):
         self._painel_detalhe = _PainelDetalheFuncionario()
         self._painel_detalhe.editar_solicitado.connect(self._editar_id)
         self._painel_detalhe.baixa_solicitada.connect(self._quitar_id)
+        self._painel_detalhe.comissao_solicitada.connect(self._repassar_comissao_id)
         self._painel_detalhe.alternar_status_solicitado.connect(self._alternar_status_id)
         self._painel_detalhe.excluir_solicitado.connect(self._excluir_id)
         return self._painel_detalhe
@@ -228,6 +238,7 @@ class FuncionariosView(QWidget):
 
         self._funcionarios = self._funcionarios_service.listar_todos()
         self._saldos = self._carregar_saldos()
+        self._comissoes = self._carregar_comissoes()
         self._preencher_kpis()
         self._preencher_lista()
 
@@ -241,6 +252,19 @@ class FuncionariosView(QWidget):
             return {}
         return {linha.funcionario_id: linha.saldo for linha in saldos}
 
+    def _carregar_comissoes(self) -> dict[int, Decimal]:
+        """Quanto cada garçom tem de comissão a receber (§9.25).
+
+        Uma consulta para a tela inteira, indexada por funcionário — ler
+        pendência por linha seria o N+1 que o §3.6 caça. Sem gerente na sessão
+        a leitura nem é tentada: é a mesma regra do consumo em aberto.
+        """
+        try:
+            pendentes = self._pagamentos.listar_comissoes_pendentes()
+        except _ERROS_SERVICE:
+            return {}
+        return {linha.funcionario_id: linha.valor for linha in pendentes}
+
     def _preencher_kpis(self) -> None:
         ativos = [f for f in self._funcionarios if f.ativo]
         consumo_total = sum((self._saldos.get(f.id, Decimal("0")) for f in self._funcionarios), Decimal("0"))
@@ -249,6 +273,7 @@ class FuncionariosView(QWidget):
         self._kpi_cadastrados.definir_valor(str(len(self._funcionarios)))
         self._kpi_ativos.definir_valor(f"{len(ativos)}/{len(self._funcionarios)}")
         self._kpi_consumo.definir_valor(formatar_reais(consumo_total))
+        self._kpi_comissao.definir_valor(formatar_reais(sum(self._comissoes.values(), Decimal("0"))))
         self._kpi_pendencia.definir_valor(str(com_pendencia))
 
     def _funcionarios_filtrados(self) -> list[Funcionario]:
@@ -286,7 +311,9 @@ class FuncionariosView(QWidget):
             self._painel_detalhe.limpar()
             return
         saldo = self._saldos.get(funcionario.id, Decimal("0"))
-        self._painel_detalhe.carregar(funcionario, saldo)
+        self._painel_detalhe.carregar(
+            funcionario, saldo, self._comissoes.get(funcionario.id, Decimal("0"))
+        )
 
     def _funcionario_por_id(self, funcionario_id: int | None) -> Funcionario | None:
         if funcionario_id is None:
@@ -415,6 +442,29 @@ class FuncionariosView(QWidget):
         self._selecionado_id = None
         self.atualizar()
 
+    def _repassar_comissao_id(self, funcionario_id: int | None) -> None:
+        """Paga de uma vez tudo o que está pendente para aquele garçom (§9.25).
+
+        O dinheiro sai da gaveta na parte que entrou em dinheiro — quem decide
+        isso é o `PagamentoService`, conta por conta. Aqui só se escolhe o
+        garçom e se mostra o resultado.
+        """
+        funcionario = self._funcionario_por_id(funcionario_id)
+        if funcionario is None:
+            self._label_erro.setText("Selecione um funcionário na lista para repassar a comissão.")
+            return
+
+        self._label_erro.setText("")
+        try:
+            total = self._pagamentos.pagar_comissoes_do_funcionario(funcionario.id)
+        except _ERROS_SERVICE as erro:
+            self._label_erro.setText(str(erro))
+            return
+        self.atualizar()
+        self._label_erro.setText(
+            f"Comissão de {funcionario.nome} repassada: {formatar_reais(total)}."
+        )
+
     def _quitar(self) -> None:
         self._quitar_id(self._selecionado_id)
 
@@ -533,6 +583,7 @@ class _PainelDetalheFuncionario(QFrame):
 
     editar_solicitado = Signal(int)
     baixa_solicitada = Signal(int)
+    comissao_solicitada = Signal(int)
     alternar_status_solicitado = Signal(int)
     excluir_solicitado = Signal(int)
 
@@ -584,6 +635,29 @@ class _PainelDetalheFuncionario(QFrame):
         layout_consumo.addWidget(nota)
         layout.addWidget(card_consumo)
 
+        # A contrapartida: o que a loja deve a ele de comissão (§9.25). Mesmo
+        # cartão do consumo, com o botão que acerta tudo de uma vez.
+        card_comissao = QFrame()
+        card_comissao.setObjectName("funcionariosCardConsumo")
+        layout_comissao = QVBoxLayout(card_comissao)
+        layout_comissao.setContentsMargins(16, 14, 16, 14)
+        layout_comissao.setSpacing(4)
+        rotulo_comissao = QLabel("COMISSÃO A REPASSAR")
+        rotulo_comissao.setObjectName("funcionariosCardConsumoRotulo")
+        layout_comissao.addWidget(rotulo_comissao)
+        self._label_comissao_valor = QLabel("R$ 0,00")
+        self._label_comissao_valor.setObjectName("funcionariosCardConsumoValor")
+        layout_comissao.addWidget(self._label_comissao_valor)
+        nota_comissao = QLabel("Taxa de serviço das contas que ele atendeu e ainda não recebeu.")
+        nota_comissao.setObjectName("funcionariosCardConsumoNota")
+        nota_comissao.setWordWrap(True)
+        layout_comissao.addWidget(nota_comissao)
+        self._botao_comissao = QPushButton("Repassar comissão")
+        self._botao_comissao.setProperty("variante", "neutro")
+        self._botao_comissao.clicked.connect(self._emitir_comissao)
+        layout_comissao.addWidget(self._botao_comissao)
+        layout.addWidget(card_comissao)
+
         grid_meta = QVBoxLayout()
         grid_meta.setSpacing(8)
         self._label_status = _linha_meta(grid_meta, "STATUS")
@@ -626,7 +700,7 @@ class _PainelDetalheFuncionario(QFrame):
 
         self.limpar()
 
-    def carregar(self, funcionario: Funcionario, saldo: Decimal) -> None:
+    def carregar(self, funcionario: Funcionario, saldo: Decimal, comissao: Decimal) -> None:
         self._funcionario_id = funcionario.id
         self.setEnabled(True)
 
@@ -645,6 +719,9 @@ class _PainelDetalheFuncionario(QFrame):
         eh_caixa = funcionario.cargo == CargoFuncionario.CAIXA.value
         self._label_senha.setText("••••••" if eh_caixa else "—")
 
+        self._label_comissao_valor.setText(formatar_reais(comissao))
+        self._botao_comissao.setEnabled(comissao > 0)
+
         self._botao_status.setText("Desativar" if funcionario.ativo else "Ativar")
         self._botao_baixa.setEnabled(saldo > 0)
 
@@ -655,6 +732,7 @@ class _PainelDetalheFuncionario(QFrame):
         self._label_nome.setText("Nenhum funcionário selecionado")
         self._label_cargo.setText("")
         self._label_consumo_valor.setText("R$ 0,00")
+        self._label_comissao_valor.setText("R$ 0,00")
         self._label_status.setText("—")
         self._label_acesso.setText("—")
         self._label_telefone.setText("—")
@@ -668,6 +746,10 @@ class _PainelDetalheFuncionario(QFrame):
     def _emitir_baixa(self) -> None:
         if self._funcionario_id is not None:
             self.baixa_solicitada.emit(self._funcionario_id)
+
+    def _emitir_comissao(self) -> None:
+        if self._funcionario_id is not None:
+            self.comissao_solicitada.emit(self._funcionario_id)
 
     def _emitir_alternar_status(self) -> None:
         if self._funcionario_id is not None:

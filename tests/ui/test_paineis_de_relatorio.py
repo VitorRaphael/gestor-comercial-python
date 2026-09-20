@@ -48,6 +48,7 @@ def _gaveta(diferenca: Decimal | None) -> FechamentoGaveta:
         total_faturado=Decimal("1234.50"),
         saldo_apurado=Decimal("1200.00"),
         diferenca=diferenca,
+        total_taxa_servico=Decimal("98.70"),
     )
 
 
@@ -78,6 +79,21 @@ def test_a_gaveta_mostra_a_diferenca_com_sinal(qapp):
     assert "-R$ 12,00" in textos
     assert "R$ 1.234,50" in textos
     assert "Turno da Manhã — 06/09" in textos
+
+
+def test_a_gaveta_mostra_a_taxa_de_servico_como_parte_do_faturado(qapp):
+    """§9.23: a taxa sai em linha própria, logo abaixo do faturado, e o rótulo
+    diz "inclusa" — é uma fatia do total, e somar as duas linhas contaria a
+    taxa duas vezes."""
+    painel = PainelGaveta()
+    painel.preencher(_gaveta(diferenca=None))
+
+    textos = _textos(painel)
+    assert "Taxa de serviço (inclusa)" in textos
+    assert "R$ 98,70" in textos
+    assert textos.index("Total faturado") < textos.index("Taxa de serviço (inclusa)") < textos.index(
+        "Saldo apurado"
+    )
 
 
 def test_a_gaveta_nao_guarda_o_valor_do_periodo_anterior(qapp):

@@ -50,7 +50,7 @@ from gestor_comercial.ui.views.impressoras_view import ImpressorasView
 from gestor_comercial.ui.views.loja_hub_view import LojaHubView
 from gestor_comercial.ui.views.login_view import LoginView
 from gestor_comercial.ui.views.mesas_view import MesasView
-from gestor_comercial.ui.views.pagamento_dialog import PagamentoDialog
+from gestor_comercial.ui.views.pagamento_view import PagamentoView
 from gestor_comercial.ui.views.relatorios_view import RelatoriosView
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
@@ -145,6 +145,13 @@ class MainWindow(QMainWindow):
         self._comanda_view.comanda_cancelada.connect(self._ao_comanda_cancelada)
         self._comanda_view.pagamento_solicitado.connect(self._abrir_pagamento)
 
+        # O recebimento virou TELA no §9.25 (era o último diálogo de fábrica do
+        # fluxo de venda): entra na pilha como as outras, com "← Voltar à mesa"
+        # no cabeçalho em vez de um botão de fechar janela.
+        self._pagamento_view = PagamentoView(self._pagamentos, self._impressao)
+        self._pagamento_view.voltar.connect(self._voltar_para_comanda)
+        self._pagamento_view.pagamento_concluido.connect(self._ao_pagamento_concluido)
+
         self._caixa_view = CaixaView(caixa_service, self._impressao)
         self._cardapio_view = CardapioView(cardapio_service)
         self._funcionarios_view = FuncionariosView(
@@ -169,6 +176,7 @@ class MainWindow(QMainWindow):
         for pagina in (
             self._mesas_view,
             self._comanda_view,
+            self._pagamento_view,
             self._caixa_view,
             self._cardapio_view,
             self._funcionarios_view,
@@ -400,18 +408,29 @@ class MainWindow(QMainWindow):
         self._voltar_para_mesas()
 
     def _abrir_pagamento(self, comanda_id: int) -> None:
+        """Vai para a tela de recebimento daquela conta (§9.25)."""
         self._aviso_impressao.limpar()
-        modal = PagamentoDialog(self._pagamentos, comanda_id, self)
-        executar_modal(modal)
-        if modal.comanda_fechada:
-            # Recibo só quando a conta fecha: um cupom por pagamento parcial
-            # gastaria bobina e nenhum deles traria o total final nem o troco.
-            self._imprimir_recibo(comanda_id)
-            self._voltar_para_mesas()
-        else:
-            # Pagamento parcial: a comanda continua aberta, só o total pago
-            # e o restante mudaram.
-            self._comanda_view.atualizar()
+        self._pagamento_view.carregar(comanda_id)
+        # Tela de detalhe, alcançada a partir da comanda: nenhum botão da
+        # sidebar fica aceso, como já acontece com a própria comanda.
+        self._mostrar_pagina(self._pagamento_view)
+        self._marcar_nav_ativo(None)
+
+    def _voltar_para_comanda(self) -> None:
+        """O "← Voltar à mesa": a conta continua em conferência, com o que já
+        foi recebido lançado nela."""
+        self._comanda_view.atualizar()
+        self._mostrar_pagina(self._comanda_view)
+
+    def _ao_pagamento_concluido(self, comanda_id: int) -> None:
+        """Conta quitada: a mesa some do salão e a grade recarrega.
+
+        O recibo NÃO sai daqui desde o §9.25: quem imprime é o botão
+        "Registrar e imprimir comprovante" da própria tela, porque nem toda
+        conta precisa de papel e a bobina é do food truck.
+        """
+        del comanda_id
+        self._voltar_para_mesas()
 
     def _imprimir_recibo(self, comanda_id: int) -> None:
         """Recibo do cliente, disparado assim que o pagamento fecha a comanda.
