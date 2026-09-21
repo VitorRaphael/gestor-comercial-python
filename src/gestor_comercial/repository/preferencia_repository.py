@@ -12,6 +12,12 @@ from gestor_comercial.repository.base import Repository
 BOOTSTRAP_CONCLUIDO = "bootstrap_concluido"
 ULTIMO_OPERADOR_ID = "ultimo_operador_id"
 CHAVE_DE_EXIBICAO = "chave_de_exibicao"
+TEMA = "tema"
+
+# Os dois valores de `TEMA`. Texto e não "1"/"0": quem abrir o banco num
+# navegador de SQLite lê o tema sem precisar saber qual dos dois é o verdadeiro.
+TEMA_CLARO = "claro"
+TEMA_ESCURO = "escuro"
 
 # Valor gravado em `BOOTSTRAP_CONCLUIDO`. O que importa é a chave EXISTIR; o
 # texto é para quem abrir o banco num navegador de SQLite entender o que leu.

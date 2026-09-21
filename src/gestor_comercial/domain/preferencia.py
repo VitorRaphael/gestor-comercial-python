@@ -19,6 +19,9 @@ class Preferencia(Base):
       da criação do banco".
     * **`ultimo_operador_id`** — quem entrou por último na tela de login, para
       o dropdown já vir naquele nome em vez de no primeiro da lista.
+    * **`tema`** — `claro` ou `escuro`, o último tema escolhido em
+      Configurações, lido no boot antes de qualquer janela existir (ver
+      `PreferenciaService`).
 
     Por que texto e não uma coluna por assunto: cada chave nova aqui é uma
     linha, não uma migração. O preço é não haver tipo — quem lê converte e

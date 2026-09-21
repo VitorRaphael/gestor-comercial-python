@@ -56,7 +56,6 @@ from __future__ import annotations
 import functools
 import logging
 import logging.handlers
-import os
 import sys
 import threading
 import time
@@ -64,6 +63,8 @@ import traceback
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Callable, TextIO
+
+from gestor_comercial.core.caminhos import pasta_de_dados
 
 NOME_LOGGER = "gestor_comercial"
 
@@ -94,19 +95,10 @@ TITULO_MODAL = "Aviso do sistema"
 # ----------------------------------------------------------------------
 
 
-def pasta_de_dados() -> Path:
-    """A pasta de dados do app, derivada em runtime e nunca gravada.
-
-    Mesma escolha (e mesma variável de ambiente) de `repository/base.py` e
-    `hardware/impressora_escpos.py`, mas montada aqui com `os.environ` em vez de
-    importada: `core/` é a camada mais baixa e não pode depender de `repository/`
-    — se dependesse, configurar o log exigiria carregar SQLAlchemy antes, e o log
-    tem que existir *antes* de qualquer coisa que possa falhar.
-    """
-    bruto = os.environ.get("GESTOR_COMERCIAL_DB")
-    if bruto and bruto != ":memory:":
-        return Path(bruto).expanduser().parent
-    return Path.home() / ".gestor_comercial"
+# `pasta_de_dados` mora em `core/caminhos.py`, junto com o caminho do banco e a
+# pasta de dados própria do `.exe`. É importada daqui (e não de `repository/`)
+# pelo mesmo motivo de sempre: o log tem que existir antes de o SQLAlchemy
+# carregar, e `core/` é a camada mais baixa.
 
 
 def caminho_do_log() -> Path:

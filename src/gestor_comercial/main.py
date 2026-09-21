@@ -1,44 +1,60 @@
 """Ponto de entrada do PDV desktop.
 
-Cuida só do que precisa acontecer uma vez por processo: aplicar as
-migrations do Alembic, rodar o seed (mesas + gerente padrão), montar o
-`UnitOfWork` único que vive o processo inteiro (ver docstring de
+Cuida só do que precisa acontecer uma vez por processo: criar o banco de
+produção a partir da semente embutida (só na primeira abertura do `.exe`),
+aplicar as migrations do Alembic, rodar o seed (mesas + gerente padrão), montar
+o `UnitOfWork` único que vive o processo inteiro (ver docstring de
 `UnitOfWork`, §3.1 da arquitetura) e os services em cima dele, aplicar o
-tema QSS e abrir `MainWindow`. A composição das telas fica em
+tema QSS (o que o operador escolheu da última vez) e abrir `MainWindow`. A composição das telas fica em
 `ui/main_window.py`.
 """
 
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFontDatabase, QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from gestor_comercial.core.caminhos import caminho_do_banco, recurso
 
-def _raiz_recursos() -> Path:
-    """Raiz de onde ler `alembic.ini`, `migrations/` e `resources/`.
+# O identificador com que o Windows agrupa as janelas na barra de tarefas. Sem
+# ele, rodando pelo `python.exe` o botão da barra mostra o ícone do Python; com
+# ele, a barra usa o ícone da janela. O atalho do instalador
+# (`packaging/instalador.iss`) grava o MESMO valor: se divergissem, o programa
+# fixado na barra e o programa aberto virariam dois botões separados.
+ID_DO_APP_NO_WINDOWS = "gestor.comercial.pdv.v2"
+ICONE_DO_APP = "resources/icons/app_icon.ico"
 
-    Em desenvolvimento é a raiz do repositório (2 níveis acima deste
-    arquivo). Empacotado pelo PyInstaller (`packaging/build.spec`), o
-    processo roda a partir de uma pasta temporária de extração
-    (`sys._MEIPASS`) que contém esses mesmos itens copiados pelo `datas`
-    do spec — por isso o caminho não pode ser fixo.
+
+def _identificar_processo_no_windows() -> None:
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(ID_DO_APP_NO_WINDOWS)
+    except Exception:  # fora do Windows, ou shell sem a função: só perde o agrupamento
+        pass
+
+
+def _provisionar_banco() -> None:
+    """Na primeira abertura do `.exe`, cria o banco a partir da semente embutida.
+
+    Roda antes de qualquer conexão com o banco — a migration abriria (e criaria)
+    um arquivo vazio no lugar onde a semente tem que entrar. Ver
+    `core/banco_semente.py`.
     """
-    if getattr(sys, "frozen", False):
-        return Path(sys._MEIPASS)  # type: ignore[attr-defined]
-    return Path(__file__).resolve().parents[2]
+    from gestor_comercial.core.banco_semente import PASTA_DA_SEMENTE, provisionar
+    from gestor_comercial.core.resilience import logger_do_app
 
-
-_RAIZ_PROJETO = _raiz_recursos()
+    resultado = provisionar(caminho_do_banco(), recurso(PASTA_DA_SEMENTE))
+    logger_do_app().info("Banco de dados: %s (%s)", resultado.situacao.value, resultado.banco)
 
 
 def _aplicar_migrations() -> None:
     from alembic import command
     from alembic.config import Config
 
-    config = Config(str(_RAIZ_PROJETO / "alembic.ini"))
+    config = Config(str(recurso("alembic.ini")))
     # O `alembic.ini` manda o progresso das migrations para o `stderr`, e o
     # espelho do escudo transformaria cada uma daquelas linhas informativas num
     # ERROR no log do app — 17 delas num boot saudável, afogando qualquer erro
@@ -61,7 +77,7 @@ def _registrar_fonte_marca() -> None:
     `resources/fonts/`) para todo o app poder usá-la via `font-family` no
     QSS — não é fonte de sistema, então precisa ser embutida e registrada
     manualmente."""
-    caminho_fonte = _RAIZ_PROJETO / "resources" / "fonts" / "ArchivoBlack-Regular.ttf"
+    caminho_fonte = recurso("resources/fonts/ArchivoBlack-Regular.ttf")
     QFontDatabase.addApplicationFont(str(caminho_fonte))
 
 
@@ -75,8 +91,12 @@ def main() -> int:
 
     logger = instalar_escudo()
     logger.info("Boot do Gestor Comercial")
+    _identificar_processo_no_windows()
 
     app = QApplication(sys.argv)
+    # No `QApplication`, e não só na `MainWindow`: vale para toda janela que
+    # abrir sem pai, inclusive o "Erro ao iniciar" logo abaixo.
+    app.setWindowIcon(QIcon(str(recurso(ICONE_DO_APP))))
     _registrar_fonte_marca()
 
     from gestor_comercial.ui.theme.controller import ThemeController
@@ -84,6 +104,7 @@ def main() -> int:
     ThemeController.instancia().aplicar_inicial()
 
     try:
+        _provisionar_banco()
         _aplicar_migrations()
         _rodar_seed()
     except Exception as erro:  # banco não sobe -> nada no app funciona
@@ -107,6 +128,7 @@ def main() -> int:
     from gestor_comercial.services.funcionario_service import FuncionarioService
     from gestor_comercial.services.impressao_service import ImpressaoService
     from gestor_comercial.services.pagamento_service import PagamentoService
+    from gestor_comercial.services.preferencia_service import PreferenciaService
     from gestor_comercial.ui.main_window import MainWindow
     from gestor_comercial.ui.widgets.aviso_impressao import aguardar_repintando
 
@@ -145,6 +167,12 @@ def main() -> int:
                 uow, auth_service, aguardar=aguardar_repintando
             )
 
+            # O tema escolhido da última vez, aplicado ANTES de montar a
+            # janela: as telas nascem na paleta certa, sem repintura. Uma
+            # leitura por chave primária — e daqui em diante toda troca de
+            # tema grava na hora (ver `ThemeController.restaurar`).
+            ThemeController.instancia().restaurar(PreferenciaService(uow))
+
             janela = MainWindow(
                 auth_service,
                 comanda_service,
@@ -155,6 +183,9 @@ def main() -> int:
                 funcionario_service,
             )
             janela.showMaximized()
+            # Com o "Boot" lá de cima, dá no log o tempo que o Celeron leva até a
+            # tela — e é a linha que a prova de fumaça do build espera ver.
+            logger.info("Janela principal aberta")
 
             codigo = app.exec()
 

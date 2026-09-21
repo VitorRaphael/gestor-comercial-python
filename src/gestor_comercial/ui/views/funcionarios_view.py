@@ -40,7 +40,6 @@ from PySide6.QtWidgets import (
 from gestor_comercial.domain.enums import CargoFuncionario
 from gestor_comercial.domain.funcionario import Funcionario
 from gestor_comercial.services.auth_service import AuthService
-from gestor_comercial.services.caixa_service import CaixaService
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
     NaoAutorizadoError,
@@ -54,7 +53,6 @@ from gestor_comercial.ui.formatacao import (
     formatar_reais,
     safe_decimal,
 )
-from gestor_comercial.ui.rotulo_identidade import rotulo_identidade
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.modais import executar_modal
 from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
@@ -87,19 +85,22 @@ _FILTRO_INATIVOS = "INATIVO"
 class FuncionariosView(QWidget):
     """Equipe, permissões de operação e consumo interno."""
 
+    # Um cadastro foi editado. A edição renomeia junto o login de mesmo nome
+    # (`FuncionarioService.editar`), e o nome do login é o nome do turno que
+    # ele abre — o rótulo dos cabeçalhos do shell (`IdentidadeDoTurno`).
+    cadastro_alterado = Signal()
+
     def __init__(
         self,
         funcionario_service: FuncionarioService,
         pagamento_service: PagamentoService,
         auth_service: AuthService,
-        caixa_service: CaixaService,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._funcionarios_service = funcionario_service
         self._pagamentos = pagamento_service
         self._auth = auth_service
-        self._caixa_service = caixa_service
         self._funcionarios: list[Funcionario] = []
         self._saldos: dict[int, Decimal] = {}
         self._filtro_status = _FILTRO_TODOS
@@ -137,7 +138,7 @@ class FuncionariosView(QWidget):
 
         bloco_titulo = QVBoxLayout()
         bloco_titulo.setSpacing(2)
-        self._label_eyebrow = QLabel("GERENTE")
+        self._label_eyebrow = QLabel("")
         self._label_eyebrow.setObjectName("caixaEyebrow")
         bloco_titulo.addWidget(self._label_eyebrow)
 
@@ -227,9 +228,15 @@ class FuncionariosView(QWidget):
     # Carregamento / preenchimento
     # ------------------------------------------------------------------
 
+    def definir_usuario(self, rotulo: str) -> None:
+        """O rótulo de identidade do shell, já em maiúsculas — escrito pela
+        `MainWindow` a cada `IdentidadeDoTurno.rotulo_mudou`, como nas outras telas
+        da Central de Loja. Esta tela calculava o próprio rótulo em
+        `atualizar()`, e por isso podia mostrar um nome diferente do cabeçalho."""
+        self._label_eyebrow.setText(rotulo)
+
     def atualizar(self) -> None:
         self._label_erro.setText("")
-        self._label_eyebrow.setText(rotulo_identidade(self._auth, self._caixa_service).upper())
 
         self._funcionarios = self._funcionarios_service.listar_todos()
         self._saldos = self._carregar_saldos()
@@ -362,6 +369,7 @@ class FuncionariosView(QWidget):
             return
         self._aplicar_situacao(atualizado, dados.ativo)
         self.atualizar()
+        self.cadastro_alterado.emit()
 
     def _aplicar_situacao(self, funcionario: Funcionario, ativo: bool) -> None:
         """A situação escolhida no modal, escrita pelos métodos que já existiam.

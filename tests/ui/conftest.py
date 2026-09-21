@@ -129,7 +129,7 @@ def todas_as_telas(
         "Dashboard Mensal": DashboardMensalView(caixas_service, funcionarios),
         "Relatórios": RelatoriosView(caixas_service, auth, impressao, funcionarios),
         "Cardápio": CardapioView(cardapio),
-        "Funcionários": FuncionariosView(funcionarios, pagamentos, auth, caixas_service),
+        "Funcionários": FuncionariosView(funcionarios, pagamentos, auth),
         "Impressoras": ImpressorasView(cardapio, impressao),
         "Configurações": ConfiguracoesView(auth),
         "Central de Loja": LojaHubView(),

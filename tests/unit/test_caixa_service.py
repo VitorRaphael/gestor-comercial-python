@@ -29,7 +29,7 @@ from gestor_comercial.services.loja_config_service import (
     SENHA_MASTER_PADRAO,
     SENHA_OPERACIONAL_PADRAO,
 )
-from tests.conftest import PIN_ATENDENTE
+from tests.conftest import PIN_ATENDENTE, PIN_GERENTE
 
 
 @pytest.fixture
@@ -1250,15 +1250,45 @@ def test_fechamento_da_gaveta_do_periodo_sem_turnos(caixas):
 
 
 # ----------------------------------------------------------------------
-# identificacao_turno (§3.1 -- "Caixa Turno - Noite", não pelo operador)
+# identificacao_turno — o nome do operador que abriu (`nome_do_turno`)
 # ----------------------------------------------------------------------
+
+
+def test_o_turno_se_chama_como_o_operador_que_o_abriu_e_nao_pela_hora(
+    uow, caixas, auth, gerente
+):
+    """O defeito relatado, com os dados do banco de trabalho do Vitor: o
+    operador "Caixa Turno - Noite" abriu o caixa às 17:36, e o cabeçalho dizia
+    "Caixa Turno - Tarde" porque a Noite da heurística de hora só começa às 18h.
+    O turno tem UM nome, e é o de quem o abriu."""
+    noite = auth.criar_usuario("Caixa Turno - Noite", PerfilUsuario.GERENTE)
+    auth.login_como(noite.id, PIN_GERENTE)
+    caixa = caixas.abrir(dinheiro("50.00"))
+    caixa.aberto_em = datetime(2026, 9, 19, 17, 36)
+    uow.commit()
+
+    assert caixas.identificacao_turno(caixa) == "Caixa Turno - Noite"
+
+
+def test_o_nome_do_turno_acompanha_o_cadastro_do_operador(uow, caixas, auth, gerente):
+    """O nome não é copiado para o turno: é lido do operador. Renomeado o
+    cadastro, o turno aberto passa a se chamar assim na mesma hora — inclusive
+    os já fechados, que nunca guardaram o nome como texto."""
+    caixa = caixas.abrir(dinheiro("50.00"))
+
+    gerente.nome = "Caixa"
+    uow.commit()
+
+    assert caixas.identificacao_turno(caixa) == "Caixa"
 
 
 @pytest.mark.parametrize(
     "hora, periodo_esperado",
     [(6, "Manhã"), (11, "Manhã"), (12, "Tarde"), (17, "Tarde"), (18, "Noite"), (2, "Noite")],
 )
-def test_identificacao_turno_deriva_periodo_da_hora_de_abertura(caixas, hora, periodo_esperado):
+def test_turno_sem_operador_gravado_cai_no_nome_pela_hora(caixas, hora, periodo_esperado):
+    """`aberto_por_id` é anulável: um turno sem operador não tem outro nome para
+    dar, e só nesse caso a hora de abertura ainda nomeia o turno."""
     caixa = Caixa(status=StatusCaixa.ABERTO, valor_abertura=dinheiro("50.00"), aberto_em=datetime(2026, 8, 20, hora, 0))
     assert caixas.identificacao_turno(caixa) == f"Caixa Turno - {periodo_esperado}"
 
@@ -1266,11 +1296,12 @@ def test_identificacao_turno_deriva_periodo_da_hora_de_abertura(caixas, hora, pe
 def test_fechamento_da_gaveta_usa_identificacao_de_turno(uow, caixas, gerente):
     caixa = _caixa_fechado(uow, fechado_em=datetime(2026, 8, 5, 22, 0))
     caixa.aberto_em = datetime(2026, 8, 5, 19, 0)
+    caixa.aberto_por_id = gerente.id
     caixa.numero_sequencial_dia = 1
     uow.commit()
 
     gaveta = caixas.fechamento_da_gaveta(caixa.id)
-    assert gaveta.identificacao.startswith("Caixa Turno - Noite")
+    assert gaveta.identificacao.startswith(f"{gerente.nome} · T1")
 
 
 # ----------------------------------------------------------------------

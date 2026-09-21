@@ -5411,6 +5411,141 @@ conferência": **botão próprio**.
 - **O aviso de pendências ao sair** continua sendo a caixa de mensagem do
   sistema (`QMessageBox`), não foi pedido em cartão.
 
+### 9.28 O tema que volta como foi deixado, e o turno com um nome só ✅ CONCLUÍDO — 2026-09-21
+
+Dois defeitos relatados juntos pelo Vitor: (1) o tema escolhido em
+Configurações se perdia ao fechar o programa, e (2) o nome do caixa/turno
+aparecia diferente de uma tela para outra ("Caixa Turno - Noite" numa,
+"Caixa Turno - Tarde" noutra).
+
+#### Antes
+
+- **Tema.** O `ThemeController` guardava o tema só em memória. Não existia
+  gravação nenhuma: todo boot começava no Escuro ("Concreto").
+- **Turno — dois nomes para a mesma coisa.** O cabeçalho do shell, o título da
+  tela de Caixa, os relatórios e o comprovante nomeavam o turno pela HORA de
+  abertura (`periodo_do_turno`: Noite só a partir das 18h). As telas de venda
+  mostravam o operador logado. No banco de trabalho do Vitor: o caixa foi
+  aberto às **17:36** pelo login **"Caixa Turno - Noite"**, e o cabeçalho dizia
+  **"Caixa Turno - Tarde"**.
+- **Turno — nenhum aviso.** O rótulo era recalculado a cada navegação, e só
+  nela. Abrir ou fechar o turno na própria tela de Caixa deixava o cabeçalho
+  velho até o próximo clique na sidebar. A `FuncionariosView` calculava o
+  próprio rótulo por conta própria, num segundo lugar.
+- **Nome — par desfeito.** Editar o nome em Funcionários mudava só o
+  `Funcionario`. O `Usuario` de login com o mesmo nome (o do dropdown, que é o
+  nome que o turno carrega) continuava com o antigo, e o par por nome (§3.11,
+  usado pela exclusão e pelo filtro de operador dos relatórios) se desfazia em
+  silêncio. O banco de trabalho já estava assim: funcionário **"Caixa"**, login
+  **"Caixa Turno - Noite"**.
+
+#### Decisões do Vitor
+
+Perguntadas antes de começar.
+
+1. **O nome do turno é o que ele edita, e persiste.** Nas palavras dele: "deve
+   ser o que eu editar e deixar editado, nesse caso é 'Caixa'". Isso desfaz a
+   regra do §3.1 (turno nomeado pela hora): o turno passa a se chamar como o
+   operador de login que o abriu.
+2. **Renomear o funcionário renomeia o login do par, no mesmo commit.**
+
+#### O desenho
+
+- **Tema — `services/preferencia_service.py` (`PreferenciaService`)**: uma
+  linha em `preferencias` (chave `tema`, valor `claro`/`escuro`), sem tabela
+  nem migração nova. Não é arquivo de configuração: o banco já tem WAL com
+  `synchronous=FULL`, então a gravação é atômica e viaja no backup.
+  `gravar_tema` faz `commit` próprio e **degrada**: uma falha de disco vira
+  registro no `gestor.log` e nunca exceção no clique (mesmo contrato do
+  `_lembrar_ultimo_operador`). Valor estranho no banco vira "nunca escolhido".
+- **Tema — `ThemeController.restaurar(armazem)`**: o controller continua sendo
+  a ÚNICA fonte do tema em memória, e o banco é só onde ele é lembrado.
+  `main.py` chama `restaurar` depois das migrations e **antes** de montar a
+  `MainWindow`: as telas nascem na paleta certa, sem repintura, com uma
+  leitura por chave primária. `restaurar` não grava de volta o que leu e não
+  emite `mudou`, porque ninguém escuta ainda. Daí em diante todo
+  `alternar_para` grava **antes** de avisar as telas: uma tela que estoure ao
+  repintar não pode custar a preferência. A pílula de Configurações não sabe
+  que existe banco. O `aplicar_inicial()` do topo do boot continua lá, para a
+  caixa "Erro ao iniciar" sair no visual do app se o banco não subir. Medido:
+  montar e aplicar o QSS custa ~1 a 5 ms sem nenhum widget, então quem usa o
+  Claro paga isso uma vez no boot, e quem usa o Escuro não paga nada.
+- **Turno — `caixa_service.nome_do_turno(operador, momento)`**: a regra única,
+  função pura. É o nome do operador que abre, e cai em "Caixa Turno -
+  <período>" só para turno sem operador gravado (`aberto_por_id` é anulável).
+  Usam essa regra: `identificacao_turno` (cabeçalho, título da tela de Caixa,
+  "Fechamento da Gaveta" dos relatórios), o comprovante de fechamento (que
+  tinha uma **cópia** da regra antiga) e o modal de abertura. Este dizia "Turno
+  da Tarde" e agora anuncia o nome que o turno vai ter. O nome não é copiado
+  para o turno, é lido do operador: renomeado o cadastro, o turno aberto (e os
+  já fechados) passa a se chamar assim.
+  `periodo_do_turno` sobrou para a coluna de PERÍODO do Histórico Diário, que
+  antes o extraía do nome com `removeprefix` e agora o lê direto.
+- **Turno — `ui/rotulo_identidade.IdentidadeDoTurno`**, a fonte única do rótulo
+  na tela. Quem MUDA o que o rótulo lê chama `recalcular`: login e logout na
+  `MainWindow`, `CaixaView.turno_alterado` (abrir e fechar pela tela) e
+  `FuncionariosView.cadastro_alterado` (editar). Quem MOSTRA o rótulo recebe
+  `rotulo_mudou` através de `MainWindow._mostrar_identidade`, que escreve nos
+  cinco lugares: barra do shell, Central de Loja, Impressoras, Relatórios e
+  Funcionários. `rotulo_mudou` só é emitido quando o texto muda. O sinal não
+  se chama `mudou` de propósito: a varredura de `test_assinantes_do_tema`
+  trata todo `.mudou.connect` como assinante do tema. A navegação deixou de
+  recalcular: o caminho reativo é o único, e é ele que os testes prendem. A
+  `FuncionariosView` perdeu o cálculo próprio e o parâmetro `caixa_service`,
+  que só servia a ele.
+- **Nome — `FuncionarioService.editar`** renomeia o login de mesmo nome (ativo
+  ou não) no mesmo commit, e recusa o nome de OUTRO login ("Já existe um
+  operador de login chamado…"), porque dois operadores iguais no dropdown não
+  se distinguem. Funcionário sem login que recebe o nome de um login existente
+  não é recusado: é assim que um par se forma. Toda validação roda antes da
+  primeira atribuição.
+
+#### Como foi conferido
+
+- **Suíte**: 2449 → 2480, 0 falhas. Testes novos: `tests/unit/test_preferencia_service.py`
+  (6, com banco em ARQUIVO fechado e reaberto), `tests/ui/test_tema_persistente.py`
+  (9: restaurar, gravar, ordem gravar→avisar, o clique na pílula de
+  Configurações gravando no banco, dois "boots" com controlador e conexão
+  novos, e a ordem `restaurar` < `MainWindow(` no `main.py`),
+  `tests/ui/test_identidade_do_turno.py` (9: a `MainWindow` real, com os
+  modais de abrir caixa, fechar caixa e editar funcionário operados de
+  verdade e **sem navegar**, conferindo que os cinco cabeçalhos dizem o mesmo
+  texto em cada passo, e o 17:36 do banco do Vitor), mais 2 em
+  `test_caixa_service` e 5 em `test_funcionario_service`. Os helpers de modal
+  têm teto (3 s), pelo mesmo motivo do `test_impressoras_cadastro`.
+- **17 mutações, as 17 reprovam**: cada aviso (`turno_alterado` ao abrir e ao
+  fechar, `cadastro_alterado`), a regra do nome de volta à hora, o login não
+  renomeado, a colisão aceita, um consumidor fora da distribuição, o logout sem
+  recalcular, o emitir sempre, e no tema: não gravar, `restaurar` ignorando o
+  gravado ou gravando de volta, avisar antes de gravar, falha de disco
+  estourando, valor estranho virando escuro, o boot sem `restaurar` e o modal
+  voltando à hora. Duas lições de bancada: a primeira passada rodou sem teto e
+  uma rodada travou por 10 minutos (causa não reproduzida depois que os
+  helpers ganharam o vigia); e cinco mutações "não acharam o trecho" porque o
+  script buscava `\n` em arquivos CRLF. Foram corrigidas e repetidas antes de
+  entrar na conta.
+- **Bancada** (`tools/comparar_telas.py`, 1366x738): as telas renderizadas,
+  conferidas a olho. Barra do shell, título do Caixa, sobrescrito de
+  Funcionários, Central de Loja e "Últimos fechamentos" dizem o mesmo nome. A
+  comparação byte a byte contra o código anterior não foi feita, porque a
+  árvore de trabalho carrega o §9.21 e o §9.27 sem commit, e não há um
+  "antes" limpo para renderizar sem mexer nela.
+
+#### Ficou de fora
+
+- **O par desfeito do banco de trabalho** (funcionário "Caixa" × login "Caixa
+  Turno - Noite", id 2) **não foi corrigido por aqui**: a escrita direta no
+  banco foi barrada pela permissão da sessão. Pela tela: editar "Caixa" para
+  "Caixa Turno - Noite" (o par se forma) e depois de volta para "Caixa" (os
+  dois mudam juntos). Precisa ser feito antes do próximo `.exe`, porque a
+  semente sai deste banco.
+- **O tema gravado viaja na semente**: `preferencias` inteira vai para o
+  `.exe`, então a máquina do pai nasce no último tema escolhido na máquina de
+  desenvolvimento, como já acontece com `ultimo_operador_id`.
+- **O sobrescrito "GERENTE" da tela de Caixa** é texto fixo de seção, não
+  identidade, e continua fixo.
+- **Regerar o `.exe`**.
+
 ---
 
 ## 10. As melhores mudanças que o programa teve — em português de balcão

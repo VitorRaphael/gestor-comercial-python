@@ -1,192 +1,125 @@
-# DEPLOYMENT - Gerando o .exe com Banco Completo
+# DEPLOYMENT — o .exe de produção
 
-## Situação Atual (2026-09-09)
+## Em uma linha
 
-✅ **Banco de dados resetado e vazio**
-- O arquivo `.db` foi deletado de `~/.gestor_comercial/`
-- Quando você abrir o app pela primeira vez, ele vai recriar as tabelas automaticamente
-- Ele vai também popular com dados padrão de seed (mesas, usuários, cardápio seed)
+```
+.venv\Scripts\python.exe packaging\gerar_exe.py
+```
+
+Roda a suíte, gera `dist\GestorComercial.exe` com o cardápio e as fotos
+embutidos, e abre o `.exe` de verdade numa pasta de usuário descartável para
+provar que ele sobe. Termina com **BUILD APROVADO** ou **BUILD REPROVADO** e o
+motivo. Nenhum passo manual.
 
 ---
 
-## Fase 1: Montar o Banco Real (AGORA)
+## O que o .exe leva dentro
 
-### 1️⃣ Abra o app e deixe criar as tabelas
-```bash
-python -m gestor_comercial.main
-```
+| Item | De onde vem |
+|---|---|
+| Código + dependências (PySide6, SQLAlchemy, Alembic, python-escpos) | análise do PyInstaller |
+| `alembic.ini` + `migrations/` | raiz do repo |
+| Fonte da marca + `app_icon.ico` | `resources/` |
+| **Semente do banco** (`banco_seed.db` + fotos) | o seu banco de trabalho, `~/.gestor_comercial/`, **no momento do build** |
 
-Isso vai:
-- Rodar as migrações (criar todas as tabelas)
-- Rodar o seed (popular mesas e dados iniciais)
-- Abrir a interface
+A semente é tirada do banco que você usa no dia a dia em desenvolvimento. Para
+mudar o cardápio que vai para o pai: abra o programa em dev
+(`python -m gestor_comercial.main`), edite, e gere o `.exe` de novo.
 
-### 2️⃣ Agora CRIE seu cardápio real
-No app:
-1. Abra **Cardápio** (tela à esquerda)
-2. Crie as categorias (ex: Lanches, Bebidas, Combos)
-3. Crie as subcategorias (ex: Lanches > Podrão, Lanches > Artesanal)
-4. **Crie cada produto:**
-   - Nome
-   - Preço
-   - Foto (ela vai ser compactada e salva no banco)
-   - Subcategoria (se tiver)
-5. **Crie os combos** (produtos montados a partir de outros)
+### O build recusa a semente (e para) quando
 
-### 3️⃣ Configure funcionários, turnos, etc.
-- **Funcionários**: adicione os operadores que vão usar o caixa
-- **Configurações**: ajuste as senhas, preferências, etc.
-- **Impressoras**: configure os portos (se tiver impressora térmica)
+- o banco tem **movimento de venda** (caixa, comanda, pagamento…) — a semente é
+  só cadastro. Um teste feito na tela antes do build faria o programa do pai
+  nascer com vendas que não aconteceram. Nada é apagado: a mensagem diz quais
+  tabelas têm linhas, e a decisão de limpar é sua;
+- um produto aponta para uma **foto que não está em disco**;
+- o banco está **corrompido** ou com referência quebrada.
 
-### 4️⃣ Nenhuma restrição agora
-- Teste tudo
-- Crie quantos produtos quiser
-- As fotos vão ser armazenadas direto no `.db` (o arquivo vai crescer)
-
-**Resultado:** Um banco em `~/.gestor_comercial/gestor_comercial.db` com TODO seu cardápio
+A cópia usa a API de backup do SQLite, a partir de uma conexão somente leitura:
+pega também o que ainda está no `-wal` (medido em 2026-09-16: uma cópia só do
+`.db` teria levado 182 produtos em vez de 188 e 169 fotos em vez de 177) e não
+consegue alterar o seu banco.
 
 ---
 
-## Fase 2: Gerar o .exe (DEPOIS)
+## Onde o .exe grava
 
-Quando o cardápio estiver **100% pronto e testado**:
-
-### Comando para gerar o .exe
-```bash
-pyinstaller packaging/build.spec
+```
+%APPDATA%\GestorComercial_V2\
+├── gestor_comercial.db        ← vendas, cardápio, senhas
+├── uploads\thumbnails\        ← fotos dos produtos
+├── backups\                   ← cópia automática a cada fechamento de caixa
+├── logs\gestor.log            ← caixa-preta (erros, boot, "Janela principal aberta")
+└── cupons\                    ← impressora tipo ARQUIVO
 ```
 
-Isso vai:
-1. Compilar o código Python
-2. Agrupar as dependências (PySide6, SQLAlchemy, etc.)
-3. Copiar as migrações, temas e ícones
-4. Gerar um **bundle único** em `dist/gestor_comercial.exe`
+- **Primeira abertura** (pasta sem banco): as fotos e depois o banco são
+  copiados da semente. Se a energia cair no meio, a abertura seguinte refaz do
+  zero — o banco só aparece depois de todas as fotos gravadas.
+- **Todas as outras aberturas**: o banco existente é usado como está. A semente
+  nunca mais é lida, e nunca sobrescreve nada.
+- **A pasta do .exe antigo** (`%USERPROFILE%\.gestor_comercial\`, do build de
+  2026-09-01) não é lida, não é apagada e não serve de reserva. A variável
+  `GESTOR_COMERCIAL_DB` também é ignorada pelo `.exe` — ela só vale rodando do
+  código-fonte.
 
-**Tempo estimado:** 2-5 minutos
-
-### Onde fica o .exe
-```
-dist/gestor_comercial.exe    ← Seu executável único
-```
+Desinstalar o programa não apaga `%APPDATA%\GestorComercial_V2\`.
 
 ---
 
-## Fase 3: Levar para o Pendrive (DEPOIS)
+## Levar para a máquina do pai
 
-### O que copiar
+1. Copie **só** `dist\GestorComercial.exe` (pendrive, ou o instalador — abaixo).
+2. Na máquina do pai, coloque numa pasta local fora do OneDrive e dê duplo
+   clique. O SmartScreen pode avisar ("Windows protegeu seu PC" → Mais
+   informações → Executar assim mesmo): é esperado num `.exe` sem assinatura.
+3. Não copie `.db` nenhum. O cardápio já está dentro do `.exe`.
+4. Siga `docs/checklist-maquina-limpa.md`.
 
-Você vai copiar **2 coisas** para o pendrive:
+### Instalador (opcional)
 
-#### 1. O .exe
-```
-dist/gestor_comercial.exe → /pendrive/
-```
+Com o Inno Setup instalado:
 
-#### 2. O banco completo
 ```
-~/.gestor_comercial/gestor_comercial.db → /pendrive/
+ISCC.exe packaging\instalador.iss
 ```
 
-**Estrutura no pendrive:**
-```
-pendrive/
-├── gestor_comercial.exe
-└── gestor_comercial.db      ← Seu banco com TUDO
-```
+Gera `packaging\output\GestorComercial-Setup.exe` (atalho no Menu Iniciar e na
+Área de Trabalho, com o mesmo identificador de barra de tarefas do programa).
 
 ---
 
-## Fase 4: Instalar na Máquina do Pai (DEPOIS)
+## Refazer do zero na máquina do pai
 
-Na máquina fraca do food truck:
-
-### Passo 1: Copiar do pendrive
-- Coloque em uma pasta (ex: `C:\GestorComercial\`)
-- Copie os 2 arquivos para lá
-
-### Passo 2: Criar a pasta do app
-Na máquina do pai, crie:
-```
-C:\Users\[USUARIO]\.gestor_comercial\
-```
-
-### Passo 3: Copiar o banco para o lugar certo
-Mova o arquivo `.db` que você copiou do pendrive para:
-```
-C:\Users\[USUARIO]\.gestor_comercial\gestor_comercial.db
-```
-
-### Passo 4: Executar o .exe
-Clique 2x em `gestor_comercial.exe`
-
-✅ **Resultado:** O app abre com TODO o cardápio, fotos e configurações já carregadas
+Feche o programa e apague (ou renomeie) `%APPDATA%\GestorComercial_V2\`. Na
+próxima abertura ele nasce de novo da semente embutida. **Isso descarta as
+vendas daquela pasta** — faça uma cópia antes (Configurações → Cópia de
+Segurança).
 
 ---
 
-## ⚠️ Pontos Importantes
+## Trocar o ícone
 
-### O .exe é portável
-- Você pode copiar para qualquer pasta
-- Não precisa instalar nada (nenhuma dependência Python)
-- Pode colocar direto no pendrive e rodar de lá
-
-### O banco fica fora do .exe
-- O `.db` **não está dentro** do executável
-- Ele fica na pasta `~/.gestor_comercial/` do usuário
-- Isso permite que os dados persistam mesmo se reinstalar o .exe
-
-### Primeira execução na máquina do pai
-- Se o banco NÃO existir em `~/.gestor_comercial/`, o app vai criar um VAZIO
-- **É por isso que você precisa copiar o `.db`** - para trazer seu cardápio completo junto
-
-### Backup é seguro
-- O arquivo `.db` é um SQLite normal
-- Você pode fazer backup dele antes de passar para o pai
-- Pode restaurar a qualquer momento
-
----
-
-## Checklist Final Antes de Gerar o .exe
-
-- [ ] Abri o app e deixei criar as tabelas
-- [ ] Criei todas as categorias e subcategorias
-- [ ] Populei o cardápio inteiro (todos os produtos)
-- [ ] Adicionei as fotos de cada produto
-- [ ] Testei o cardápio (lancar itens, ver preços corretos)
-- [ ] Criei os combos necessários
-- [ ] Adicionei os funcionários/operadores
-- [ ] Testei a impressão (se aplicável)
-- [ ] O app está estável e pronto
-- [ ] Fechei o app (para garantir que tudo foi gravado)
-
-**Depois de OK em tudo acima:**
-```bash
-pyinstaller packaging/build.spec
+```
+.venv\Scripts\python.exe packaging\gerar_icone.py caminho\do\novo.png
 ```
 
----
-
-## Troubleshooting
-
-### P: Gerei o .exe mas não aparece na pasta `dist/`
-R: Espere a compilação terminar (pode levar alguns minutos). Procure por mensagens de erro no terminal.
-
-### P: O .exe abre mas está vazio (sem cardápio)
-R: Você não copiou o arquivo `.db` para `~/.gestor_comercial/` na máquina do pai. Copie manualmente.
-
-### P: Quero fazer mais alterações no cardápio depois de gerar o .exe
-R: Nenhum problema. Abra o app na sua máquina de desenvolvimento, faça as alterações, feche, e gere um novo .exe. O banco (`~/.gestor_comercial/gestor_comercial.db`) é sempre a fonte de verdade.
-
-### P: Posso atualizar o app no pendrive?
-R: Sim. Gere um novo `.exe`, substitua o arquivo no pendrive. O banco (`.db`) que estava lá continua, então os dados não são perdidos.
+Converte para `resources\icons\app_icon.ico` (16 a 256 px, cantos brancos
+viram transparentes) e guarda a arte em `packaging\app_icon_fonte.png`.
 
 ---
 
-## Próxima Ação
+## Peças, para quem for mexer
 
-Agora você pode:
-1. Abrir o app
-2. Começar a popular o cardápio
-3. Quando terminar, volte aqui e gere o .exe
+| Arquivo | Papel |
+|---|---|
+| `packaging/gerar_exe.py` | fluxo completo: ícone → testes → build → prova de fumaça |
+| `packaging/app.spec` | PyInstaller: prepara a semente, empacota, poda o Qt que o app não usa |
+| `packaging/preparar_semente.py` | gera `build/semente/` (roda sozinho para conferir o cardápio sem gerar o `.exe`) |
+| `src/gestor_comercial/repository/preparo_da_semente.py` | regras do que entra e do que é recusado na semente |
+| `src/gestor_comercial/core/banco_semente.py` | a cópia da semente no primeiro boot |
+| `src/gestor_comercial/core/caminhos.py` | onde o programa lê recursos e grava dados, em dev e no `.exe` |
 
-Qualquer dúvida, é só chamar! 🚀
+Para depurar um `.exe` que não abre: troque `console=False` por `console=True`
+em `packaging/app.spec`, gere de novo e rode pelo terminal. Volte para
+`console=False` antes do build de distribuição.

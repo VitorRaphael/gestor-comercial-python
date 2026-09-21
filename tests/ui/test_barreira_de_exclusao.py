@@ -124,7 +124,7 @@ def test_os_outros_usos_do_pin_nao_ganharam_mensagem(qapp, auth):
 
 @pytest.fixture
 def tela(qapp, funcionarios, pagamentos, auth, caixas_service, gerente):
-    return FuncionariosView(funcionarios, pagamentos, auth, caixas_service)
+    return FuncionariosView(funcionarios, pagamentos, auth)
 
 
 def _excluir_pela_tela(qapp, tela, funcionario_id, senha, confirmar=True):

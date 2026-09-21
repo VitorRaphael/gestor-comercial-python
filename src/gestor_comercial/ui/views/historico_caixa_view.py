@@ -46,6 +46,7 @@ from gestor_comercial.services.caixa_service import (
     CaixaService,
     ResumoCaixa,
     ResumoCancelamentos,
+    periodo_do_turno,
 )
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
@@ -288,7 +289,10 @@ class HistoricoCaixaView(QWidget):
         diferenca_total = resumo.diferenca_total
         diferenca = "—" if diferenca_total is None else formatar_reais_com_sinal(diferenca_total)
         turno = "—" if caixa.numero_sequencial_dia is None else f"T{caixa.numero_sequencial_dia}"
-        periodo = self._caixas.identificacao_turno(caixa).removeprefix("Caixa Turno - ")
+        # O PERÍODO do dia, não o nome do turno: o operador tem coluna própria,
+        # e desde que o turno passou a se chamar como quem o abriu
+        # (`nome_do_turno`) tirar o prefixo dele não sobraria período nenhum.
+        periodo = periodo_do_turno(caixa.aberto_em)
         sequencial = f"{periodo} · {turno}"
 
         self._tabela.setItem(linha, 0, QTableWidgetItem(caixa.aberto_em.strftime("%d/%m")))

@@ -40,7 +40,7 @@ from gestor_comercial.services.exceptions import (
 from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.services.pagamento_service import PagamentoService
-from gestor_comercial.ui.rotulo_identidade import rotulo_identidade
+from gestor_comercial.ui.rotulo_identidade import IdentidadeDoTurno
 from gestor_comercial.ui.views.caixa_view import CaixaView
 from gestor_comercial.ui.views.cardapio_view import CardapioView
 from gestor_comercial.ui.views.mesa_detalhe_view import MesaDetalheView
@@ -113,6 +113,14 @@ class MainWindow(QMainWindow):
         )
         self._pilha_raiz.setCurrentIndex(0)
 
+        # A fonte única do rótulo de identidade (o nome do turno aberto). As
+        # telas que MUDAM o que ele lê avisam; as que o MOSTRAM recebem por
+        # `_mostrar_identidade`. Ver `IdentidadeDoTurno`.
+        self._identidade = IdentidadeDoTurno(auth_service, caixa_service, self)
+        self._identidade.rotulo_mudou.connect(self._mostrar_identidade)
+        self._caixa_view.turno_alterado.connect(self._identidade.recalcular)
+        self._funcionarios_view.cadastro_alterado.connect(self._identidade.recalcular)
+
     # ------------------------------------------------------------------
     # Montagem do shell autenticado: sidebar + páginas
     # ------------------------------------------------------------------
@@ -155,7 +163,7 @@ class MainWindow(QMainWindow):
         self._caixa_view = CaixaView(caixa_service, self._impressao)
         self._cardapio_view = CardapioView(cardapio_service)
         self._funcionarios_view = FuncionariosView(
-            self._funcionarios, self._pagamentos, auth_service, caixa_service
+            self._funcionarios, self._pagamentos, auth_service
         )
         self._impressoras_view = ImpressorasView(cardapio_service, self._impressao)
         self._relatorios_view = RelatoriosView(
@@ -360,7 +368,6 @@ class MainWindow(QMainWindow):
         self._caixa_desbloqueada = False
 
     def _navegar_agora(self, rotulo: str) -> None:
-        self._atualizar_rotulo_identidade()
         pagina, recarregar = self._destinos_nav[rotulo]()
         recarregar()
         self._mostrar_pagina(pagina)
@@ -450,18 +457,24 @@ class MainWindow(QMainWindow):
     # Sessão
     # ------------------------------------------------------------------
 
-    def _atualizar_rotulo_identidade(self) -> None:
-        # Recalculado a cada navegação (ver `_navegar_agora`), não só no
-        # login — abrir/fechar caixa no meio da sessão precisa refletir aqui
-        # sem exigir logout.
-        rotulo = rotulo_identidade(self._auth, self._caixa_service)
+    def _mostrar_identidade(self, rotulo: str) -> None:
+        """Escreve o rótulo de identidade em TODO lugar que o mostra.
+
+        Chamado só por `IdentidadeDoTurno.rotulo_mudou`. Antes o rótulo era
+        recalculado a cada navegação, e o que mudava sem navegação — o turno
+        abrindo ou fechando na própria tela de Caixa, o operador renomeado em
+        Funcionários — ficava com o nome velho no cabeçalho até o próximo
+        clique na sidebar. Consumidor novo entra AQUI, não num segundo cálculo.
+        """
         self._label_usuario.setText(rotulo)
-        self._loja_hub_view.definir_usuario(rotulo.upper())
-        self._impressoras_view.definir_usuario(rotulo.upper())
-        self._relatorios_view.definir_usuario(rotulo.upper())
+        maiusculo = rotulo.upper()
+        self._loja_hub_view.definir_usuario(maiusculo)
+        self._impressoras_view.definir_usuario(maiusculo)
+        self._relatorios_view.definir_usuario(maiusculo)
+        self._funcionarios_view.definir_usuario(maiusculo)
 
     def _ao_logar(self, usuario: Usuario) -> None:
-        self._atualizar_rotulo_identidade()
+        self._identidade.recalcular()
         # Sessão nova: Loja e Caixa não herdam o desbloqueio de quem usou antes.
         self._trancar_loja()
         self._trancar_caixa()
@@ -480,4 +493,7 @@ class MainWindow(QMainWindow):
     def _deslogar_agora(self) -> None:
         self._trancar_loja()
         self._auth.logout()
+        # Sem sessão o rótulo é vazio: o nome de quem saiu não fica esperando
+        # nos cabeçalhos pelo próximo operador.
+        self._identidade.recalcular()
         self._pilha_raiz.setCurrentIndex(0)

@@ -396,7 +396,7 @@ def test_trinta_aberturas_nao_deixam_nada_preso_a_view(
     """O caminho real: a view de Funcionários como parent, `exec()` de verdade e
     fechamento pelo botão. Se alguém trocar `executar_modal()` por um `.exec()`
     cru em `_criar`/`_editar_id`, é aqui que aparece."""
-    view = FuncionariosView(funcionarios, pagamentos, auth, caixas_service)
+    view = FuncionariosView(funcionarios, pagamentos, auth)
 
     for _ in range(30):
         modal = FuncionarioDialog(parent=view)

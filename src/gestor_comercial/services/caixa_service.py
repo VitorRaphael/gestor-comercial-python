@@ -23,6 +23,7 @@ from gestor_comercial.domain.enums import (
 )
 from gestor_comercial.domain.movimento_caixa import MovimentoCaixa
 from gestor_comercial.domain.pagamento import Pagamento
+from gestor_comercial.domain.usuario import Usuario
 from gestor_comercial.repository.unit_of_work import UnitOfWork
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
@@ -978,13 +979,8 @@ class CaixaService:
     # ------------------------------------------------------------------
 
     def identificacao_turno(self, caixa: Caixa) -> str:
-        """"Caixa Turno - Noite" etc. (§3.1): o turno é identificado pelo
-        PERÍODO em que foi aberto, não por quem operou — é o nome que
-        pertence à operação/gaveta, não ao CPF de um funcionário específico.
-        Período deriva da hora de `aberto_em` (heurística simples: sem
-        cadastro de escala no sistema, é a única informação que já existe
-        pra todo turno, aberto ou fechado)."""
-        return f"Caixa Turno - {periodo_do_turno(caixa.aberto_em)}"
+        """O nome do turno — ver `nome_do_turno`, a regra única."""
+        return nome_do_turno(caixa.aberto_por, caixa.aberto_em)
 
     def fechamento_da_gaveta(self, caixa_id: int) -> FechamentoGaveta:
         """Fotografia enxuta de um turno já fechado, para a seção "Fechamento
@@ -1137,9 +1133,36 @@ class CaixaService:
         return limpo or None
 
 
+def nome_do_turno(operador: Usuario | None, momento: datetime) -> str:
+    """O nome do turno, igual em todo lugar que o mostra: cabeçalho do shell,
+    tela de Caixa, modal de abertura, relatórios e cupom de fechamento.
+
+    É o nome do operador de login que abre o turno ("Caixa Turno - Noite",
+    ou "Caixa" se foi assim que o Vitor cadastrou) — o nome que ele escolhe no
+    dropdown do login e edita em Funcionários, que renomeia o login junto (ver
+    `FuncionarioService.editar`).
+
+    Até 2026-09-21 o nome saía da HORA de abertura (`periodo_do_turno`), e o
+    mesmo turno tinha dois nomes: o operador "Caixa Turno - Noite" abria o
+    caixa às 17:36 e o cabeçalho dizia "Caixa Turno - Tarde", porque a Noite
+    da heurística só começa às 18h — enquanto as telas de venda mostravam o
+    operador. A hora sobrou só para turno sem operador gravado
+    (`aberto_por_id` é anulável), que não tem outro nome para dar.
+
+    Função pura e não método: o cupom (`comprovante_fechamento`) e o modal de
+    abertura, que nomeia um turno que ainda nem existe, usam a mesma regra sem
+    precisar de um `Caixa` nem de uma instância do service.
+    """
+    if operador is not None:
+        return operador.nome
+    return f"Caixa Turno - {periodo_do_turno(momento)}"
+
+
 def periodo_do_turno(momento: datetime) -> str:
     """Manhã (05h-11h59) / Tarde (12h-17h59) / Noite (18h-04h59) — heurística
-    de food truck (sem cadastro de escala), usada por `identificacao_turno`."""
+    de food truck (sem cadastro de escala). Não dá mais NOME a turno (ver
+    `nome_do_turno`): é a coluna de período do Histórico Diário e o nome de
+    reserva do turno sem operador."""
     hora = momento.hour
     if 5 <= hora < 12:
         return "Manhã"

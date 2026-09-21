@@ -69,17 +69,62 @@ class FuncionarioService:
         que não vier vira `None`. O modal manda o estado completo da tela — e
         é por isso que ele abre com o turno atual já escrito no campo. Omitir
         um argumento aqui é apagar o dado, não "deixar como está".
+
+        ## O login de mesmo nome é renomeado junto
+
+        Para o Vitor, "Caixa Turno - Noite" é UMA coisa: o funcionário desta
+        tela, o operador do dropdown do login e o nome do turno que ele abre
+        (`caixa_service.nome_do_turno`). As duas tabelas são separadas (§3.11)
+        e o par é casado por nome — a mesma convenção de `excluir` e de
+        `listar_operadores_caixa`. Renomear só o funcionário desfazia o par em
+        silêncio: o cabeçalho, o login e o turno continuavam com o nome antigo,
+        e a exclusão e o filtro por operador deixavam de achar o login.
+
+        Num commit só: ou os dois mudam, ou nenhum. Toda validação — inclusive
+        a do nome de login repetido — roda antes da primeira atribuição, então
+        uma recusa sai sem nada para o `@transacional` desfazer.
         """
         self.auth.exigir_gerente()
         funcionario = self.buscar(funcionario_id)
 
-        funcionario.nome = self._validar_nome(nome)
-        funcionario.cargo = self._validar_cargo(cargo)
+        nome_limpo = self._validar_nome(nome)
+        cargo_valido = self._validar_cargo(cargo)
+        turno_valido = self._validar_turno(turno_horario)
+        login = self._login_a_renomear(funcionario.nome, nome_limpo)
+
+        funcionario.nome = nome_limpo
+        funcionario.cargo = cargo_valido
         funcionario.telefone = self._limpar_texto(telefone)
-        funcionario.turno_horario = self._validar_turno(turno_horario)
+        funcionario.turno_horario = turno_valido
+        if login is not None:
+            login.nome = nome_limpo
+            self.uow.usuarios.salvar(login)
         self.uow.funcionarios.salvar(funcionario)
         self.uow.commit()
         return funcionario
+
+    def _login_a_renomear(self, nome_atual: str, nome_novo: str) -> Usuario | None:
+        """O login que acompanha o funcionário na troca de nome, ou `None`.
+
+        Ativo ou não: o par existe pelo nome, e um login desativado que ficasse
+        com o nome antigo voltaria a casar com quem viesse a usá-lo.
+
+        Recusa o nome de OUTRO login: dois operadores com o mesmo nome no
+        dropdown não se distinguem, e o par por nome passaria a achar qualquer
+        um dos dois. Funcionário sem login que recebe o nome de um login
+        existente não é recusado — é assim que um par se forma (o seed cria os
+        dois lados com o mesmo nome).
+        """
+        if nome_novo == nome_atual:
+            return None
+        login = self.uow.usuarios.buscar_por_nome(nome_atual)
+        if login is None:
+            return None
+        if self.uow.usuarios.buscar_por_nome(nome_novo) is not None:
+            raise RegraDeNegocioError(
+                f"Já existe um operador de login chamado {nome_novo}. Escolha outro nome."
+            )
+        return login
 
     def listar_ativos(self) -> list[Funcionario]:
         return self.uow.funcionarios.listar_ativos()

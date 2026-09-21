@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDialog,
@@ -35,7 +35,7 @@ from gestor_comercial.domain.movimento_caixa import MovimentoCaixa
 from gestor_comercial.services.caixa_service import (
     CaixaService,
     ResumoCaixa,
-    periodo_do_turno,
+    nome_do_turno,
 )
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
@@ -95,6 +95,11 @@ def _cor_perigo() -> QColor:
 
 class CaixaView(QWidget):
     """Status do caixa, abertura/fechamento, movimentos da gaveta e conferência."""
+
+    # Um turno abriu ou fechou por esta tela. O nome do turno aberto é o rótulo
+    # dos cabeçalhos do shell, então quem os mantém (`IdentidadeDoTurno`, via
+    # `MainWindow`) precisa saber na hora — e não na próxima navegação.
+    turno_alterado = Signal()
 
     def __init__(
         self,
@@ -565,17 +570,19 @@ class CaixaView(QWidget):
             self._label_erro.setText(str(erro))
             return
         self.atualizar()
+        self.turno_alterado.emit()
 
     def _turno_a_abrir(self) -> str:
-        """"Turno da Noite" — o turno que está prestes a começar.
+        """O nome do turno que está prestes a começar.
 
-        Deriva de `periodo_do_turno`, a mesma heurística de hora que
-        `identificacao_turno` usa para nomear um turno já existente (§3.1). Não
-        dá para chamar `identificacao_turno` aqui porque ela recebe um `Caixa`,
-        e neste ponto ele ainda não existe — é justamente o que o modal vai
-        criar.
+        A mesma regra (`nome_do_turno`) que nomeia o turno depois de aberto, com
+        quem está logado — que é quem o service vai gravar como `aberto_por`.
+        Não dá para chamar `identificacao_turno` aqui porque ela recebe um
+        `Caixa`, e neste ponto ele ainda não existe — é justamente o que o
+        modal vai criar. Antes isto dizia "Turno da Tarde" pela hora, e o
+        cabeçalho passava a dizer outra coisa no instante seguinte à abertura.
         """
-        return f"Turno da {periodo_do_turno(datetime.now())}"
+        return nome_do_turno(self._caixa_service.auth.usuario_logado, datetime.now())
 
     def _fechar_caixa(self) -> None:
         """Abre o cartão de conferência e fecha o turno com o que ele devolver.
@@ -603,6 +610,9 @@ class CaixaView(QWidget):
             self._label_erro.setText(str(erro))
             return
         self.atualizar()
+        # Antes da impressão, que pode demorar: o cabeçalho deixa de nomear
+        # um turno que já fechou no mesmo instante em que a tela de Caixa.
+        self.turno_alterado.emit()
         # O relatório sai sozinho no fim do turno — é o momento em que o gerente
         # confere a gaveta, e esperar que ele lembre de clicar em Imprimir depois
         # de o caixa já estar fechado é pedir para o papel nunca sair. Vem DEPOIS

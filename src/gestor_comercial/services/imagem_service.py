@@ -31,6 +31,7 @@ from pathlib import Path
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QImage, QImageReader, QPainter
 
+from gestor_comercial.core.caminhos import SUBPASTA_DAS_FOTOS
 from gestor_comercial.core.resilience import logger_do_app
 from gestor_comercial.repository.base import DB_PATH
 
@@ -54,7 +55,7 @@ MENSAGEM_FORMATO_INVALIDO = "Formato inválido. Selecione PNG, JPG ou WEBP."
 
 def pasta_thumbnails() -> Path:
     """Pasta de miniaturas, ao lado do banco (mesmo diretório de dados)."""
-    pasta = DB_PATH.parent / "uploads" / "thumbnails"
+    pasta = DB_PATH.parent / SUBPASTA_DAS_FOTOS
     pasta.mkdir(parents=True, exist_ok=True)
     return pasta
 

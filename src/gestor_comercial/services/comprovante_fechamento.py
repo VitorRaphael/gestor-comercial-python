@@ -26,7 +26,7 @@ from gestor_comercial.services import formatador_cupom as cupom
 from gestor_comercial.services.caixa_service import (
     GrupoVendaCategoria,
     LinhaConferenciaPagamento,
-    periodo_do_turno,
+    nome_do_turno,
 )
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
 
@@ -60,11 +60,10 @@ def montar_documento(
     ]
     if titulo_fechamento:
         documento.append(BlocoTexto(titulo_fechamento, centralizado=True))
-    # §3.1: o cupom identifica a GAVETA/turno pelo período em que abriu — não
-    # pelo id interno nem por quem operou — mesmo raciocínio de
-    # `CaixaService.identificacao_turno` (duplicado aqui, função pura, para
-    # este módulo não precisar de uma instância de `CaixaService` só por isso).
-    documento.append(BlocoTexto(f"Caixa Turno - {periodo_do_turno(caixa.aberto_em)}", centralizado=True))
+    # O mesmo nome de turno da tela (`nome_do_turno`, a regra única): o
+    # comprovante que o gerente confere no fim da noite não pode chamar de
+    # "Tarde" o turno que a tela chamou de "Caixa Turno - Noite".
+    documento.append(BlocoTexto(nome_do_turno(caixa.aberto_por, caixa.aberto_em), centralizado=True))
     documento.extend([
         BlocoTexto(cupom.duas_colunas("Aberto em", cupom.data_hora(caixa.aberto_em), largura)),
         BlocoTexto(

@@ -1,4 +1,3 @@
-import os
 import sqlite3
 from pathlib import Path
 from typing import Generic, TypeVar
@@ -7,10 +6,13 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-# GESTOR_COMERCIAL_DB permite apontar pra outro arquivo sem tocar no código —
-# usado pra testar migration em banco descartável e pra apontar o .exe pra um
-# caminho fixo na máquina do food truck.
-DB_PATH = Path(os.environ.get("GESTOR_COMERCIAL_DB", Path.home() / ".gestor_comercial" / "gestor_comercial.db"))
+from gestor_comercial.core.caminhos import caminho_do_banco
+
+# Em desenvolvimento, GESTOR_COMERCIAL_DB permite apontar pra outro arquivo sem
+# tocar no código (banco descartável de teste de migration). No `.exe` o banco é
+# sempre o da pasta de dados própria da versão, e a variável é ignorada — ver
+# `core/caminhos.py`.
+DB_PATH = caminho_do_banco()
 
 
 @event.listens_for(Engine, "connect")

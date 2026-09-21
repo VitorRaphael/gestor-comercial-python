@@ -373,20 +373,22 @@ def test_o_erro_do_service_continua_aparecendo_na_tela_de_tras(
     assert caixa_fechado_na_tela._label_erro.text() != ""
 
 
-def test_o_turno_do_cartao_sai_da_mesma_regra_de_periodo_do_service(
-    qapp, caixa_fechado_na_tela
+def test_o_cartao_anuncia_o_nome_que_o_turno_vai_ter_depois_de_aberto(
+    qapp, caixa_fechado_na_tela, caixas_service, gerente
 ):
-    """"Turno da Noite" deriva de `periodo_do_turno`, a mesma heurística de hora
-    que `identificacao_turno` usa para nomear um turno já existente. Não dá para
-    chamar `identificacao_turno` aqui porque ela recebe um `Caixa` — e neste
-    ponto ele ainda não existe."""
-    from datetime import datetime
+    """O cartão nomeia um turno que ainda não existe; aberto, ele tem que se
+    chamar exatamente assim — na tela de Caixa e em `identificacao_turno`. Antes
+    o cartão dizia "Turno da Tarde" pela hora, e o cabeçalho passava a dizer
+    outra coisa no instante seguinte. A regra única é `nome_do_turno`: o nome do
+    operador que abre."""
+    anunciado = caixa_fechado_na_tela._turno_a_abrir()
 
-    from gestor_comercial.services.caixa_service import periodo_do_turno
+    _abrir_pela_tela(qapp, caixa_fechado_na_tela, "5000")
 
-    assert caixa_fechado_na_tela._turno_a_abrir() == (
-        f"Turno da {periodo_do_turno(datetime.now())}"
-    )
+    caixa = caixas_service.buscar_aberto()
+    assert anunciado == gerente.nome
+    assert caixas_service.identificacao_turno(caixa) == anunciado
+    assert caixa_fechado_na_tela._label_titulo.text() == anunciado
 
 
 # ---------------------------------------------------------------------------
