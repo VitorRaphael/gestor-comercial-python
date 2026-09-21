@@ -476,8 +476,9 @@ TEMA_ESCURO: dict[str, str] = {
     "impressora_situacao_inativa_texto": "#71717A",
     # O interruptor desenhado (`interruptor.py`). Chamava-se
     # `impressora_interruptor_*` enquanto só "Impressora ativa" o usava; o §9.23
-    # levou o mesmo desenho para "Cobrar taxa de serviço" na Configurações, e o
-    # nome passou a ser o papel — o critério de `botao_circular_*` (§9.4).
+    # levou o mesmo desenho para a Central de Loja e o nome passou a ser o papel
+    # — o critério de `botao_circular_*` (§9.4). O segundo uso saiu com a taxa
+    # de serviço (§9.26); o nome fica, porque ele descreve a peça.
     "interruptor_ligado": "#22C55E",
     "interruptor_desligado": "#3F3F46",
     "interruptor_botao_ligado": "#0B0B0A",
@@ -501,23 +502,12 @@ TEMA_ESCURO: dict[str, str] = {
     "conferencia_mesa_badge_glifo": "#E5A93C",
     "conferencia_mesa_secao": "#E5A93C",
     "conferencia_mesa_divisor": "rgba(255, 255, 255, 0.06)",
-    # O subtotal, a taxa e o aviso são REBAIXADOS em relação ao cartão, como o
-    # visor de valor: é o que se confere, não mais um cartão por cima.
-    "conferencia_mesa_valor_bg": "#111110",
-    "conferencia_mesa_valor_borda": "rgba(255, 255, 255, 0.07)",
-    "conferencia_mesa_rotulo": "#A1A1AA",
     # O total da pré-conta: a moldura âmbar do mockup, e o único valor da tela
-    # na cor — é o número que vai para o papel.
+    # na cor — é o número que vai para o papel. Os tokens do subtotal e da marca
+    # da taxa saíram no §9.26, com a cobrança.
     "conferencia_mesa_total_bg": "#1E1912",
     "conferencia_mesa_total_borda": "rgba(229, 169, 60, 0.45)",
     "conferencia_mesa_total_texto": "#E5A93C",
-    "conferencia_mesa_taxa_hover_borda": "rgba(229, 169, 60, 0.35)",
-    # A marca da taxa: disco âmbar com o visto escuro quando cobrada, só o
-    # anel quando não.
-    "conferencia_mesa_marca_bg": "#E5A93C",
-    "conferencia_mesa_marca_glifo": "#0C0E12",
-    "conferencia_mesa_marca_vazia": "rgba(255, 255, 255, 0.28)",
-    "conferencia_mesa_taxa_valor": "#E5A93C",
     # O aviso do cadeado: petróleo, e não âmbar nem vermelho — não é alerta de
     # erro, é a regra dita antes ("os itens vão travar").
     "conferencia_mesa_aviso_bg": "#132226",
@@ -559,16 +549,6 @@ TEMA_ESCURO: dict[str, str] = {
     # O card do garçom. O "paga" é o verde de repasse feito; o "não paga" é o
     # âmbar de pendência — e não vermelho, que é erro: deixar para depois é uma
     # escolha legítima, não um defeito.
-    "pagamento_comissao_bg": "#141413",
-    "pagamento_comissao_borda": "rgba(255, 255, 255, 0.06)",
-    "pagamento_avatar_bg": "#2B2113",
-    "pagamento_avatar_glifo": "#E5A93C",
-    "pagamento_comissao_paga_bg": "#0E1A12",
-    "pagamento_comissao_paga_borda": "rgba(34, 197, 94, 0.35)",
-    "pagamento_comissao_paga_texto": "#22C55E",
-    "pagamento_comissao_pendente_bg": "#201911",
-    "pagamento_comissao_pendente_borda": "rgba(245, 158, 11, 0.35)",
-    "pagamento_comissao_pendente_texto": "#F59E0B",
 }
 
 TEMA_CLARO: dict[str, str] = {
@@ -881,17 +861,9 @@ TEMA_CLARO: dict[str, str] = {
     "conferencia_mesa_badge_glifo": "#1D4ED8",
     "conferencia_mesa_secao": "#1D4ED8",
     "conferencia_mesa_divisor": "#EFEEE8",
-    "conferencia_mesa_valor_bg": "#FAF9F5",
-    "conferencia_mesa_valor_borda": "#E2E1D9",
-    "conferencia_mesa_rotulo": "#64748B",
     "conferencia_mesa_total_bg": "#EFF4FF",
     "conferencia_mesa_total_borda": "#93B4FF",
     "conferencia_mesa_total_texto": "#0043CC",
-    "conferencia_mesa_taxa_hover_borda": "#93B4FF",
-    "conferencia_mesa_marca_bg": "#0055FF",
-    "conferencia_mesa_marca_glifo": "#FFFFFF",
-    "conferencia_mesa_marca_vazia": "#CBD5E1",
-    "conferencia_mesa_taxa_valor": "#0043CC",
     "conferencia_mesa_aviso_bg": "#F0FDFA",
     "conferencia_mesa_aviso_borda": "#99F6E4",
     "conferencia_mesa_aviso_glifo": "#0F766E",
@@ -921,14 +893,4 @@ TEMA_CLARO: dict[str, str] = {
     "pagamento_campo_bg": "#FAF9F5",
     "pagamento_troco_bg": "#FAF9F5",
     "pagamento_troco_texto": "#DC2626",
-    "pagamento_comissao_bg": "#FAF9F5",
-    "pagamento_comissao_borda": "#E2E1D9",
-    "pagamento_avatar_bg": "#FEF3C7",
-    "pagamento_avatar_glifo": "#B45309",
-    "pagamento_comissao_paga_bg": "#F0FDF4",
-    "pagamento_comissao_paga_borda": "#BBF7D0",
-    "pagamento_comissao_paga_texto": "#15803D",
-    "pagamento_comissao_pendente_bg": "#FFFBEB",
-    "pagamento_comissao_pendente_borda": "#FDE68A",
-    "pagamento_comissao_pendente_texto": "#B45309",
 }

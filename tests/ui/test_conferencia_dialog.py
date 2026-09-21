@@ -1,22 +1,25 @@
-"""O cartão "Fechar conta para conferência". §9.23, sem a escolha desde o §9.25.
+"""O cartão "Fechar conta para conferência". §9.23, sem a taxa desde o §9.26.
 
 Pedido do Vitor, com o mockup: trocar o diálogo de fábrica do "Fechar conta" —
 moldura do Windows, um `QCheckBox` e OK/Cancelar — por um cartão que diz quanto
-a mesa vai pagar ANTES de imprimir a pré-conta. A caixinha de marcar a taxa
-existiu por um dia: no §9.25 ela saiu ("deixa de existir como etapa de escolha
-do operador"), e quem decide se a loja cobra os 10% é a Central de Loja.
+a mesa vai pagar ANTES de imprimir a pré-conta.
+
+A taxa de serviço passou por aqui e foi embora: caixinha marcável no §9.23,
+selo informativo no §9.25 ("deixa de existir como etapa de escolha do
+operador") e nada no §9.26, quando a cobrança saiu do sistema. O cartão ficou —
+decisão do Vitor no §9.25 — porque fechar a conta trava os itens e só o PIN de
+gerente reabre.
 
 O que esta suíte cobra:
 
-1. **as frases do mockup** — cabeçalho, os dois valores, a linha da taxa, o
-   aviso e o rodapé, na mesa e no balcão;
-2. **a taxa vem da loja** — o total já abre com ela, o cartão devolve o
-   percentual sem perguntar nada, e não há como alterá-lo pela tela;
-3. **a loja sem taxa** — o bloco não é criado e o total é o subtotal;
-4. **zero SQL** — repintar o cartão não vai ao banco;
-5. **o teclado** — Enter fecha e imprime, Esc cancela, os botões não roubam foco;
-6. **o desenho** — nada espremido, nos dois temas, abaixo dos 728px úteis;
-7. **o ciclo de vida** — o escurecedor sai com o cartão, as ligações saem
+1. **as frases do mockup** — cabeçalho, o total, o aviso e o rodapé, na mesa e
+   no balcão;
+2. **o total é o consumo** — nenhum acréscimo, e nenhum vestígio da taxa na
+   tela;
+3. **zero SQL** — repintar o cartão não vai ao banco;
+4. **o teclado** — Enter fecha e imprime, Esc cancela, os botões não roubam foco;
+5. **o desenho** — nada espremido, nos dois temas, abaixo dos 728px úteis;
+6. **o ciclo de vida** — o escurecedor sai com o cartão, as ligações saem
    nominalmente, e trinta aberturas não deixam nada para trás.
 """
 
@@ -33,19 +36,17 @@ from PySide6.QtWidgets import QApplication, QDialog, QLabel, QPushButton, QWidge
 from sqlalchemy import event
 
 import gestor_comercial
-from gestor_comercial.services.comanda_service import TAXA_SERVICO_PADRAO, PreviaDeConferencia
+from gestor_comercial.services.comanda_service import PreviaDeConferencia
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.widgets.cartao_modal import Backdrop
 from gestor_comercial.ui.widgets.conferencia_dialog import (
     AVISO_TEXTO,
     SUBTITULO,
     ConferenciaMesaDialog,
-    _CartaoTaxa,
 )
 
-MOCKUP = PreviaDeConferencia(mesa_numero=12, subtotal=Decimal("131.50"), taxa_percentual=TAXA_SERVICO_PADRAO)
-BALCAO = PreviaDeConferencia(mesa_numero=None, subtotal=Decimal("48.00"), taxa_percentual=TAXA_SERVICO_PADRAO)
-SEM_TAXA = PreviaDeConferencia(mesa_numero=12, subtotal=Decimal("131.50"), taxa_percentual=None)
+MOCKUP = PreviaDeConferencia(mesa_numero=12, subtotal=Decimal("131.50"))
+BALCAO = PreviaDeConferencia(mesa_numero=None, subtotal=Decimal("48.00"))
 
 
 @pytest.fixture
@@ -84,17 +85,13 @@ def test_o_mockup_frase_por_frase(criar):
     assert modal._titulo.text() == "Fechar conta para conferência"
     assert modal._subtitulo.text() == SUBTITULO == "Revise os valores antes de imprimir a pré-conta."
     for frase in (
-        "SUBTOTAL",
         "TOTAL DA PRÉ-CONTA",
-        "Taxa de serviço incluída",
-        "10% sobre o consumo da mesa",
-        "R$ 13,15",
+        "R$ 131,50",
         "A mesa ficará em conferência",
         AVISO_TEXTO,
         "AÇÃO SEGURA",
     ):
         assert frase in textos, frase
-    assert modal._valor_subtotal.text() == "R$ 131,50"
     assert modal._botao_cancelar.text() == "Cancelar"
     assert modal._botao_confirmar.text() == "Fechar e imprimir"
     assert "“Reabrir” com o PIN de gerente" in AVISO_TEXTO
@@ -108,59 +105,43 @@ def test_o_balcao_nao_fala_em_mesa(criar):
 
     assert modal._secao.text() == "BALCÃO · CONFERÊNCIA"
     assert "A comanda ficará em conferência" in textos
-    assert "10% sobre o consumo da comanda" in textos
     assert not any("mesa" in texto.lower() for texto in textos if texto != AVISO_TEXTO)
 
 
 # ---------------------------------------------------------------------------
-# 2. A taxa vem da loja, e o cartão não pergunta nada
+# 2. O total é o consumo, e nada mais
 # ---------------------------------------------------------------------------
 
 
-def test_o_total_ja_abre_com_a_taxa(criar):
-    """§9.25: sem etapa de escolha. Quem decide é a Central de Loja, e o cartão
-    abre com a conta pronta — os R$ 144,65 do mockup."""
+def test_o_total_e_o_consumo_sem_acrescimo(criar):
+    """§9.26: o cartão mostra a soma dos itens. Um acréscimo que volte a ser
+    aplicado — taxa, serviço, couvert — reprova aqui."""
     modal = criar(MOCKUP)
 
-    assert modal._valor_total.text() == "R$ 144,65"
-    assert modal._valor_subtotal.text() == "R$ 131,50"
-    assert modal.resultado() == Decimal("10")
-    assert modal._cartao_taxa.valor.text() == "R$ 13,15"
+    assert modal._valor_total.text() == "R$ 131,50"
+    assert modal._previa.total == modal._previa.subtotal == Decimal("131.50")
 
 
-def test_nao_existe_controle_nenhum_para_a_taxa(criar):
-    """A caixinha sumiu: o card da taxa não é clicável, não tem cursor de mão e
-    não existe método para alternar. Uma delas que voltasse traria de volta a
-    pergunta que o §9.25 tirou do balcão."""
+def test_nao_sobrou_vestigio_da_taxa_na_tela(criar):
+    """Nem palavra, nem percentual, nem controle: a cobrança saiu do sistema, e
+    a tela não pode ser a única a ainda falar dela."""
     modal = criar(MOCKUP)
+    textos = " ".join(_textos(modal)).lower()
 
+    assert "taxa" not in textos
+    assert "serviço" not in textos
+    assert "10%" not in textos
     assert not hasattr(modal, "alternar_taxa")
-    assert not hasattr(modal, "cobrar_taxa")
-    assert not hasattr(modal._cartao_taxa, "clicado")
-    assert modal._cartao_taxa.cursor().shape() == Qt.CursorShape.ArrowCursor
-    # O Espaço, que alternava, não faz mais nada com os números.
+    # O cartão não devolve mais percentual nenhum à view.
+    assert not hasattr(modal, "resultado")
+    # O Espaço, que um dia alternou a taxa, não faz nada.
     _tecla(modal, Qt.Key.Key_Space)
-    assert modal._valor_total.text() == "R$ 144,65"
+    assert modal._valor_total.text() == "R$ 131,50"
     assert modal.result() == 0
 
 
 # ---------------------------------------------------------------------------
-# 3. A loja sem taxa
-# ---------------------------------------------------------------------------
-
-
-def test_loja_sem_taxa_nem_cria_o_bloco(criar):
-    """Não é escondido: não existe. Nenhum widget invisível ocupando memória."""
-    modal = criar(SEM_TAXA)
-
-    assert modal.findChildren(_CartaoTaxa) == []
-    assert not any("axa de serviço" in texto for texto in _textos(modal))
-    assert modal._valor_total.text() == modal._valor_subtotal.text() == "R$ 131,50"
-    assert modal.resultado() is None
-
-
-# ---------------------------------------------------------------------------
-# 4. Zero SQL
+# 3. Zero SQL
 # ---------------------------------------------------------------------------
 
 
@@ -189,7 +170,7 @@ def test_repintar_o_cartao_nao_vai_ao_banco(qapp, uow, comandas, gerente, caixa_
 
 
 # ---------------------------------------------------------------------------
-# 5. O teclado
+# 4. O teclado
 # ---------------------------------------------------------------------------
 
 
@@ -200,7 +181,6 @@ def test_enter_fecha_e_imprime(criar, tecla):
     _tecla(modal, tecla)
 
     assert modal.result() == QDialog.DialogCode.Accepted
-    assert modal.resultado() == Decimal("10")
 
 
 def test_esc_cancela(criar):
@@ -223,11 +203,10 @@ def test_o_x_e_o_cancelar_rejeitam(criar, nome_do_botao):
 
 
 def test_o_botao_fechar_e_imprimir_aceita(criar):
-    modal = criar(SEM_TAXA)
+    modal = criar(BALCAO)
     modal._botao_confirmar.click()
 
     assert modal.result() == QDialog.DialogCode.Accepted
-    assert modal.resultado() is None
 
 
 def test_os_botoes_nao_roubam_o_teclado(criar):
@@ -241,7 +220,7 @@ def test_os_botoes_nao_roubam_o_teclado(criar):
 
 
 # ---------------------------------------------------------------------------
-# 6. O desenho
+# 5. O desenho
 # ---------------------------------------------------------------------------
 
 
@@ -273,11 +252,8 @@ def com_fonte_e_tema(qapp, request):
 _VARIANTES = {
     "mockup": MOCKUP,
     "balcao": BALCAO,
-    "sem_taxa": SEM_TAXA,
-    # A conta grande de uma mesa de festa: cinco dígitos nos dois cartões.
-    "conta_grande": PreviaDeConferencia(
-        mesa_numero=60, subtotal=Decimal("9999.99"), taxa_percentual=TAXA_SERVICO_PADRAO
-    ),
+    # A conta grande de uma mesa de festa: cinco dígitos no cartão do total.
+    "conta_grande": PreviaDeConferencia(mesa_numero=60, subtotal=Decimal("9999.99")),
 }
 
 
@@ -321,13 +297,15 @@ def test_os_tokens_da_familia_existem_nos_dois_temas():
     from gestor_comercial.ui.theme.tokens import TEMA_CLARO, TEMA_ESCURO
 
     familia = {chave for chave in TEMA_ESCURO if chave.startswith(("conferencia_mesa_", "interruptor_"))}
-    assert len(familia) > 20
+    # Piso de 21 para 16 no §9.26: oito tokens do subtotal e da marca da taxa
+    # saíram com a cobrança (a família foi de 25 para 17). O que ele segura é a família sumir inteira.
+    assert len(familia) > 15
     assert familia == {chave for chave in TEMA_CLARO if chave.startswith(("conferencia_mesa_", "interruptor_"))}
     assert not any(chave.startswith("impressora_interruptor") for chave in TEMA_ESCURO | TEMA_CLARO)
 
 
 # ---------------------------------------------------------------------------
-# 7. Ciclo de vida
+# 6. O ciclo de vida
 # ---------------------------------------------------------------------------
 
 
@@ -337,7 +315,7 @@ def test_fechar_solta_o_escurecedor_da_janela(qapp, assentar):
     janela = QWidget()
     janela.show()
 
-    for previa in (MOCKUP, SEM_TAXA, BALCAO):
+    for previa in (MOCKUP, BALCAO):
         modal = ConferenciaMesaDialog(previa, janela)
         modal.show()
         qapp.processEvents()
@@ -353,10 +331,10 @@ def test_trinta_aberturas_nao_deixam_nada_preso_a_view(qapp, assentar):
     """O caminho real do app: aberto com `exec()` e fechado pelo gesto — pelos
     quatro caminhos de saída, alternando."""
     pai = QWidget()
-    variantes = (MOCKUP, SEM_TAXA, BALCAO)
+    variantes = (MOCKUP, BALCAO)
 
     for volta in range(30):
-        modal = ConferenciaMesaDialog(variantes[volta % 3], pai)
+        modal = ConferenciaMesaDialog(variantes[volta % 2], pai)
         saida = (modal.reject, modal._botao_cancelar.click, modal._botao_fechar.click, modal.accept)[volta % 4]
         QTimer.singleShot(0, saida)
         modal.exec()
@@ -385,7 +363,7 @@ def test_fechar_desliga_as_tres_ligacoes(criar):
 def test_soltar_os_recursos_duas_vezes_e_silencioso(criar):
     """A trava `_limpo`, medida pelo AVISO (§9.12): nesta versão do PySide6 o
     segundo `disconnect` devolve `False` e imprime `RuntimeWarning`."""
-    for previa in (MOCKUP, SEM_TAXA):
+    for previa in (MOCKUP, BALCAO):
         modal = criar(previa)
         modal.reject()
 

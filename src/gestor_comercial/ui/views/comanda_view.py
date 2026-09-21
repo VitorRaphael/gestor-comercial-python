@@ -744,9 +744,8 @@ class ComandaView(QWidget):
     def _fechar_para_conferencia(self) -> None:
         """Mostra a prévia da pré-conta, trava os itens e a imprime na impressora padrão.
 
-        O cartão (§9.23) só mostra e devolve o percentual escolhido; quem grava
-        percentual, valor da taxa e status num commit só, e quem recusa a taxa
-        com a loja desligada, é o `fechar_para_conferencia` do service.
+        O cartão (§9.23) só mostra o total e pede a confirmação; quem grava o
+        status é o `fechar_para_conferencia` do service.
         """
         if self._comanda is None:
             return
@@ -761,10 +760,9 @@ class ComandaView(QWidget):
         modal = ConferenciaMesaDialog(previa, self)
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
-        taxa = modal.resultado()
 
         try:
-            self._comanda_service.fechar_para_conferencia(comanda_id, taxa)
+            self._comanda_service.fechar_para_conferencia(comanda_id)
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
             return

@@ -95,15 +95,16 @@ def _clicar(modal: MovimentacaoCaixaDialog, rotulo: str) -> None:
 
 
 def test_as_movimentacoes_manuais_sao_exatamente_as_do_enum_menos_consumo():
-    """Dois tipos ficam de fora porque `registrar_movimento` os recusa, e a
-    lista de recusas do service é a MESMA que decide os botões daqui.
+    """Um tipo fica de fora porque `registrar_movimento` o recusa, e a lista de
+    recusas do service é a MESMA que decide os botões daqui.
 
     `CONSUMO_FUNCIONARIO` porque o consumo interno já é rastreado como pagamento
     da comanda, e um movimento manual descontaria a mesma dívida uma segunda
-    vez; `COMISSAO` (§9.25) porque o repasse nasce no recebimento da conta, e um
-    lançado à mão não teria comanda nenhuma do outro lado. Oferecer o botão
-    seria oferecer um erro — e é este teste que segura o dia em que alguém
-    "completar" a lista com um membro novo do enum."""
+    vez. Oferecer o botão seria oferecer um erro — e é este teste que segura o
+    dia em que alguém "completar" a lista com um membro novo do enum.
+
+    Entre o §9.25 e o §9.26 eram dois: `COMISSAO` também ficava fora, porque o
+    repasse nascia no recebimento da conta. Ele saiu do enum com a taxa."""
     esperado = set(TipoMovimento) - set(TIPOS_FORA_DO_LANCAMENTO_MANUAL)
 
     assert set(OPERACOES) == esperado

@@ -40,14 +40,12 @@ class TipoMovimento(enum.Enum):
     REFORCO = "REFORCO"
     DESPESA = "DESPESA"
     CONSUMO_FUNCIONARIO = "CONSUMO_FUNCIONARIO"
-    # O repasse da comissão ao garçom no recebimento da conta (§9.25). Sai da
-    # gaveta como a sangria e a despesa, mas NÃO é lançado à mão: quem o cria é
-    # `CaixaService.registrar_repasse_comissao`, chamado pela tela de pagamento
-    # quando a comissão é marcada como paga e a conta entrou em dinheiro. A
-    # coluna é `VARCHAR` sem `CHECK` (ver o schema), então o valor novo não pede
-    # migração — o que pede cuidado é o cálculo da gaveta, e por isso ele entra
-    # em `TIPOS_QUE_SAEM_DA_GAVETA` no `caixa_service`.
-    COMISSAO = "COMISSAO"
+    # Houve um quinto tipo entre o §9.25 e o §9.26, `COMISSAO`: o repasse da
+    # taxa de serviço ao garçom. Saiu junto com a taxa. A coluna é `VARCHAR` sem
+    # `CHECK`, então nada no schema guardava a lista — mas uma linha antiga com
+    # o texto "COMISSAO" estouraria ao ser lida por este enum, e por isso a
+    # migração `c5d9e17a24b8` reescreve essas linhas como `DESPESA` (o dinheiro
+    # saiu da gaveta de verdade e não pode sumir do fechamento do turno).
 
 
 class CargoFuncionario(enum.Enum):

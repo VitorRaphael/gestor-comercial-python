@@ -133,9 +133,9 @@ GLIFO_NEGRITO = "negrito"
 GLIFO_DOCUMENTO_VISTO = "documento_visto"
 GLIFO_CADEADO = "cadeado"
 GLIFO_ESCUDO = "escudo"
-# Os quatro da tela "Receber Pagamento" (§9.25): as formas de pagamento e o
-# avatar do garçom no card de comissão. Os emojis equivalentes (💵 💳 📱 👤)
-# sairiam coloridos e chapados, como sempre.
+# Os quatro da tela "Receber Pagamento" (§9.25): as formas de pagamento e a
+# pessoa do consumo interno. Os emojis equivalentes (💵 💳 📱 👤) sairiam
+# coloridos e chapados, como sempre.
 GLIFO_CEDULA = "cedula"
 GLIFO_CARTAO = "cartao"
 GLIFO_CELULAR = "celular"
@@ -475,8 +475,7 @@ def _caminho_do_glifo(nome: str) -> QPainterPath:
         p.moveTo(10.0, 18.5)
         p.lineTo(14.0, 18.5)
     elif nome == GLIFO_PESSOA:
-        # Cabeça e ombros: o funcionário do consumo interno e o avatar do
-        # garçom no card de comissão.
+        # Cabeça e ombros: o funcionário do consumo interno.
         p.addEllipse(QPointF(12.0, 8.0), 3.4, 3.4)
         p.moveTo(4.8, 20.5)
         p.quadTo(4.8, 14.0, 12.0, 14.0)

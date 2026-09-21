@@ -1490,8 +1490,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
     /* ---- Receber Pagamento (`views/pagamento_view.py`, §9.25) ----
        A tela que substituiu o ultimo dialogo de fabrica do fluxo de venda. Dois
        cartoes pontilhados lado a lado; o que e proprio daqui sao os cards de
-       forma de pagamento, o bloco do total, o visor de troco e o card da
-       comissao do garcom. */
+       forma de pagamento, o bloco do total e o visor de troco. */
 
     QLabel#pagEyebrow {{
       color: {t['pagamento_badge_glifo']};
@@ -1661,51 +1660,6 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background: transparent;
     }}
 
-    QFrame#pagComissaoCard {{
-      background: {t['pagamento_comissao_bg']};
-      border: 1px solid {t['pagamento_comissao_borda']};
-      border-radius: 12px;
-    }}
-    QFrame#pagComissaoAvatar {{
-      background: {t['pagamento_avatar_bg']};
-      border: none;
-      border-radius: 10px;
-    }}
-    QLabel#pagComissaoTitulo {{
-      color: {t['texto']};
-      font-size: 13px;
-      font-weight: 800;
-      background: transparent;
-    }}
-    QLabel#pagComissaoDetalhe {{
-      color: {t['texto_fraco']};
-      font-size: 11px;
-      background: transparent;
-    }}
-    /* Os dois botoes sao um SELETOR: o aceso tem fundo tingido e borda da
-       familia; o apagado fica na superficie neutra. O `padding-left` reserva o
-       glifo que `BotaoComGlifo` pinta (x=16, 13px de lado). */
-    QPushButton#pagComissaoPaga, QPushButton#pagComissaoNaoPaga {{
-      padding: 9px 14px 9px 38px;
-      background: {t['pagamento_opcao_bg']};
-      border: 1px solid {t['pagamento_opcao_borda']};
-      border-radius: 10px;
-      color: {t['texto_fraco']};
-      font-size: 11px;
-      font-weight: 700;
-      text-align: left;
-    }}
-    QPushButton#pagComissaoPaga[ativa="true"] {{
-      background: {t['pagamento_comissao_paga_bg']};
-      border-color: {t['pagamento_comissao_paga_borda']};
-      color: {t['pagamento_comissao_paga_texto']};
-    }}
-    QPushButton#pagComissaoNaoPaga[ativa="true"] {{
-      background: {t['pagamento_comissao_pendente_bg']};
-      border-color: {t['pagamento_comissao_pendente_borda']};
-      color: {t['pagamento_comissao_pendente_texto']};
-    }}
-
     QPushButton#pagBotaoRegistrar {{
       padding: 11px 20px 11px 44px;
       background: {t['acento']};
@@ -1732,10 +1686,9 @@ def construir_qss_app(t: dict[str, str]) -> str:
 
     /* ---- Conferencia da mesa (`conferencia_dialog.py`, §9.23) ----
        Decimo segundo modal em cartao. Cabecalho, cartao e rodape seguem o
-       desenho dos outros; o que e proprio daqui sao os dois cartoes de valor, o
-       card da taxa (a caixinha e pintada pelo widget) e o aviso do cadeado. O
-       fechar, o Cancelar e o "Fechar e imprimir" entram nas familias
-       compartilhadas mais abaixo. */
+       desenho dos outros; o que e proprio daqui sao o cartao do total e o aviso
+       do cadeado. O fechar, o Cancelar e o "Fechar e imprimir" entram nas
+       familias compartilhadas mais abaixo. */
 
     QDialog#confDialog {{ background: transparent; }}
     QFrame#confDialogCard {{
@@ -1772,52 +1725,24 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-size: 12px;
       background: transparent;
     }}
-    QFrame#confDialogSubtotal, QFrame#confDialogTaxa {{
-      background: {t['conferencia_mesa_valor_bg']};
-      border: 1px solid {t['conferencia_mesa_valor_borda']};
-      border-radius: 12px;
-    }}
-    QFrame#confDialogTaxa:hover {{ border-color: {t['conferencia_mesa_taxa_hover_borda']}; }}
     QFrame#confDialogTotal {{
       background: {t['conferencia_mesa_total_bg']};
       border: 1px solid {t['conferencia_mesa_total_borda']};
       border-radius: 12px;
     }}
-    QLabel#confDialogSubtotalRotulo, QLabel#confDialogTotalRotulo {{
+    QLabel#confDialogTotalRotulo {{
+      color: {t['conferencia_mesa_total_texto']};
       font-size: 9px;
       font-weight: 700;
       letter-spacing: 1.4px;
       background: transparent;
     }}
-    QLabel#confDialogSubtotalRotulo {{ color: {t['conferencia_mesa_rotulo']}; }}
-    QLabel#confDialogTotalRotulo {{ color: {t['conferencia_mesa_total_texto']}; }}
-    QLabel#confDialogValor, QLabel#confDialogValorTotal {{
+    QLabel#confDialogValorTotal {{
+      color: {t['conferencia_mesa_total_texto']};
       font-size: 22px;
       font-weight: 800;
       background: transparent;
     }}
-    QLabel#confDialogValor {{ color: {t['texto']}; }}
-    QLabel#confDialogValorTotal {{ color: {t['conferencia_mesa_total_texto']}; }}
-    QLabel#confDialogTaxaTitulo {{
-      color: {t['texto']};
-      font-size: 13px;
-      font-weight: 800;
-      background: transparent;
-    }}
-    QLabel#confDialogTaxaDescricao {{
-      color: {t['texto_fraco']};
-      font-size: 11px;
-      background: transparent;
-    }}
-    /* O valor da taxa fica a vista desmarcado, apagado: e o que o garcom diz
-       ao cliente antes de marcar. Cobrado, acende na cor do total. */
-    QLabel#confDialogTaxaValor {{
-      color: {t['texto_fraquissimo']};
-      font-size: 13px;
-      font-weight: 800;
-      background: transparent;
-    }}
-    QLabel#confDialogTaxaValor[cobrada="true"] {{ color: {t['conferencia_mesa_taxa_valor']}; }}
     QFrame#confDialogAviso {{
       background: {t['conferencia_mesa_aviso_bg']};
       border: 1px solid {t['conferencia_mesa_aviso_borda']};

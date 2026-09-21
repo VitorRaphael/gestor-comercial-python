@@ -449,13 +449,20 @@ def test_fechar_para_conferencia_trava_novos_itens(comandas, comanda, produto):
         comandas.lancar_item(comanda.id, produto.id, 1)
 
 
-def test_fechar_para_conferencia_calcula_taxa_de_servico(comandas, comanda, produto):
-    comandas.lancar_item(comanda.id, produto.id, 1)  # R$ 10,00
+def test_fechar_para_conferencia_nao_acrescenta_nada_ao_subtotal(comandas, comanda, produto):
+    """O total a pagar é a soma dos itens, e nada mais (§9.26).
 
-    comandas.fechar_para_conferencia(comanda.id, taxa_servico_percentual=Decimal("10"))
+    Este é o teste que fecha a porta por onde a taxa de serviço entrava: até o
+    §9.25 `fechar_para_conferencia` recebia um percentual e o somava aqui, e um
+    item de 10,00 saía por 11,00. Qualquer acréscimo que volte a ser aplicado
+    sobre o consumo reprova nesta linha.
+    """
+    comandas.lancar_item(comanda.id, produto.id, 3)  # 3 x R$ 10,00
 
-    assert comandas.calcular_total(comanda.id) == Decimal("10.00")
-    assert comandas.calcular_total_a_pagar(comanda.id) == Decimal("11.00")
+    comandas.fechar_para_conferencia(comanda.id)
+
+    assert comandas.calcular_total(comanda.id) == Decimal("30.00")
+    assert comandas.calcular_total_a_pagar(comanda.id) == Decimal("30.00")
 
 
 def test_fechar_para_conferencia_aplica_desconto(comandas, comanda, produto):
@@ -466,29 +473,11 @@ def test_fechar_para_conferencia_aplica_desconto(comandas, comanda, produto):
     assert comandas.calcular_total_a_pagar(comanda.id) == Decimal("7.00")
 
 
-def test_fechar_para_conferencia_taxa_e_desconto_juntos(comandas, comanda, produto):
-    comandas.lancar_item(comanda.id, produto.id, 2)  # R$ 20,00
-
-    comandas.fechar_para_conferencia(
-        comanda.id, taxa_servico_percentual=Decimal("10"), desconto=Decimal("2.00")
-    )
-
-    # 20,00 + 10% (2,00) - desconto (2,00) = 20,00
-    assert comandas.calcular_total_a_pagar(comanda.id) == Decimal("20.00")
-
-
 def test_fechar_para_conferencia_desconto_maior_que_a_conta_e_bloqueado(comandas, comanda, produto):
     comandas.lancar_item(comanda.id, produto.id, 1)  # R$ 10,00
 
     with pytest.raises(RegraDeNegocioError):
         comandas.fechar_para_conferencia(comanda.id, desconto=Decimal("50.00"))
-
-
-def test_fechar_para_conferencia_taxa_fora_da_faixa_e_bloqueada(comandas, comanda, produto):
-    comandas.lancar_item(comanda.id, produto.id, 1)
-
-    with pytest.raises(RegraDeNegocioError):
-        comandas.fechar_para_conferencia(comanda.id, taxa_servico_percentual=Decimal("150"))
 
 
 def test_fechar_para_conferencia_de_comanda_ja_em_conferencia(comandas, comanda, produto):
@@ -523,13 +512,12 @@ def test_fechar_para_conferencia_de_comanda_inexistente(comandas, gerente):
 
 def test_reabrir_devolve_para_aberta_e_libera_itens(comandas, comanda, produto):
     comandas.lancar_item(comanda.id, produto.id, 1)
-    comandas.fechar_para_conferencia(comanda.id, taxa_servico_percentual=Decimal("10"))
+    comandas.fechar_para_conferencia(comanda.id, desconto=Decimal("2.00"))
 
     reaberta = comandas.reabrir(comanda.id, PIN_GERENTE)
 
     assert reaberta.status is StatusComanda.ABERTA
     assert reaberta.em_conferencia_em is None
-    assert reaberta.taxa_servico_percentual is None
     assert reaberta.valor_desconto == Decimal("0.00")
     # Item continua liberado de novo.
     comandas.lancar_item(comanda.id, produto.id, 1)

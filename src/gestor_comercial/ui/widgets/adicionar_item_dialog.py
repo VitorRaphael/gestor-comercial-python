@@ -19,7 +19,7 @@ antes de ler o nome.
 
 Nenhuma regra de negócio. O diálogo continua sem conhecer `ComandaService`:
 recebe um `lancar_item(produto_id, quantidade, observacao)` e chama. Preço,
-total da comanda e taxa de serviço continuam sendo conta de quem lança — o
+total da comanda continua sendo conta de quem lança — o
 `R$ 0,00` do rodapé daqui é **prévia visual** (preço do produto destacado ×
 quantidade escolhida), não entra em cálculo nenhum e não é gravado.
 
@@ -867,7 +867,7 @@ class AdicionarItemDialog(QDialog):
     def _atualizar_resumo(self) -> None:
         """Prévia visual do que o Enter vai lançar. Não é cálculo de comanda.
 
-        O total da comanda, a taxa de serviço e o arredondamento continuam
+        O total da comanda e o arredondamento continuam
         inteiros em `ComandaService`/`services.dinheiro` — aqui é preço ×
         quantidade, formatado pelo mesmo `formatar_reais` do resto do app
         (§3.8), só para o operador conferir antes de apertar.

@@ -72,8 +72,9 @@ def test_linhas_de_recebimentos_nao_encolhem_quando_a_pagina_e_baixa(
 
     nomes = ("caixaFormaNome", "caixaFormaValor")
     linhas = [r for r in tela.findChildren(QLabel) if r.objectName() in nomes]
-    # 4 formas de recebimento + a linha da taxa de serviço inclusa (§9.23).
-    assert len(linhas) == 10, "as 4 formas e a taxa de serviço deveriam ter nome e valor"
+    # As 4 formas de recebimento, nome e valor. Eram 5 linhas entre o §9.23 e o
+    # §9.26, quando a taxa de serviço saiu do card.
+    assert len(linhas) == 8, "as 4 formas deveriam ter nome e valor"
 
     espremidas = [r for r in linhas if r.height() < r.sizeHint().height()]
     assert not espremidas, (

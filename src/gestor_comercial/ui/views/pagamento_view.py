@@ -10,29 +10,25 @@ O mockup do Vitor é uma TELA, não um modal: sai do fluxo de janela sobre janel
 e entra na navegação do shell, com "← Voltar à mesa" e "Imprimir 2ª via" no
 cabeçalho. Duas colunas:
 
-* **esquerda, "Consumo da mesa"** — os itens, o subtotal, a taxa de serviço, o
-  bloco âmbar do total e o "dividir por", que só mostra quanto dá por pessoa;
+* **esquerda, "Consumo da mesa"** — os itens, o subtotal, o bloco âmbar do
+  total e o "dividir por", que só mostra quanto dá por pessoa;
 * **direita, "Registrar pagamento"** — as cinco formas em cards, o valor
-  recebido, o troco ao vivo, o card da comissão do garçom e os dois botões.
+  recebido, o troco ao vivo e os dois botões.
 
 ## A conta vem pronta do service
 
 `PagamentoService.conta_para_pagamento` devolve um `ContaParaPagamento`
-imutável (itens, totais, o que já foi pago, a comissão). A tela só mostra e
-recalcula o troco na tecla — nenhuma conta de dinheiro nasce aqui, e nenhuma
-leitura de `Comanda` acontece durante a pintura (a lição do §9.4: todo commit
-expira as instâncias do SQLAlchemy).
+imutável (itens, totais, o que já foi pago). A tela só mostra e recalcula o
+troco na tecla — nenhuma conta de dinheiro nasce aqui, e nenhuma leitura de
+`Comanda` acontece durante a pintura (a lição do §9.4: todo commit expira as
+instâncias do SQLAlchemy).
 
-## A comissão
+## O que saiu com a taxa de serviço (§9.26)
 
-O card do garçom aparece quando a conta tem taxa de serviço E atendente
-vinculado — sem um dos dois não há repasse a fazer. Os dois botões são um
-seletor de status: "Comissão paga" (verde) e "Comissão não paga" (âmbar). O
-padrão é **não paga**: nenhum dinheiro sai da gaveta sem alguém dizer que saiu,
-e a conta entra na lista de pendentes que o gerente acerta no fim do turno. A
-escolha viaja no mesmo commit que fecha a conta (`registrar(...,
-comissao_paga=...)`), e é o service que decide se o repasse vira saída de
-gaveta — só quando a conta entrou em dinheiro.
+Esta tela nasceu no §9.25 com a linha "Serviço" no consumo e o card "Comissão
+de [garçom]" na coluna da direita. Os dois saíram com a taxa: a comissão nunca
+teve valor próprio — ela ERA o `valor_taxa_servico` da conta —, e sem a taxa
+todo card do garçom mostraria R$ 0,00.
 
 ## Consumo interno
 
@@ -77,10 +73,8 @@ from gestor_comercial.services.exceptions import (
     RecursoNaoEncontradoError,
     RegraDeNegocioError,
 )
-from gestor_comercial.services.formatador_cupom import percentual
 from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.services.pagamento_service import (
-    ComissaoDaConta,
     ContaParaPagamento,
     PagamentoService,
 )
@@ -121,14 +115,6 @@ FORMAS = (
 # Em quantas pessoas a conta pode ser dividida na tela. Seis é o que cabe numa
 # fileira de pílulas na largura do card, e é mesa grande de food truck.
 PESSOAS_MAXIMO = 6
-
-# Como o card do garçom abre em toda conta: NÃO PAGA (decisão do Vitor,
-# confirmada). Nenhum dinheiro sai da gaveta sem um clique deliberado, e a
-# conta entra na lista de pendentes que o gerente acerta no fim do turno.
-# Constante, e não dois literais: o valor é lido na montagem da tela E a cada
-# conta carregada, e os dois têm que dizer a mesma coisa.
-COMISSAO_PAGA_PADRAO = False
-
 
 class _CartaoForma(QFrame):
     """Um card de forma de pagamento. O card inteiro é o alvo do clique."""
@@ -177,89 +163,8 @@ class _CartaoForma(QFrame):
             self.clicado.emit(self.forma)
         super().mousePressEvent(event)
 
-
-class _CartaoComissao(QFrame):
-    """"Comissão de [garçom]" com o seletor de status: paga ou não paga.
-
-    Os dois botões são um seletor, e não duas ações: o que estiver aceso é o que
-    vai ser gravado quando a conta fechar. Quem grava é o service, no mesmo
-    commit do fechamento.
-    """
-
-    escolhido = Signal(bool)
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("pagComissaoCard")
-
-        coluna = QVBoxLayout(self)
-        coluna.setContentsMargins(16, 12, 16, 12)
-        coluna.setSpacing(10)
-
-        topo = QHBoxLayout()
-        topo.setSpacing(12)
-        avatar = QFrame()
-        avatar.setObjectName("pagComissaoAvatar")
-        avatar.setFixedSize(34, 34)
-        dentro = QHBoxLayout(avatar)
-        dentro.setContentsMargins(0, 0, 0, 0)
-        dentro.addWidget(GlifoSolto(GLIFO_PESSOA, 17, "pagamento_avatar_glifo"), 0, Qt.AlignmentFlag.AlignCenter)
-        topo.addWidget(avatar, 0, Qt.AlignmentFlag.AlignVCenter)
-
-        textos = QVBoxLayout()
-        textos.setSpacing(2)
-        self._titulo = QLabel("")
-        self._titulo.setObjectName("pagComissaoTitulo")
-        textos.addWidget(self._titulo)
-        self._detalhe = QLabel("")
-        self._detalhe.setObjectName("pagComissaoDetalhe")
-        textos.addWidget(self._detalhe)
-        topo.addLayout(textos, 1)
-        coluna.addLayout(topo)
-
-        botoes = QHBoxLayout()
-        botoes.setSpacing(10)
-        self.botao_paga = BotaoComGlifo(
-            "Comissão paga", GLIFO_VISTO, "pagamento_comissao_paga_texto", "pagamento_comissao_paga_texto"
-        )
-        self.botao_paga.setObjectName("pagComissaoPaga")
-        self.botao_nao_paga = BotaoComGlifo(
-            "Comissão não paga",
-            GLIFO_CIFRAO,
-            "pagamento_comissao_pendente_texto",
-            "pagamento_comissao_pendente_texto",
-        )
-        self.botao_nao_paga.setObjectName("pagComissaoNaoPaga")
-        for botao, paga in ((self.botao_paga, True), (self.botao_nao_paga, False)):
-            botao.setMinimumHeight(34)
-            botao.setProperty("ativa", False)
-            botao.setCursor(Qt.CursorShape.PointingHandCursor)
-            botao.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            botao.setAutoDefault(False)
-            botoes.addWidget(botao, 1)
-        self.botao_paga.clicked.connect(self._marcar_paga)
-        self.botao_nao_paga.clicked.connect(self._marcar_pendente)
-        coluna.addLayout(botoes)
-
-    def carregar(self, comissao: ComissaoDaConta, paga: bool) -> None:
-        self._titulo.setText(f"Comissão de {comissao.nome}")
-        self._detalhe.setText(f"Referente ao serviço · {formatar_reais(comissao.valor)}")
-        self.definir(paga)
-
-    def definir(self, paga: bool) -> None:
-        for botao, aceso in ((self.botao_paga, paga), (self.botao_nao_paga, not paga)):
-            if botao.property("ativa") != aceso:
-                aplicar_propriedade(botao, "ativa", aceso)
-
-    def _marcar_paga(self) -> None:
-        self.escolhido.emit(True)
-
-    def _marcar_pendente(self) -> None:
-        self.escolhido.emit(False)
-
-
 class PagamentoView(QWidget):
-    """Recebimento da conta: consumo à esquerda, pagamento e comissão à direita."""
+    """Recebimento da conta: o consumo à esquerda, o pagamento à direita."""
 
     voltar = Signal()
     pagamento_concluido = Signal(int)
@@ -278,7 +183,6 @@ class PagamentoView(QWidget):
         self._conta: ContaParaPagamento | None = None
         self._forma = FormaPagamento.DINHEIRO
         self._pessoas = 1
-        self._comissao_paga = COMISSAO_PAGA_PADRAO
 
         self._montar_layout()
 
@@ -390,9 +294,6 @@ class PagamentoView(QWidget):
 
         self._linha_subtotal, self._valor_subtotal = self._linha_de_total("Subtotal")
         coluna.addLayout(self._linha_subtotal)
-        self._linha_taxa, self._valor_taxa = self._linha_de_total("Serviço")
-        self._rotulo_taxa = self._linha_taxa.itemAt(0).widget()
-        coluna.addLayout(self._linha_taxa)
 
         total = QFrame()
         total.setObjectName("pagTotalCard")
@@ -449,7 +350,7 @@ class PagamentoView(QWidget):
         titulo = QLabel("Registrar pagamento")
         titulo.setObjectName("pagCartaoTitulo")
         textos.addWidget(titulo)
-        subtitulo = QLabel("Informe o recebimento e a comissão.")
+        subtitulo = QLabel("Informe o valor recebido e a forma de pagamento.")
         subtitulo.setObjectName("pagCartaoSubtitulo")
         textos.addWidget(subtitulo)
         topo.addLayout(textos, 1)
@@ -490,10 +391,6 @@ class PagamentoView(QWidget):
         self._valor_troco.setObjectName("pagTrocoValor")
         linha_troco.addWidget(self._valor_troco)
         coluna.addWidget(troco)
-
-        self._cartao_comissao = _CartaoComissao()
-        self._cartao_comissao.escolhido.connect(self._escolher_comissao)
-        coluna.addWidget(self._cartao_comissao)
 
         coluna.addStretch()
 
@@ -553,9 +450,6 @@ class PagamentoView(QWidget):
         """Abre a tela para uma conta — o ponto de entrada da navegação."""
         self._comanda_id = comanda_id
         self._pessoas = 1
-        # Conta nova, escolha nova: sem este reset, a comissão marcada como paga
-        # numa mesa seguiria marcada na próxima que abrisse.
-        self._comissao_paga = COMISSAO_PAGA_PADRAO
         self._aviso_impressao.limpar()
         self._label_erro.setText("")
         self._escolher_forma(FormaPagamento.DINHEIRO)
@@ -584,23 +478,8 @@ class PagamentoView(QWidget):
 
         self._preencher_itens(conta)
         self._valor_subtotal.setText(formatar_reais(conta.subtotal))
-        tem_taxa = conta.valor_taxa > 0
-        # `percentual` é o mesmo do cupom e do cartão de conferência: o papel e
-        # as duas telas dizem "10%", nunca "10,00%" (o `:g` do Decimal manteria
-        # as casas mortas).
-        self._rotulo_taxa.setText(
-            f"Serviço {percentual(conta.taxa_percentual)}%" if conta.taxa_percentual else "Serviço"
-        )
-        self._rotulo_taxa.setVisible(tem_taxa)
-        self._valor_taxa.setVisible(tem_taxa)
-        self._valor_taxa.setText(formatar_reais(conta.valor_taxa))
         self._valor_total.setText(formatar_reais(conta.total))
         self._mostrar_divisao()
-
-        self._cartao_comissao.setVisible(conta.comissao is not None)
-        if conta.comissao is not None:
-            self._comissao_paga = conta.comissao.paga or self._comissao_paga
-            self._cartao_comissao.carregar(conta.comissao, self._comissao_paga)
 
         # O campo já vem com o que falta receber: no caminho normal o operador
         # só confere e confirma, e o troco aparece quando ele digita mais.
@@ -671,10 +550,6 @@ class PagamentoView(QWidget):
         if self._conta is not None:
             self._valor_por_pessoa.setText(formatar_reais(self._conta.por_pessoa(self._pessoas)))
 
-    def _escolher_comissao(self, paga: bool) -> None:
-        self._comissao_paga = paga
-        self._cartao_comissao.definir(paga)
-
     def _mostrar_troco(self) -> None:
         """O troco ao vivo — a conta que o operador fazia de cabeça.
 
@@ -730,7 +605,6 @@ class PagamentoView(QWidget):
                 valor,
                 pin_gerente=pin_gerente,
                 funcionario_consumo_id=funcionario_id,
-                comissao_paga=self._comissao_paga,
             )
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))

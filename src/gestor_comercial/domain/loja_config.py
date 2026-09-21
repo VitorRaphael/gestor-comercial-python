@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Integer, String, text
+from sqlalchemy import Boolean, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gestor_comercial.repository.base import Base
@@ -7,9 +7,11 @@ from gestor_comercial.repository.base import Base
 class LojaConfig(Base):
     """Configuração única da loja: cascata de 3 níveis de PIN — Senha de
     Login (Nível 1), Senha Operacional/Caixa (Nível 2), Senha Master/Dono
-    (Nível 3) — e CPF do Dono (§3.13, módulo "Senhas e Acesso"). Desde o
-    §9.23 guarda também a única regra de operação que a Central de Loja liga e
-    desliga: se a loja cobra a taxa de serviço (ver o fim desta classe).
+    (Nível 3) — e CPF do Dono (§3.13, módulo "Senhas e Acesso").
+
+    Entre o §9.23 e o §9.26 guardou também `aceita_taxa_servico`, o interruptor
+    da taxa de serviço. A taxa foi removida do sistema e a coluna saiu do banco
+    (migração `c5d9e17a24b8`): esta tabela voltou a ser só segredos.
 
     Singleton (sempre id=1, ver `LojaConfigRepository.obter`). A autenticação
     usa só hash+salt de cada segredo — igual ao PIN antigo de `Usuario`, agora
@@ -99,26 +101,3 @@ class LojaConfig(Base):
     senha_operacional_cifrada: Mapped[str | None] = mapped_column(String(255))
     senha_login_cifrada: Mapped[str | None] = mapped_column(String(255))
     cpf_dono_cifrado: Mapped[str | None] = mapped_column(String(255))
-
-    # ------------------------------------------------------------------
-    # Operação do salão (§9.23)
-    # ------------------------------------------------------------------
-    # A loja cobra a taxa de serviço de 10% nas mesas? Primeira coluna desta
-    # tabela que não é segredo, e mora aqui e não em `preferencias` porque É
-    # regra de negócio: `ComandaService.fechar_para_conferencia` recusa a taxa
-    # quando ela está desligada, e `preferencias` é, por definição, o que
-    # nenhuma regra consulta (ver a docstring de `Preferencia`).
-    #
-    # Ligada por padrão porque é o que a loja sempre fez: antes desta coluna o
-    # "Fechar conta" já oferecia os 10%, e o banco que já existe não pode perder
-    # a taxa no dia em que for atualizado (migração `e4b8c2a6d913`).
-    #
-    # Vale para as contas fechadas DAQUI em diante. A comanda que já está em
-    # conferência tem o percentual congelado em `Comanda.taxa_servico_percentual`
-    # (pelo mesmo motivo do preço do item), e desligar aqui não a muda.
-    #
-    # `server_default` pelo motivo de `Comanda.valor_taxa_servico`: o schema do
-    # `create_all` tem que ser o mesmo da migração.
-    aceita_taxa_servico: Mapped[bool] = mapped_column(
-        Boolean, default=True, server_default=text("1"), nullable=False
-    )

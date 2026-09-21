@@ -26,7 +26,6 @@ from gestor_comercial.services import formatador_cupom as cupom
 from gestor_comercial.services.caixa_service import (
     GrupoVendaCategoria,
     LinhaConferenciaPagamento,
-    ResumoCaixa,
     periodo_do_turno,
 )
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
@@ -41,7 +40,6 @@ LARGURA_PADRAO = 48
 _DESCRICAO_PADRAO = {
     TipoMovimento.SANGRIA: "Sangria",
     TipoMovimento.DESPESA: "Pagamento de conta",
-    TipoMovimento.COMISSAO: "Repasse de comissão",
 }
 
 
@@ -49,7 +47,6 @@ def montar_documento(
     *,
     caixa: Caixa,
     titulo_fechamento: str | None,
-    resumo: ResumoCaixa,
     conferencia: list[LinhaConferenciaPagamento],
     grupos_categoria: list[GrupoVendaCategoria],
     movimentos: list[MovimentoCaixa],
@@ -86,7 +83,6 @@ def montar_documento(
             documento.append(BlocoTexto(linha))
 
     documento.extend(_secao_conferencia(conferencia, largura))
-    documento.extend(_secao_taxa_servico(resumo, largura))
     documento.extend(_secao_produtos(grupos_categoria, largura))
     documento.extend(_secao_entradas(caixa, movimentos, largura))
     documento.extend(_secao_saidas(movimentos, largura))
@@ -109,24 +105,6 @@ def _secao_conferencia(linhas: list[LinhaConferenciaPagamento], largura: int) ->
         diferenca_txt = "—" if linha.diferenca is None else f"R$ {cupom.moeda(linha.diferenca)}"
         documento.append(BlocoTexto(cupom.duas_colunas("  Conferido", conferido_txt, largura)))
         documento.append(BlocoTexto(cupom.duas_colunas("  Diferença", diferenca_txt, largura), negrito=negrito))
-    return documento
-
-
-def _secao_taxa_servico(resumo: ResumoCaixa, largura: int) -> Documento:
-    """Quanto das contas fechadas no turno foi taxa de serviço (§9.23).
-
-    Em seção própria, logo depois da conferência, e dizendo que está DENTRO do
-    total de lá: o gerente que repassa a taxa aos garçons precisa do número
-    separado, e quem somasse as duas seções contaria a taxa duas vezes. Sai
-    também no turno sem taxa nenhuma — "R$ 0,00" é a resposta de "quanto de
-    taxa entrou hoje?", e uma seção que some e aparece é pior de conferir.
-    """
-    documento: Documento = [BlocoTexto(cupom.separador(largura, titulo="TAXA DE SERVIÇO"))]
-    documento.append(
-        BlocoTexto(cupom.linha_de_valor("Arrecadada no turno", resumo.total_taxa_servico, largura))
-    )
-    for linha in cupom.quebrar("Já incluída no Total da conferência acima.", largura):
-        documento.append(BlocoTexto(linha))
     return documento
 
 
@@ -185,13 +163,7 @@ def _secao_entradas(caixa: Caixa, movimentos: list[MovimentoCaixa], largura: int
 
 
 def _secao_saidas(movimentos: list[MovimentoCaixa], largura: int) -> Documento:
-    # O repasse de comissão (§9.25) entra aqui: é dinheiro que saiu da gaveta,
-    # e quem confere a gaveta precisa ver a linha dele.
-    saidas = [
-        m
-        for m in movimentos
-        if m.tipo in (TipoMovimento.SANGRIA, TipoMovimento.DESPESA, TipoMovimento.COMISSAO)
-    ]
+    saidas = [m for m in movimentos if m.tipo in (TipoMovimento.SANGRIA, TipoMovimento.DESPESA)]
     documento: Documento = [BlocoTexto(cupom.separador(largura, titulo="PAGAMENTOS / SANGRIAS"))]
     if not saidas:
         for linha in cupom.quebrar("Nenhuma sangria ou pagamento neste turno.", largura):

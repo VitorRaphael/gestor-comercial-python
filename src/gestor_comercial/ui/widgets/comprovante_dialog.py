@@ -116,7 +116,6 @@ def montar_texto_comprovante(caixa_service: CaixaService, caixa: Caixa) -> str:
     titulo = None
     if caixa.numero_sequencial_dia is not None and caixa.fechado_em is not None:
         titulo = caixa_service.titulo_fechamento(caixa.id)
-    resumo = caixa_service.resumo(caixa.id)
     conferencia = caixa_service.conferencia_pagamentos(caixa.id)
     grupos_categoria = caixa_service.resumo_vendas_por_categoria(caixa.id)
     movimentos = caixa_service.listar_movimentos(caixa.id)
@@ -125,7 +124,6 @@ def montar_texto_comprovante(caixa_service: CaixaService, caixa: Caixa) -> str:
     documento = comprovante_fechamento.montar_documento(
         caixa=caixa,
         titulo_fechamento=titulo,
-        resumo=resumo,
         conferencia=conferencia,
         grupos_categoria=grupos_categoria,
         movimentos=movimentos,

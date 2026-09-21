@@ -132,17 +132,6 @@ def moeda(valor: Decimal | int | str) -> str:
     return f"{sinal}{milhares},{centavos}"
 
 
-def percentual(valor: Decimal | int | str) -> str:
-    """Um percentual sem as casas que não dizem nada: 10 vira '10', 12.5 vira '12,5'.
-
-    A taxa de serviço saía no cupom de pré-conta como "(10,00%)", formatada como
-    dinheiro. O cartão de conferência diz "10%" (§9.23), e o cliente tem que ler
-    no papel o mesmo número que o garçom leu na tela.
-    """
-    texto = f"{dinheiro(valor):.2f}".rstrip("0").rstrip(".")
-    return texto.replace(".", ",")
-
-
 def linha_de_valor(
     rotulo: str, valor: Decimal | int | str, largura: int, preenchimento: str = " "
 ) -> str:

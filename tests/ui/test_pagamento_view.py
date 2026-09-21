@@ -1,19 +1,22 @@
-"""A tela "Receber Pagamento". §9.25.
+"""A tela "Receber Pagamento". §9.25, sem a taxa e sem a comissão desde o §9.26.
 
 Pedido do Vitor, com o mockup: o último diálogo de fábrica do fluxo de venda
 (combo de forma, campo de texto, resumo em três linhas) virou tela, com o
-consumo à esquerda, as formas em cards, o troco ao vivo e o card da comissão do
-garçom.
+consumo à esquerda, as formas em cards e o troco ao vivo.
+
+A linha "Serviço" e o card "Comissão de [garçom]" nasceram aqui no §9.25 e
+saíram no §9.26 com a taxa de serviço: a comissão nunca teve valor próprio —
+ela ERA a taxa da conta —, e sem a taxa o card só saberia dizer R$ 0,00.
 
 O que esta suíte cobra:
 
-1. **o mockup** — cabeçalho, itens, subtotal, serviço, total e "por pessoa";
-2. **dividir por** — só mostra quanto dá por pessoa, sem mexer no que é lançado;
-3. **as formas** — o card escolhido acende, "Consumo" abre o seletor de
+1. **o mockup** — cabeçalho, itens, subtotal, total e "por pessoa";
+2. **o total é o consumo** — nenhum acréscimo entre o subtotal e o que se
+   recebe, e nenhum vestígio da taxa ou da comissão na tela;
+3. **dividir por** — só mostra quanto dá por pessoa, sem mexer no que é lançado;
+4. **as formas** — o card escolhido acende, "Consumo" abre o seletor de
    funcionário, e só dinheiro mostra troco;
-4. **o recebimento** — fecha a conta, avisa no parcial e leva a comissão junto;
-5. **a comissão** — abre como "não paga", e o clique em "Comissão paga" é o que
-   tira o dinheiro da gaveta;
+5. **o recebimento** — fecha a conta e avisa no parcial;
 6. **o desenho** — nada espremido a 1366x738, nos dois temas.
 """
 
@@ -30,12 +33,11 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
 
 import gestor_comercial
-from gestor_comercial.domain.enums import FormaPagamento, StatusComanda, TipoMovimento
+from gestor_comercial.domain.enums import FormaPagamento, StatusComanda
 from gestor_comercial.domain.mesa import Mesa
 from gestor_comercial.domain.produto import Produto
-from gestor_comercial.services.comanda_service import TAXA_SERVICO_PADRAO
 from gestor_comercial.ui.theme.controller import ThemeController
-from gestor_comercial.ui.views.pagamento_view import COMISSAO_PAGA_PADRAO, PagamentoView
+from gestor_comercial.ui.views.pagamento_view import PagamentoView
 from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
 from tests.conftest import PIN_GERENTE
 
@@ -47,7 +49,12 @@ def garcom(funcionarios, gerente):
 
 @pytest.fixture
 def conta(uow, comandas, gerente, caixa_aberto, categoria, garcom):
-    """A mesa 12 do mockup, em conferência: R$ 131,50 + 10% = R$ 144,65."""
+    """A mesa 12 do mockup, em conferência: 2 x R$ 65,75 = R$ 131,50.
+
+    O mockup do §9.25 dizia R$ 144,65, que era o mesmo consumo com os 10% da
+    taxa por cima. A taxa saiu no §9.26 e o número da mesa passou a ser o do
+    consumo.
+    """
     lanche = uow.produtos.salvar(
         Produto(nome="Artesanal", preco=Decimal("65.75"), categoria_id=categoria.id)
     )
@@ -55,7 +62,7 @@ def conta(uow, comandas, gerente, caixa_aberto, categoria, garcom):
     comanda = comandas.abrir_por_mesa(mesa.id)
     comandas.lancar_item(comanda.id, lanche.id, 2)
     comandas.definir_atendente(comanda.id, garcom.id)
-    comandas.fechar_para_conferencia(comanda.id, TAXA_SERVICO_PADRAO)
+    comandas.fechar_para_conferencia(comanda.id)
     return comanda
 
 
@@ -89,21 +96,19 @@ def test_o_mockup_frase_por_frase(tela, conta):
     assert tela._subtitulo.text() == f"Comanda #{conta.id} · Garçom Lucas Prado"
     assert tela._rotulo_comanda.text() == f"COMANDA #{conta.id}"
     assert tela._titulo_consumo.text() == "Consumo da mesa"
-    for frase in ("2×", "Artesanal", "Subtotal", "Serviço 10%", "Total da conta", "TROCO"):
+    for frase in ("2×", "Artesanal", "Subtotal", "Total da conta", "TROCO"):
         assert frase in textos, frase
     assert tela._valor_subtotal.text() == "R$ 131,50"
-    assert tela._valor_taxa.text() == "R$ 13,15"
-    assert tela._valor_total.text() == "R$ 144,65"
-    assert tela._campo_valor.valor() == Decimal("144.65"), "o campo já vem com o que falta"
+    assert tela._valor_total.text() == "R$ 131,50"
+    assert tela._campo_valor.valor() == Decimal("131.50"), "o campo já vem com o que falta"
     assert tela._valor_troco.text() == "R$ 0,00"
 
 
-def test_a_conta_sem_taxa_nao_mostra_a_linha_de_servico(qapp, auth, comandas, pagamentos, impressao, uow, gerente, caixa_aberto, categoria):
-    auth.loja_config.definir_aceita_taxa_servico(False)
+def test_a_comanda_de_balcao_nao_fala_em_mesa(qapp, comandas, pagamentos, impressao, uow, gerente, caixa_aberto, categoria):
     produto = uow.produtos.salvar(Produto(nome="Suco", preco=Decimal("10.00"), categoria_id=categoria.id))
     comanda = comandas.abrir_balcao()
     comandas.lancar_item(comanda.id, produto.id, 1)
-    comandas.fechar_para_conferencia(comanda.id, None)
+    comandas.fechar_para_conferencia(comanda.id)
 
     view = PagamentoView(pagamentos, impressao)
     try:
@@ -111,15 +116,39 @@ def test_a_conta_sem_taxa_nao_mostra_a_linha_de_servico(qapp, auth, comandas, pa
 
         assert view._titulo.text() == "Receber Pagamento · Balcão"
         assert view._titulo_consumo.text() == "Consumo da comanda"
-        assert view._valor_taxa.isHidden() is True
         assert view._valor_total.text() == "R$ 10,00"
-        assert view._cartao_comissao.isHidden() is True, "sem taxa não há comissão"
     finally:
         view.deleteLater()
 
 
 # ---------------------------------------------------------------------------
-# 2. Dividir por
+# 2. O total é o consumo, e nada mais
+# ---------------------------------------------------------------------------
+
+
+def test_o_total_e_o_subtotal_sem_acrescimo(tela):
+    """§9.26: entre o que o cliente consumiu e o que ele paga não entra nada.
+
+    Até o §9.25 havia a linha "Serviço 10%" no meio, e esta mesa saía por
+    R$ 144,65. Qualquer acréscimo que volte reprova aqui.
+    """
+    assert tela._valor_total.text() == tela._valor_subtotal.text() == "R$ 131,50"
+    assert tela._conta.total == tela._conta.subtotal == Decimal("131.50")
+
+
+def test_nao_sobrou_vestigio_da_taxa_nem_da_comissao(tela):
+    """Nem linha, nem card, nem estado guardado na tela."""
+    textos = " ".join(_textos(tela)).lower()
+
+    assert "serviço" not in textos
+    assert "taxa" not in textos
+    assert "comissão" not in textos
+    for atributo in ("_valor_taxa", "_rotulo_taxa", "_cartao_comissao", "_comissao_paga"):
+        assert not hasattr(tela, atributo), atributo
+
+
+# ---------------------------------------------------------------------------
+# 3. Dividir por
 # ---------------------------------------------------------------------------
 
 
@@ -128,13 +157,14 @@ def test_dividir_por_so_mostra_o_valor_por_pessoa(tela):
     tela._dividir_por(2)
 
     assert tela._rotulo_por_pessoa.text() == "Por pessoa (2)"
-    assert tela._valor_por_pessoa.text() == "R$ 72,33"
-    assert tela._campo_valor.valor() == Decimal("144.65"), "o valor a receber não muda"
+    # 131,50 / 2 = 65,75 exatos; o arredondamento para cima não tem o que subir.
+    assert tela._valor_por_pessoa.text() == "R$ 65,75"
+    assert tela._campo_valor.valor() == Decimal("131.50"), "o valor a receber não muda"
     assert [p.text() for p in tela._pilulas if p.property("ativa")] == ["2"]
 
 
 # ---------------------------------------------------------------------------
-# 3. As formas
+# 4. As formas
 # ---------------------------------------------------------------------------
 
 
@@ -165,14 +195,14 @@ def test_o_troco_e_ao_vivo_e_so_em_dinheiro(tela):
     """Só dinheiro gera troco (regra do service): mostrar troco no cartão
     prometeria o que o registro vai recusar."""
     tela._campo_valor.definir_valor(Decimal("200.00"))
-    assert tela._valor_troco.text() == "R$ 55,35"
+    assert tela._valor_troco.text() == "R$ 68,50"
 
     tela._escolher_forma(FormaPagamento.DEBITO)
     assert tela._valor_troco.text() == "R$ 0,00"
 
 
 # ---------------------------------------------------------------------------
-# 4. O recebimento
+# 5. O recebimento
 # ---------------------------------------------------------------------------
 
 
@@ -193,8 +223,8 @@ def test_o_parcial_mantem_a_tela_e_diz_o_que_falta(uow, tela, conta):
     tela._botao_registrar.click()
 
     assert recebidos == []
-    assert "Falta R$ 44,65" in tela._label_erro.text()
-    assert tela._campo_valor.valor() == Decimal("44.65"), "o campo recarrega com o que falta"
+    assert "Falta R$ 31,50" in tela._label_erro.text()
+    assert tela._campo_valor.valor() == Decimal("31.50"), "o campo recarrega com o que falta"
     uow.session.rollback()
     assert uow.comandas.buscar_por_id(conta.id).status is StatusComanda.EM_CONFERENCIA
 
@@ -220,7 +250,7 @@ def test_o_consumo_pede_o_pin_e_entra_no_saldo_do_funcionario(qapp, uow, tela, g
         tela._botao_registrar.click()
 
     assert tela._label_erro.text() == ""
-    assert pagamentos.calcular_saldo_devedor(garcom.id) == Decimal("144.65")
+    assert pagamentos.calcular_saldo_devedor(garcom.id) == Decimal("131.50")
 
 
 @contextmanager
@@ -270,57 +300,19 @@ def test_o_consumo_sem_pin_nao_registra(qapp, uow, tela, garcom, conta):
     assert uow.comandas.buscar_por_id(conta.id).status is StatusComanda.EM_CONFERENCIA
 
 
-# ---------------------------------------------------------------------------
-# 5. A comissão
-# ---------------------------------------------------------------------------
+def test_receber_nao_mexe_na_gaveta_alem_do_pagamento(uow, tela, conta, caixa_aberto):
+    """§9.26: o recebimento não gera movimento de caixa nenhum.
 
-
-def test_a_comissao_abre_como_nao_paga(tela, garcom):
-    textos = _textos(tela._cartao_comissao)
-
-    assert "Comissão de Lucas Prado" in textos
-    assert "Referente ao serviço · R$ 13,15" in textos
-    assert tela._cartao_comissao.botao_nao_paga.property("ativa") is True
-    assert tela._cartao_comissao.botao_paga.property("ativa") is False
-    assert tela._comissao_paga is COMISSAO_PAGA_PADRAO is False
-
-
-def test_cada_conta_comeca_do_padrao_de_novo(tela, conta):
-    """Sem o reset, a comissão marcada como paga numa mesa seguiria marcada na
-    próxima que o operador abrisse — e o dinheiro sairia da gaveta sozinho."""
-    tela._cartao_comissao.botao_paga.click()
-    assert tela._comissao_paga is True
-
-    tela.carregar(conta.id)
-
-    assert tela._comissao_paga is COMISSAO_PAGA_PADRAO is False
-    assert tela._cartao_comissao.botao_nao_paga.property("ativa") is True
-
-
-def test_marcar_paga_tira_o_dinheiro_da_gaveta(uow, tela, conta, caixa_aberto):
-    tela._cartao_comissao.botao_paga.click()
-    assert tela._cartao_comissao.botao_paga.property("ativa") is True
-
+    Enquanto a comissão existiu, marcar "Comissão paga" tirava o valor da
+    gaveta no mesmo commit do fechamento. Sem ela, fechar a conta só grava o
+    pagamento — e uma saída que reapareça aqui é dinheiro sumindo do turno sem
+    ninguém ter pedido.
+    """
     tela._botao_registrar.click()
 
     uow.session.rollback()
-    assert uow.comandas.buscar_por_id(conta.id).comissao_paga is True
-    movimentos = [
-        m for m in uow.movimentos.listar_por_caixa(caixa_aberto.id) if m.tipo is TipoMovimento.COMISSAO
-    ]
-    assert [m.valor for m in movimentos] == [Decimal("13.15")]
-
-
-def test_nao_paga_deixa_o_dinheiro_na_gaveta_e_a_conta_na_lista(uow, tela, conta, pagamentos, caixa_aberto):
-    tela._cartao_comissao.botao_paga.click()
-    tela._cartao_comissao.botao_nao_paga.click()
-
-    tela._botao_registrar.click()
-
-    uow.session.rollback()
-    assert uow.comandas.buscar_por_id(conta.id).comissao_paga is False
-    assert [p.nome for p in pagamentos.listar_comissoes_pendentes()] == ["Lucas Prado"]
-    assert [m for m in uow.movimentos.listar_por_caixa(caixa_aberto.id) if m.tipo is TipoMovimento.COMISSAO] == []
+    assert uow.comandas.buscar_por_id(conta.id).status is StatusComanda.FECHADA
+    assert uow.movimentos.listar_por_caixa(caixa_aberto.id) == []
 
 
 # ---------------------------------------------------------------------------
@@ -398,5 +390,8 @@ def test_os_tokens_da_tela_existem_nos_dois_temas():
     from gestor_comercial.ui.theme.tokens import TEMA_CLARO, TEMA_ESCURO
 
     familia = {chave for chave in TEMA_ESCURO if chave.startswith("pagamento_")}
-    assert len(familia) > 20
+    # O piso caiu de 21 para 16 no §9.26, com a saída dos dez tokens do card da
+    # comissão e do avatar dele (a família foi de 30 para 20). O que este número segura é a família sumir
+    # inteira por um apagamento desatento, não o tamanho dela.
+    assert len(familia) > 15
     assert familia == {chave for chave in TEMA_CLARO if chave.startswith("pagamento_")}

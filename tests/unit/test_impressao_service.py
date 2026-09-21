@@ -1390,7 +1390,7 @@ def test_pre_conta_impressa_pelo_caminho_de_verdade(
 
     comanda = comandas.abrir_por_mesa(mesa.id)
     comandas.lancar_item(comanda.id, lanche.id, 2)
-    comandas.fechar_para_conferencia(comanda.id, taxa_servico_percentual=Decimal("10"))
+    comandas.fechar_para_conferencia(comanda.id)
 
     resultado = impressao.imprimir_pre_conta(comanda.id)
 
@@ -1398,8 +1398,10 @@ def test_pre_conta_impressa_pelo_caminho_de_verdade(
     cupom = driver.texto_de("Balcão")
     assert "CONFERÊNCIA" in cupom
     assert "2x X-Burger" in cupom
-    assert "TOTAL A PAGAR" in cupom and "44,00" in cupom
-    assert "Taxa de serviço" in cupom
+    # 2 x 20,00, sem acréscimo nenhum: o papel diz o que o cliente consumiu
+    # (§9.26, a linha "Taxa de serviço" saiu daqui com a cobrança).
+    assert "TOTAL A PAGAR" in cupom and "40,00" in cupom
+    assert "Taxa de serviço" not in cupom
     assert "documento fiscal" in cupom.replace("\n", " ")
     assert "Dinheiro" not in cupom
 

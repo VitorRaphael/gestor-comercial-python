@@ -29,10 +29,10 @@ segredo (`domain/loja_config.py`, colunas `*_cifrada`), guardada por
 `services/segredo_reversivel.py` — que documenta, sem rodeios, o que essa
 cópia protege e o que não protege.
 
-Desde o §9.23 o singleton guarda também uma regra de operação: se a loja cobra
-a taxa de serviço (`aceita_taxa_servico`), o interruptor da tela de
-Configurações. Não é segredo e não passa por nenhuma das barreiras acima — a
-tela já está atrás da Senha Master da Central de Loja.
+Entre o §9.23 e o §9.26 o singleton guardou também uma regra de operação
+(`aceita_taxa_servico`, o interruptor da taxa de serviço na tela de
+Configurações). A taxa foi removida do sistema: este service voltou a cuidar só
+de segredos.
 """
 
 from __future__ import annotations
@@ -355,37 +355,6 @@ class LojaConfigService:
         config.cpf_dono_hash = AuthService.hash_pin(cpf_limpo, salt)
         config.cpf_dono_definido = True
         self._guardar_para_exibicao(config, CAMPO_CPF_DONO, cpf_limpo)
-        self.uow.loja_config.salvar(config)
-        self.uow.commit()
-
-    # ------------------------------------------------------------------
-    # Taxa de serviço (§9.23) — a regra de operação da Central de Loja
-    # ------------------------------------------------------------------
-
-    def aceita_taxa_servico(self) -> bool:
-        """A loja cobra a taxa de serviço nas mesas?
-
-        Quem lê é o `ComandaService`, que recusa a taxa quando ela está
-        desligada, e a tela de conferência, que nem mostra o bloco — as duas
-        pela MESMA leitura, para a tela nunca oferecer o que o service recusa.
-        """
-        return bool(self.obter_ou_criar().aceita_taxa_servico)
-
-    def definir_aceita_taxa_servico(self, aceita: bool) -> None:
-        """Liga ou desliga a taxa de serviço da loja, num commit só.
-
-        Sem credencial própria: a tela que chama fica atrás da Senha Master da
-        Central de Loja, como a troca de tema e a cópia de segurança ao lado
-        dela. `bool` estrito, e não "qualquer coisa verdadeira": um `"0"` vindo
-        de um texto ligaria a taxa, que é o contrário do que ele diz.
-
-        Vale para as contas fechadas depois disto. A comanda que já está em
-        conferência tem o percentual congelado nela, e desligar aqui não a muda.
-        """
-        if not isinstance(aceita, bool):
-            raise RegraDeNegocioError("Informe se a loja cobra a taxa de serviço (sim ou não).")
-        config = self.obter_ou_criar()
-        config.aceita_taxa_servico = aceita
         self.uow.loja_config.salvar(config)
         self.uow.commit()
 

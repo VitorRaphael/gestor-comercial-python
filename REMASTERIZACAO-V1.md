@@ -5100,6 +5100,116 @@ chegar depois sob carga: passou a esperar a condição.
 
 ---
 
+### 9.26 A taxa de serviço sai do sistema, e a comissão sai com ela ✅ CONCLUÍDO — 2026-09-21
+
+Pedido do Vitor: remover **por completo** a taxa de serviço de 10% — regra de
+negócio, banco e tela —, com o total da conta sendo estritamente a soma dos
+itens lançados e sem quebrar o faturamento das vendas.
+
+#### Antes
+
+- **Regra**: `ComandaService.fechar_para_conferencia` recebia um percentual,
+  gravava `taxa_servico_percentual` e `valor_taxa_servico`, e
+  `calcular_total_a_pagar` somava a taxa ao subtotal. `valor_da_taxa_de_servico`
+  e `TAXA_SERVICO_PADRAO` eram a conta única da taxa (§9.23).
+- **Loja**: `loja_config.aceita_taxa_servico` e o interruptor "Cobrar taxa de
+  serviço (10%)" na tela de Configurações.
+- **Telas e papel**: o selo da taxa no cartão de conferência, a linha "Serviço
+  10%" na tela de pagamento, a linha "Taxa de serviço" da pré-conta, "Taxa de
+  serviço inclusa" no fechamento impresso, a seção TAXA DE SERVIÇO do
+  comprovante, a linha "Taxa de serviço (inclusa)" no card Recebimentos do Caixa
+  e no painel Fechamento da Gaveta dos dois relatórios.
+- **Comissão (§9.25)**: o card "Comissão de [garçom]" na tela de pagamento, o KPI
+  "Comissão a repassar" e o card/botão de repasse em Funcionários,
+  `TipoMovimento.COMISSAO`, a linha "Comissões repassadas" do fechamento e as
+  colunas `comissao_paga`/`comissao_paga_em`.
+
+#### Decisões do Vitor
+
+Perguntadas antes de começar, porque mudavam o tamanho do trabalho:
+
+1. **A comissão sai junto.** Ela nunca teve valor próprio:
+   `ComissaoDaConta.valor` ERA o `valor_taxa_servico` da conta, por decisão
+   explícita do §9.25. Sem taxa, toda comissão valeria R$ 0,00 para sempre —
+   manter o código seria manter uma funcionalidade morta que a suíte continuaria
+   testando. As alternativas eram "manter zerada" (código morto) e "nova base de
+   cálculo" (funcionalidade nova, fora do pedido).
+2. **Drop físico das colunas**, e não colunas dormentes em 0,00. Na máquina do
+   pai não há o que perder: o `.exe` de lá é anterior ao §9.23.
+
+#### O desenho
+
+- **Motor de cálculo.** `calcular_total_a_pagar` = subtotal − desconto, sem
+  acréscimo nenhum. `PreviaDeConferencia` ficou com `mesa_numero` e `subtotal`,
+  e `total` é propriedade (dois campos iguais guardados lado a lado é a
+  divergência esperando acontecer). Saíram `TAXA_SERVICO_PADRAO`,
+  `valor_da_taxa_de_servico`, `_validar_taxa_servico`, `aceita_taxa_servico` e o
+  parâmetro `taxa_servico_percentual` de `fechar_para_conferencia` — o desconto
+  continua, intocado.
+- **Banco — migração `c5d9e17a24b8`.** Cinco `ALTER TABLE ... DROP COLUMN`
+  nativos (a técnica da `a3e6b91c4d05`: o `batch_alter_table` recriaria
+  `comandas` com `itens_comanda` e `pagamentos` apontando para ela e o
+  `foreign_keys=ON` ligado), dentro do mesmo `BEGIN` explícito das três irmãs.
+  O movimento `COMISSAO` que existir vira `DESPESA` com a descrição preservada,
+  ANTES dos drops: o tipo saiu do enum e a linha antiga estouraria ao ser lida,
+  e apagá-la faria o turno sobrar dinheiro (aquilo saiu da gaveta de verdade).
+  O saldo esperado dá o mesmo número antes e depois — os dois tipos saem da
+  gaveta. O `downgrade` devolve o schema, não o dado.
+- **O faturamento não é tocado.** `total_faturado` sai de `pagamentos`, e
+  nenhuma linha de lá muda: uma conta fechada com taxa continua com o valor que
+  o cliente pagou. O que some é só a decomposição "quanto disso foi taxa".
+- **`PagamentoService`** perdeu a dependência do `CaixaService` (existia só pelo
+  repasse), o parâmetro `comissao_paga` de `registrar` e os cinco métodos de
+  comissão. `ComandaRepository.fechadas_do_caixa` voltou a devolver só a
+  contagem. `formatador_cupom.percentual` saiu (só a taxa o usava), e o
+  `comprovante_fechamento.montar_documento` perdeu o `resumo`, que só a seção da
+  taxa lia.
+- **Cartão de conferência**: UM cartão de valor, "TOTAL DA PRÉ-CONTA" — sem a
+  taxa, subtotal e total seriam o mesmo número em dois cartões lado a lado. O
+  cartão continua (decisão do §9.25: fechar a conta tranca os itens) e não
+  devolve mais nada além do "confirmou"; `resultado()` saiu. Largura mantida em
+  576px.
+- **Configurações** voltou às três seções; o `_CartaoInterruptor` saiu junto (o
+  `Interruptor` fica, o cadastro de impressora usa).
+- **Tema**: 18 tokens sem leitor saíram dos dois temas (subtotal e marca da
+  taxa no cartão; card, botões e avatar da comissão), junto com o QSS deles. Os
+  dois temas seguem com as mesmas 252 chaves.
+
+#### Conferência
+
+- **Suíte 2354, 0 falhas** (de 2453). Saíram as cinco suítes da taxa e da
+  comissão (`test_taxa_de_servico`, `test_taxa_de_servico_nas_telas`,
+  `test_comissao`, `test_migracao_taxa_de_servico`, `test_migracao_comissao`);
+  entrou `test_migracao_remove_taxa_de_servico` (9 testes: colunas, linhas,
+  pagamentos intactos, `COMISSAO`→`DESPESA`, varredura do enum, idempotência,
+  ida e volta, banco novo e schema igual ao do `create_all`), e os testes que
+  prendem a porta fechada: total a pagar = soma dos itens no service, no cupom
+  de pré-conta, no cartão e na tela de pagamento, nenhum vestígio de
+  "taxa"/"serviço"/"comissão" nas duas telas, e o recebimento sem movimento de
+  gaveta nenhum.
+- **Banco real (cópia)**: a migração rodou numa cópia do banco de trabalho (188
+  produtos, 4 comandas, 9 itens, 4 pagamentos somando R$ 174,90). Os números
+  saíram idênticos antes e depois, `integrity_check` ok, `foreign_key_check`
+  sem violação; resumo do turno, fechamento da gaveta e a conta da tela de
+  pagamento montaram sobre ele sem erro, com total a pagar = soma dos itens em
+  todas as comandas.
+- **Renderização** do cartão de conferência nos dois temas, 576x409.
+- **Não feito desta vez**: mutações e a bancada `tools/comparar_telas.py` /
+  `comparar_cupons.py`. As telas de Caixa, Configurações, Funcionários,
+  Relatórios e Pagamento e o cupom de pré-conta diferem de propósito.
+
+#### Ficou de fora
+
+- **Regerar o `.exe`**: precisa ser gerado de novo para levar isto (e os §9.23 a
+  §9.25, que ele também não leva).
+- **Um repasse ao garçom com outra base** (percentual sobre o consumo, valor
+  fixo): seria funcionalidade nova, com decisões próprias.
+- As migrações `f1a2b3c4d5e6`, `e4b8c2a6d913` e `f6a1d3b78c42` continuam no
+  histórico, como toda migração aplicada: são o caminho por onde um banco
+  antigo chega à `c5d9e17a24b8`.
+
+---
+
 ## 10. As melhores mudanças que o programa teve — em português de balcão
 
 > **Por que esta seção existe.** Todo o resto do documento é escrito para quem

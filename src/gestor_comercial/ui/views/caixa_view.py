@@ -57,7 +57,6 @@ from gestor_comercial.ui.widgets.movimentacao_caixa_dialog import (
     papel_do_movimento,
     rotulo_do_movimento,
 )
-from gestor_comercial.ui.widgets.paineis_relatorio import ROTULO_TAXA_INCLUSA
 from gestor_comercial.ui.widgets.secao_cancelamentos import SecaoCancelamentos
 from gestor_comercial.ui.widgets.estilo import repolir
 from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
@@ -263,17 +262,6 @@ class CaixaView(QWidget):
 
             self._barras_forma[forma] = (valor, barra)
 
-        # A taxa de serviço das mesas fechadas no turno (§9.23), sem barra: não
-        # é uma forma de recebimento, é a parte das formas acima que foi taxa.
-        linha_taxa = QHBoxLayout()
-        nome_taxa = QLabel(ROTULO_TAXA_INCLUSA)
-        nome_taxa.setObjectName("caixaFormaNome")
-        self._label_taxa_servico = QLabel("R$ 0,00")
-        self._label_taxa_servico.setObjectName("caixaFormaValor")
-        linha_taxa.addWidget(nome_taxa)
-        linha_taxa.addStretch()
-        linha_taxa.addWidget(self._label_taxa_servico)
-        layout.addLayout(linha_taxa)
         return card
 
     def _montar_card_ajustes(self) -> QFrame:
@@ -286,7 +274,6 @@ class CaixaView(QWidget):
             ("reforcos", "Reforços"),
             ("sangrias", "Sangrias"),
             ("despesas", "Despesas"),
-            ("comissoes", "Comissão repassada"),
             ("consumo_interno", "Consumo interno"),
         ):
             linha = QHBoxLayout()
@@ -441,16 +428,12 @@ class CaixaView(QWidget):
             label_valor.setText(formatar_reais(valor))
             percentual = int((valor / maior) * 100) if maior > 0 else 0
             barra.setValue(percentual)
-        self._label_taxa_servico.setText(formatar_reais(resumo.total_taxa_servico))
 
     def _preencher_card_ajustes(self, resumo: ResumoCaixa) -> None:
         self._definir_valor_ajuste("abertura", resumo.valor_abertura, negativo=False)
         self._definir_valor_ajuste("reforcos", resumo.reforcos, negativo=False)
         self._definir_valor_ajuste("sangrias", resumo.sangrias, negativo=True)
         self._definir_valor_ajuste("despesas", resumo.despesas, negativo=True)
-        # Sai da gaveta como sangria e despesa (§9.25): sem esta linha, o saldo
-        # esperado não fecharia com o que a tela lista.
-        self._definir_valor_ajuste("comissoes", resumo.comissoes, negativo=True)
         self._definir_valor_ajuste("consumo_interno", resumo.total_consumo_interno, negativo=True)
 
     def _definir_valor_ajuste(self, chave: str, valor: Decimal, *, negativo: bool) -> None:

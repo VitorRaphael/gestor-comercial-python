@@ -6,37 +6,30 @@ Substitui o `_FecharConferenciaDialog` de fábrica que morava dentro de
 marcava a caixa às cegas: a tela não dizia quanto a mesa ia pagar, e ele só
 descobria o total no papel que saía da impressora.
 
-O cartão do mockup do Vitor diz o número ANTES de imprimir: o subtotal dos
-itens, a taxa em reais e o total da pré-conta, que muda na hora em que a taxa é
-marcada ou desmarcada. É o 12º modal em cartão do app.
+O cartão do mockup do Vitor diz o número ANTES de imprimir. É o 12º modal em
+cartão do app.
 
 ## A conta mora no service, não aqui
 
 O cartão recebe um `PreviaDeConferencia` (o instantâneo que
-`ComandaService.previa_de_conferencia` monta na abertura) e só MOSTRA as contas
-dele — `valor_da_taxa` é a mesma função com que `fechar_para_conferencia` grava
-`valor_taxa_servico`, o número que o cupom imprime e o fechamento do dia soma.
-Clicar na taxa não toca no banco: é conta sobre o instantâneo, e um teste conta
-zero SQL em cem cliques.
+`ComandaService.previa_de_conferencia` monta na abertura) e só MOSTRA o número
+dele. Não toca no banco: um teste conta zero SQL com o cartão aberto.
 
-## Quem decide a taxa é a Central de Loja, não este cartão (§9.25)
+## O que a taxa de serviço deixou aqui (§9.26)
 
-O cartão **não pergunta nada**. Com a loja cobrando a taxa (o interruptor da
-tela de Configurações), o bloco aparece dizendo que ela está na conta, e o total
-já vem com ela; com a loja sem taxa, o bloco não é escondido: ele **não é
-criado**, e o total é o subtotal.
+Entre o §9.23 e o §9.26 este cartão mostrava três números — subtotal, taxa e
+total — e devolvia à view o percentual a congelar na comanda. A taxa foi
+removida do sistema: o cartão mostra UM número, o total da pré-conta, e não
+devolve nada além do "confirmou" do `QDialog`.
 
-A caixinha que se marcava viveu um dia. Ela nasceu no §9.23 (por pedido, e
-desmarcada por pedido) e saiu no §9.25, também por pedido: "deixa de existir
-como etapa de escolha do operador". A conta do salão passou a ser uma regra da
-loja, decidida uma vez pelo dono, e não uma pergunta feita ao garçom em toda
-mesa — que é onde a taxa era esquecida ou cobrada por engano.
+Ele continua existindo, e essa foi uma decisão do Vitor no §9.25, perguntada
+entre "um clique sem tela nenhuma" e "o cartão só confirma": fechar a conta
+trava os itens e só o PIN de gerente reabre, e um clique errado não pode fazer
+isso sem perguntar.
 
-O que o cartão devolve é o percentual a congelar na comanda (`resultado()`), ou
-`None`; o valor em reais quem grava é o service, na mesma conta que a prévia
-mostrou. E quem recusa a taxa com a loja desligada continua sendo o service
-(`fechar_para_conferencia`), que confere a regra outra vez na hora de gravar: o
-cartão é uma foto tirada na abertura.
+O selo da taxa morreu duas mortes. Nasceu caixinha marcável no §9.23,
+virou selo informativo no §9.25 ("deixa de existir como etapa de escolha do
+operador") e saiu de vez no §9.26, com a cobrança.
 
 ## Teclado
 
@@ -64,10 +57,8 @@ limpeza em `done()` desliga os botões.
 
 from __future__ import annotations
 
-from decimal import Decimal
-
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QKeyEvent, QPainter, QPaintEvent, QShowEvent
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeyEvent, QShowEvent
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -80,13 +71,9 @@ from PySide6.QtWidgets import (
 
 from gestor_comercial.core.resilience import nao_deixa_escapar
 from gestor_comercial.services.comanda_service import PreviaDeConferencia
-from gestor_comercial.services.formatador_cupom import percentual
 from gestor_comercial.ui.formatacao import formatar_reais
-from gestor_comercial.ui.theme.controller import ThemeController
-from gestor_comercial.ui.theme.cores import cor_do_token
 from gestor_comercial.ui.widgets import cartao_modal
 from gestor_comercial.ui.widgets.cardapio_cartoes import (
-    GLIFO_ARQUIVO_TEXTO,
     GLIFO_CADEADO,
     GLIFO_DOCUMENTO_VISTO,
     GLIFO_ESCUDO,
@@ -94,7 +81,6 @@ from gestor_comercial.ui.widgets.cardapio_cartoes import (
     GLIFO_VISTO,
     BotaoComGlifo,
     GlifoSolto,
-    desenhar_glifo,
 )
 from gestor_comercial.ui.widgets.cartao_modal import Backdrop
 from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
@@ -116,75 +102,6 @@ def _onde(previa: PreviaDeConferencia) -> tuple[str, str]:
     if previa.mesa_numero is None:
         return "BALCÃO", "comanda"
     return f"MESA {previa.mesa_numero}", "mesa"
-
-
-class _MarcaDaTaxa(QWidget):
-    """O selo da taxa: quadradinho âmbar com o visto, dizendo que ela está na conta.
-
-    Era a caixinha que se marcava (§9.23) e virou selo no §9.25, quando a
-    escolha saiu: o desenho ficou, porque é ele que diz num relance "a taxa
-    está aqui dentro". Pintado, e não um `QCheckBox`, pelo motivo do
-    `Interruptor`: o indicador do Qt não faz caixa cheia com o visto do app, e a
-    cor tem que ser lida a cada pintura para acompanhar o alternador de tema
-    (§3.15).
-    """
-
-    LADO_PX = 22
-    RAIO_PX = 6.0
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("confDialogMarca")
-        self.setFixedSize(self.LADO_PX, self.LADO_PX)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-
-    @nao_deixa_escapar()
-    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
-        tokens = ThemeController.instancia().tokens_atuais
-        area = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
-        pintor = QPainter(self)
-        pintor.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pintor.setPen(Qt.PenStyle.NoPen)
-        pintor.setBrush(cor_do_token(tokens["conferencia_mesa_marca_bg"]))
-        pintor.drawRoundedRect(area, self.RAIO_PX, self.RAIO_PX)
-        miolo = area.adjusted(4.0, 4.0, -4.0, -4.0)
-        desenhar_glifo(
-            pintor, GLIFO_VISTO, miolo, cor_do_token(tokens["conferencia_mesa_marca_glifo"]), 3.0
-        )
-        pintor.end()
-
-
-class _CartaoTaxa(QFrame):
-    """A linha da taxa de serviço: o selo, o texto e o valor que está na conta.
-
-    Não recebe clique nenhum desde o §9.25 — é informação, não controle.
-    """
-
-    def __init__(self, previa: PreviaDeConferencia, onde: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("confDialogTaxa")
-
-        linha = QHBoxLayout(self)
-        linha.setContentsMargins(16, 14, 18, 14)
-        linha.setSpacing(14)
-
-        self.marca = _MarcaDaTaxa()
-        linha.addWidget(self.marca, 0, Qt.AlignmentFlag.AlignVCenter)
-
-        textos = QVBoxLayout()
-        textos.setSpacing(3)
-        titulo = QLabel("Taxa de serviço incluída")
-        titulo.setObjectName("confDialogTaxaTitulo")
-        textos.addWidget(titulo)
-        descricao = QLabel(f"{percentual(previa.taxa_percentual)}% sobre o consumo da {onde}")
-        descricao.setObjectName("confDialogTaxaDescricao")
-        textos.addWidget(descricao)
-        linha.addLayout(textos, 1)
-
-        self.valor = QLabel(formatar_reais(previa.valor_da_taxa))
-        self.valor.setObjectName("confDialogTaxaValor")
-        self.valor.setProperty("cobrada", True)
-        linha.addWidget(self.valor, 0, Qt.AlignmentFlag.AlignVCenter)
 
 
 class ConferenciaMesaDialog(QDialog):
@@ -230,18 +147,6 @@ class ConferenciaMesaDialog(QDialog):
         corpo.addWidget(self._montar_corpo())
         corpo.addWidget(self._divisor())
         corpo.addWidget(self._montar_rodape())
-
-    # ------------------------------------------------------------------
-    # O que a view lê
-    # ------------------------------------------------------------------
-
-    def resultado(self) -> Decimal | None:
-        """O percentual que `fechar_para_conferencia` vai congelar na comanda.
-
-        `None` com a loja sem taxa — nunca zero, que é como a comanda aberta já
-        nasce e o que faz o cupom omitir a linha.
-        """
-        return self._previa.percentual_a_gravar
 
     # ------------------------------------------------------------------
     # Montagem
@@ -295,10 +200,14 @@ class ConferenciaMesaDialog(QDialog):
         return faixa
 
     def _montar_corpo(self) -> QWidget:
-        """A faixa pontilhada do meio: os dois valores, a taxa e o aviso.
+        """A faixa pontilhada do meio: o total da pré-conta e o aviso.
 
         `PainelPontilhado` pela mesma razão do §9.12 e do §9.18: é a textura que
         o mockup mostra atrás do conteúdo.
+
+        UM cartão de valor, e não dois (§9.26): sem a taxa, o subtotal dos itens
+        e o total da pré-conta são o MESMO número, e dois cartões lado a lado
+        repetindo-o fariam o garçom procurar a diferença entre eles.
         """
         faixa = PainelPontilhado()
         faixa.setObjectName("confDialogCorpo")
@@ -306,17 +215,6 @@ class ConferenciaMesaDialog(QDialog):
         coluna.setContentsMargins(24, 22, 24, 22)
         coluna.setSpacing(14)
 
-        valores = QHBoxLayout()
-        valores.setSpacing(12)
-        subtotal, self._valor_subtotal = self._cartao_de_valor(
-            "confDialogSubtotal",
-            GLIFO_ARQUIVO_TEXTO,
-            "conferencia_mesa_rotulo",
-            "SUBTOTAL",
-            "confDialogValor",
-        )
-        self._valor_subtotal.setText(formatar_reais(self._previa.subtotal))
-        valores.addWidget(subtotal, 1)
         total, self._valor_total = self._cartao_de_valor(
             "confDialogTotal",
             GLIFO_VISTO,
@@ -325,15 +223,7 @@ class ConferenciaMesaDialog(QDialog):
             "confDialogValorTotal",
         )
         self._valor_total.setText(formatar_reais(self._previa.total))
-        valores.addWidget(total, 1)
-        coluna.addLayout(valores)
-
-        # Loja sem taxa: o bloco NÃO É CRIADO, e não só escondido (a forma do
-        # modo componente do §9.15). Nenhum widget invisível ocupando memória.
-        self._cartao_taxa: _CartaoTaxa | None = None
-        if self._previa.oferece_taxa:
-            self._cartao_taxa = _CartaoTaxa(self._previa, self._onde)
-            coluna.addWidget(self._cartao_taxa)
+        coluna.addWidget(total)
 
         coluna.addWidget(self._montar_aviso())
         return faixa
@@ -341,10 +231,11 @@ class ConferenciaMesaDialog(QDialog):
     def _cartao_de_valor(
         self, nome_do_cartao: str, glifo: str, token_glifo: str, rotulo: str, nome_do_valor: str
     ) -> tuple[QFrame, QLabel]:
-        """Um dos dois cartões de cima: o glifo, o rótulo em caixa alta e o valor.
+        """O cartão do valor: o glifo, o rótulo em caixa alta e o número.
 
-        Uma função para os dois — subtotal e total são a mesma peça com outra
-        moldura, e a moldura vem do QSS pelo nome do objeto.
+        Continua parametrizado, e com um só chamador: a moldura vem do QSS pelo
+        nome do objeto, e é isso que mantém a peça fácil de repetir se um
+        segundo valor voltar a existir.
         """
         cartao = QFrame()
         cartao.setObjectName(nome_do_cartao)
