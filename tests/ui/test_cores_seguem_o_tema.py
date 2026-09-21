@@ -24,7 +24,7 @@ from PySide6.QtWidgets import QLabel, QWidget
 import gestor_comercial.ui as pacote_ui
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.views.caixa_view import CaixaView
-from gestor_comercial.ui.views.comanda_view import ComandaView
+from gestor_comercial.ui.views.mesa_detalhe_view import MesaDetalheView
 from gestor_comercial.ui.views.mesas_view import MesasView
 
 RAIZ_UI = Path(pacote_ui.__file__).parent
@@ -77,7 +77,7 @@ def test_a_linha_de_erro_do_qss_global_acompanha_o_tema(qapp, tema):
     assert _cor(rotulo) != escuro, "a linha de erro continua com a cor do tema anterior"
 
 
-@pytest.mark.parametrize("tela", ["Mesas", "Caixa", "Comanda"])
+@pytest.mark.parametrize("tela", ["Mesas", "Caixa", "Detalhe da Mesa"])
 def test_a_linha_de_erro_das_telas_reais_acompanha_o_tema(
     qapp, tema, comandas, cardapio, caixas_service, impressao, funcionarios, tela
 ):
@@ -86,7 +86,7 @@ def test_a_linha_de_erro_das_telas_reais_acompanha_o_tema(
     view = {
         "Mesas": lambda: MesasView(comandas),
         "Caixa": lambda: CaixaView(caixas_service, impressao),
-        "Comanda": lambda: ComandaView(comandas, cardapio, impressao, funcionarios),
+        "Detalhe da Mesa": lambda: MesaDetalheView(comandas, cardapio, impressao, funcionarios),
     }[tela]()
     view.show()
     qapp.processEvents()

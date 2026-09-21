@@ -60,7 +60,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -79,6 +78,7 @@ from gestor_comercial.services.pagamento_service import (
     PagamentoService,
 )
 from gestor_comercial.ui.formatacao import formatar_reais
+from gestor_comercial.ui.rotulo_identidade import rotulo_do_operador
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
 from gestor_comercial.ui.widgets.campo_moeda import CampoMoeda
 from gestor_comercial.ui.widgets.cardapio_cartoes import (
@@ -92,9 +92,10 @@ from gestor_comercial.ui.widgets.cardapio_cartoes import (
     GLIFO_VISTO,
     BotaoComGlifo,
     GlifoSolto,
+    badge_com_glifo,
 )
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
-from gestor_comercial.ui.widgets.layout_utils import limpar_layout
+from gestor_comercial.ui.widgets.layout_utils import limpar_layout, rolagem_vertical
 from gestor_comercial.ui.widgets.modais import executar_modal
 from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
 from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
@@ -205,25 +206,12 @@ class PagamentoView(QWidget):
         corpo = QHBoxLayout()
         corpo.setSpacing(16)
         corpo.addWidget(self._montar_coluna_consumo(), 52)
-        corpo.addWidget(self._rolar(self._montar_coluna_registro()), 48)
+        # A coluna não cabe inteira em 768px, e sem rolagem o Qt não corta: ELE
+        # ESPREME. Medido na renderização com a fonte da marca: os cards de forma
+        # de pagamento viravam faixas de 20px e o Qt parava de desenhar o texto
+        # deles — "Dinheiro", "Pix" e "Crédito" simplesmente sumiam da tela.
+        corpo.addWidget(rolagem_vertical(self._montar_coluna_registro(), "pagColunaRolagem"), 48)
         layout.addLayout(corpo, 1)
-
-    @staticmethod
-    def _rolar(coluna: QWidget) -> QScrollArea:
-        """Põe a coluna numa rolagem — ela não cabe inteira em 768px.
-
-        Sem isto o Qt não corta: ELE ESPREME (a lição do §9.1 e da Configurações
-        na Fase 7). Medido na renderização com a fonte da marca: os cards de
-        forma de pagamento viravam faixas de 20px e o Qt parava de desenhar o
-        texto deles — "Dinheiro", "Pix" e "Crédito" simplesmente sumiam da tela.
-        """
-        rolagem = QScrollArea()
-        rolagem.setObjectName("pagColunaRolagem")
-        rolagem.setWidget(coluna)
-        rolagem.setWidgetResizable(True)
-        rolagem.setFrameShape(QFrame.Shape.NoFrame)
-        rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        return rolagem
 
     def _montar_cabecalho(self) -> QHBoxLayout:
         cabecalho = QHBoxLayout()
@@ -270,7 +258,9 @@ class PagamentoView(QWidget):
         self._titulo_consumo.setObjectName("pagCartaoTitulo")
         textos.addWidget(self._titulo_consumo)
         topo.addLayout(textos, 1)
-        topo.addWidget(self._badge(GLIFO_ARQUIVO_TEXTO), 0, Qt.AlignmentFlag.AlignTop)
+        topo.addWidget(
+            badge_com_glifo(GLIFO_ARQUIVO_TEXTO, "pagBadge", "pagamento_badge_glifo"), 0, Qt.AlignmentFlag.AlignTop
+        )
         coluna.addLayout(topo)
 
         # As linhas de item rolam: uma mesa grande tem mais itens do que cabe
@@ -284,13 +274,7 @@ class PagamentoView(QWidget):
         dentro.setContentsMargins(0, 0, 0, 0)
         dentro.addLayout(self._itens)
         dentro.addStretch()
-        rolagem = QScrollArea()
-        rolagem.setObjectName("pagListaRolagem")
-        rolagem.setWidget(conteudo)
-        rolagem.setWidgetResizable(True)
-        rolagem.setFrameShape(QFrame.Shape.NoFrame)
-        rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        coluna.addWidget(rolagem, 1)
+        coluna.addWidget(rolagem_vertical(conteudo, "pagListaRolagem"), 1)
 
         self._linha_subtotal, self._valor_subtotal = self._linha_de_total("Subtotal")
         coluna.addLayout(self._linha_subtotal)
@@ -344,7 +328,9 @@ class PagamentoView(QWidget):
 
         topo = QHBoxLayout()
         topo.setSpacing(14)
-        topo.addWidget(self._badge(GLIFO_CIFRAO), 0, Qt.AlignmentFlag.AlignTop)
+        topo.addWidget(
+            badge_com_glifo(GLIFO_CIFRAO, "pagBadge", "pagamento_badge_glifo"), 0, Qt.AlignmentFlag.AlignTop
+        )
         textos = QVBoxLayout()
         textos.setSpacing(3)
         titulo = QLabel("Registrar pagamento")
@@ -415,16 +401,6 @@ class PagamentoView(QWidget):
         return cartao
 
     @staticmethod
-    def _badge(glifo: str) -> QFrame:
-        badge = QFrame()
-        badge.setObjectName("pagBadge")
-        badge.setFixedSize(38, 38)
-        dentro = QHBoxLayout(badge)
-        dentro.setContentsMargins(0, 0, 0, 0)
-        dentro.addWidget(GlifoSolto(glifo, 18, "pagamento_badge_glifo"), 0, Qt.AlignmentFlag.AlignCenter)
-        return badge
-
-    @staticmethod
     def _rotulo_secao(texto: str) -> QLabel:
         rotulo = QLabel(texto)
         rotulo.setObjectName("pagCartaoRotulo")
@@ -467,7 +443,7 @@ class PagamentoView(QWidget):
         self._conta = conta
         self._popular_funcionarios()
 
-        self._eyebrow.setText(self._identidade())
+        self._eyebrow.setText(rotulo_do_operador(self._auth.usuario_logado))
         self._titulo.setText(f"Receber Pagamento · {conta.origem}")
         garcom = conta.atendente_nome or "sem atendente"
         self._subtitulo.setText(f"Comanda #{conta.comanda_id} · Garçom {garcom}")
@@ -485,10 +461,6 @@ class PagamentoView(QWidget):
         # só confere e confirma, e o troco aparece quando ele digita mais.
         self._campo_valor.definir_valor(conta.restante)
         self._mostrar_troco()
-
-    def _identidade(self) -> str:
-        usuario = self._auth.usuario_logado
-        return "" if usuario is None else f"{usuario.perfil.value} · {usuario.nome}".upper()
 
     def _popular_funcionarios(self) -> None:
         atual = self._combo_funcionario.currentData()

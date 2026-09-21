@@ -164,24 +164,11 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QPushButton[variante="ciano"]:hover {{ background: {t['ciano_acao_hover']}; }}
     QPushButton[variante="ciano"]:disabled {{ background: {t['borda']}; color: {t['texto_fraquissimo']}; }}
 
-    /* Variante compacta de "perigo" para botões dentro de linha de tabela
-       (Remover/Cancelar em `ComandaView`): o padding padrão de QPushButton
-       (10px 16px + fonte 13px) exige ~38px de altura, mais que a linha da
-       tabela (~30px) comporta — o botão fica espremido pelo `setCellWidget`
-       e, abaixo de um certo limiar, o Qt para de desenhar o texto (vira uma
-       barra vermelha vazia). Padding e fonte menores cabem na linha padrão. */
-    QPushButton[variante="perigo-tabela"] {{
-      background: {t['perigo_tabela_bg']}; color: #FFFFFF; border: none;
-      height: 22px; padding: 0 12px; font-size: 11px; font-weight: 700; border-radius: 11px;
-    }}
-    QPushButton[variante="perigo-tabela"]:hover {{ background: {t['perigo_hover']}; }}
-    QPushButton[variante="perigo-tabela"]:pressed {{ background: {t['perigo']}; }}
+    /* ---------- Pílulas ---------- */
 
-    /* ---------- Pílulas do cabeçalho da Comanda ---------- */
-
-    /* "← Mesas": ponto de saída da tela — precisa se destacar dos botões
-       neutros ao lado (+ Item, 2ª via) pra ficar óbvio que é a saída, não
-       mais uma ação da comanda. Borda âmbar + peso maior que o padrão. */
+    /* "← Mesas" (tela da mesa) e "← Voltar à mesa" (pagamento): o ponto de
+       saída da tela precisa se destacar das ações ao lado pra ficar óbvio que
+       é a saída, não mais uma ação da conta. Borda âmbar + peso maior. */
     QPushButton[variante="pilula-voltar"] {{
       background: {t['pill_comanda_bg']};
       color: {t['pill_comanda_texto']};
@@ -230,25 +217,9 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QPushButton[variante="pilula-perigo"]:hover {{ background: {t['pilula_perigo_hover']}; }}
     QPushButton[variante="pilula-perigo"]:disabled {{ background: {t['pilula_disabled_bg']}; color: {t['pilula_disabled_texto']}; }}
 
-    /* Combo "Atendeu": some com a aparência de caixa de formulário e vira
-       texto simples, como no mockup — continua clicável/funcional, só sem o
-       chrome visual de combo box. */
-    QComboBox#combo-atendente {{
-      background: transparent;
-      border: none;
-      padding: 0 4px;
-      color: {t['combo_atendente_borda']};
-      font-size: 13px;
-      font-weight: 500;
-    }}
-    QComboBox#combo-atendente::drop-down {{ border: none; width: 14px; }}
-    QComboBox#combo-atendente QAbstractItemView {{
-      background: {t['combo_atendente_bg']};
-      border: 1px solid {t['borda_card']};
-      color: {t['texto']};
-    }}
-
-    /* Botão "Enviar Pedido à Produção", no header do card de pendentes */
+    /* Petróleo cheio: nasceu no "Enviar Pedido à Produção" da tela antiga da
+       comanda, que ganhou seletor próprio no §9.27 (`#mesaDetBotaoEnviar`).
+       Hoje só o botão de sangria do Caixa usa esta variante. */
     QPushButton[variante="enviar-pedido"] {{
       background: {t['enviar_pedido_bg']};
       color: {t['enviar_pedido_texto']};
@@ -260,19 +231,6 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
     QPushButton[variante="enviar-pedido"]:hover {{ background: {t['enviar_pedido_hover']}; }}
     QPushButton[variante="enviar-pedido"]:disabled {{ background: {t['pilula_disabled_bg']}; color: {t['pilula_disabled_texto']}; }}
-
-    /* Botão "Remover" compacto na tabela de itens pendentes */
-    QPushButton[variante="remover-tabela"] {{
-      background: {t['remover_tabela_bg']};
-      color: {t['remover_tabela_texto']};
-      border: 1px solid {t['remover_tabela_borda']};
-      border-radius: 11px;
-      font-size: 11px;
-      font-weight: 700;
-      height: 22px;
-      padding: 0 10px;
-    }}
-    QPushButton[variante="remover-tabela"]:hover {{ background: {t['remover_tabela_hover']}; }}
 
     QPushButton[variante="neutro"] {{
       background: {t['superficie_2']};
@@ -434,95 +392,6 @@ def construir_qss_app(t: dict[str, str]) -> str:
     }}
     QTableWidget::item:selected, QTableView::item:selected {{ background: {t['superficie_2']}; }}
 
-    /* ---------- Tabelas da Comanda (itens pendentes/lançados) ---------- */
-
-    QTableWidget#tabela-comanda {{
-      background: transparent;
-      border: none;
-      border-radius: 0px;
-      gridline-color: transparent;
-      outline: none;
-    }}
-    QTableWidget#tabela-comanda::item {{
-      padding: 2px 12px;
-      border-bottom: 1px solid {t['tabela_comanda_borda']};
-      color: {t['tabela_comanda_texto']};
-      font-weight: 600;
-      font-size: 14px;
-    }}
-    QTableWidget#tabela-comanda::item:selected {{
-      background: {t['tabela_comanda_selecionado_bg']};
-      color: {t['tabela_comanda_texto']};
-      outline: none;
-    }}
-    QTableWidget#tabela-comanda::item:hover {{
-      background: {t['tabela_comanda_selecionado_bg']};
-    }}
-    QTableWidget#tabela-comanda QHeaderView::section {{
-      background: transparent;
-      color: {t['secao_texto_fraco']};
-      padding: 6px 12px;
-      border: none;
-      border-bottom: 1px solid {t['tabela_comanda_borda']};
-      text-transform: uppercase;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 1.2px;
-    }}
-
-    /* ---------- Cards de seção da Comanda ---------- */
-
-    #secao-pendentes {{
-      background: {t['secao_pendentes_bg']};
-      border: 1px solid {t['secao_pendentes_borda']};
-      border-radius: 16px;
-      padding: 8px;
-    }}
-    #titulo-secao-pendentes {{
-      color: {t['secao_pendentes_titulo']};
-      font-weight: 700;
-      font-size: 11px;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-    }}
-    #secao-lancados {{
-      background: {t['secao_lancados_bg']};
-      border: 1px solid {t['borda_card']};
-      border-radius: 16px;
-      padding: 8px;
-    }}
-    #titulo-secao-lancados {{
-      color: {t['secao_texto_fraco']};
-      font-weight: 700;
-      font-size: 11px;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-    }}
-
-    /* ---------- Barra de total (Comanda) ---------- */
-
-    #barra-total {{
-      background: {t['barra_total_bg']};
-      border-radius: 10px;
-      border: none;
-      min-height: 34px;
-    }}
-    #barra-total-rotulo {{
-      color: {t['barra_total_texto']};
-      font-size: 10px;
-      font-weight: 800;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-      margin-right: 10px;
-      background: transparent;
-    }}
-    #barra-total-valor {{
-      color: {t['barra_total_texto_forte']};
-      font-size: 18px;
-      font-weight: 900;
-      background: transparent;
-    }}
-
     /* ---------- Labels auxiliares ---------- */
 
     QLabel[variante="fraco"] {{ color: {t['texto_fraco']}; }}
@@ -547,13 +416,6 @@ def construir_qss_app(t: dict[str, str]) -> str:
        estado é uma propriedade ou o objectName. */
 
     QLabel#dicaFraca {{ color: {t['texto_fraquissimo']}; font-size: 11px; background: transparent; }}
-    QLabel#comandaCelulaTexto {{ color: {t['tabela_comanda_texto']}; }}
-
-    /* Tempo na cozinha: cinza até 30 min, âmbar até 1 h, vermelho depois. */
-    QLabel#comandaHorario {{ font-size: 13px; margin-left: 8px; color: {t['texto_fraquissimo']}; }}
-    QLabel#comandaHorario[tom="aviso"] {{ color: {t['aviso']}; }}
-    QLabel#comandaHorario[tom="perigo"] {{ color: {t['perigo']}; }}
-
     QLabel#campoErroRotulo {{ color: {t['campo_erro_texto']}; font-size: 11px; background: transparent; }}
     QLineEdit[erro="true"] {{
       border: 1px solid {t['campo_erro_texto']};
@@ -584,13 +446,6 @@ def construir_qss_app(t: dict[str, str]) -> str:
       selection-background-color: {t['acento']};
     }}
     QLabel#comprovanteStatus {{ color: {t['texto_fraco']}; font-size: 12px; }}
-
-    QLabel#comandaTitulo {{ font-weight: 800; font-size: 32px; color: {t['texto']}; }}
-    QLabel#comandaRotuloAtendeu {{
-      color: {t['combo_atendente_borda']};
-      font-size: 13px;
-      font-weight: 500;
-    }}
 
     /* ---------- Cardapio em cartoes (§9.11) ----------
        As duas listas da tela (a arvore e os blocos de produto) sao PINTADAS
@@ -1683,6 +1538,309 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-weight: 700;
     }}
     QPushButton#pagBotaoRegistrarImprimir:hover {{ background: {t['botao_circular_hover']}; }}
+
+    /* ---- Tela da mesa (`views/mesa_detalhe_view.py`, §9.27) ----
+       Cabeçalho, a faixa do garçom com a esteira, os dois cartões de itens à
+       esquerda e o resumo com as ações à direita. Todo rótulo declara
+       `background: transparent` pelo motivo de sempre: a regra global
+       `QWidget {{ background }}` pinta QLabel também.
+
+       Os botões com glifo CENTRADO (`BotaoComGlifo(centrado=True)`) têm
+       21px a mais de padding na esquerda que na direita — o
+       `DESLOCAMENTO_CENTRADO_PX` (glifo de 13 + folga de 8): é o que põe o par
+       glifo+texto no meio do botão. */
+
+    QLabel#mesaDetSobrescrito {{
+      color: {t['mesa_detalhe_badge_glifo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.6px;
+      background: transparent;
+    }}
+    QLabel#mesaDetTitulo {{
+      color: {t['texto']};
+      font-size: 24px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#mesaDetSubtitulo {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QPushButton#mesaDetBotaoAdicionar {{
+      padding: 8px 18px 8px 39px;
+      background: {t['acento']};
+      border: 1px solid {t['acento']};
+      border-radius: 18px;
+      color: {t['acento_texto']};
+      font-size: 13px;
+      font-weight: 800;
+    }}
+    QPushButton#mesaDetBotaoAdicionar:hover {{
+      background: {t['acento_hover']};
+      border-color: {t['acento_hover']};
+    }}
+    QPushButton#mesaDetBotaoAdicionar:disabled {{
+      background: {t['pilula_disabled_bg']};
+      border-color: {t['pilula_disabled_bg']};
+      color: {t['pilula_disabled_texto']};
+    }}
+
+    QFrame#mesaDetFaixa {{
+      background: {t['mesa_detalhe_cartao_bg']};
+      border: 1px solid {t['mesa_detalhe_cartao_borda']};
+      border-radius: 14px;
+    }}
+    QFrame#mesaDetGarcom, QWidget#mesaDetEsteira, QWidget#mesaDetMarcaEtapa,
+    QWidget#mesaDetColuna {{
+      background: transparent;
+      border: none;
+    }}
+    QFrame#mesaDetBadge {{
+      background: {t['mesa_detalhe_badge_bg']};
+      border: 1px solid {t['mesa_detalhe_badge_borda']};
+      border-radius: 11px;
+    }}
+    QFrame#mesaDetBadge[tom="pendente"] {{
+      background: {t['mesa_detalhe_pendente_badge_bg']};
+      border-color: {t['mesa_detalhe_pendente_borda']};
+    }}
+    /* O nome do garçom é um combo sem a caixa de formulário: continua sendo o
+       clique que troca o garçom, como a linha "Atendeu:" da tela antiga. */
+    QComboBox#mesaDetGarcomNome {{
+      background: transparent;
+      border: none;
+      padding: 0;
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 800;
+    }}
+    QComboBox#mesaDetGarcomNome::drop-down {{ width: 0px; }}
+    QLabel#mesaDetGarcomCargo {{
+      color: {t['texto_fraco']};
+      font-size: 11px;
+      background: transparent;
+    }}
+    QLabel#mesaDetEtapaRotulo {{
+      color: {t['mesa_detalhe_etapa_texto']};
+      font-size: 11px;
+      font-weight: 700;
+      background: transparent;
+    }}
+    QLabel#mesaDetEtapaRotulo[estado="feita"] {{ color: {t['mesa_detalhe_etapa_feita_texto']}; }}
+    QLabel#mesaDetEtapaRotulo[estado="atual"] {{ color: {t['mesa_detalhe_etapa_atual']}; }}
+
+    QScrollArea#mesaDetRolagem {{ background: transparent; border: none; }}
+    QScrollArea#mesaDetRolagem > QWidget > QWidget {{ background: transparent; }}
+
+    QFrame#mesaDetCartao {{
+      background: {t['mesa_detalhe_cartao_bg']};
+      border: 1px solid {t['mesa_detalhe_cartao_borda']};
+      border-radius: 16px;
+    }}
+    /* "Aguardando envio": a moldura em petróleo é o aviso de que há o que
+       mandar para a cozinha antes de sair da mesa. */
+    QFrame#mesaDetCartao[destaque="true"] {{
+      background: {t['mesa_detalhe_pendente_bg']};
+      border-color: {t['mesa_detalhe_pendente_borda']};
+    }}
+    QLabel#mesaDetCartaoTitulo {{
+      color: {t['texto']};
+      font-size: 15px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#mesaDetCartaoSubtitulo {{
+      color: {t['texto_fraco']};
+      font-size: 11px;
+      background: transparent;
+    }}
+    QLabel#mesaDetRotuloSecao {{
+      color: {t['mesa_detalhe_rotulo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.4px;
+      background: transparent;
+    }}
+    QPushButton#mesaDetBotaoEnviar {{
+      padding: 9px 16px 9px 37px;
+      background: {t['mesa_detalhe_enviar_bg']};
+      border: none;
+      border-radius: 12px;
+      color: {t['mesa_detalhe_enviar_texto']};
+      font-size: 12px;
+      font-weight: 800;
+    }}
+    QPushButton#mesaDetBotaoEnviar:hover {{ background: {t['mesa_detalhe_enviar_hover']}; }}
+    QPushButton#mesaDetBotaoEnviar:disabled {{
+      background: {t['pilula_disabled_bg']};
+      color: {t['pilula_disabled_texto']};
+    }}
+    QLabel#mesaDetPilula {{
+      background: {t['mesa_detalhe_pilula_bg']};
+      border-radius: 10px;
+      padding: 3px 10px;
+      color: {t['texto_fraco']};
+      font-size: 11px;
+      font-weight: 700;
+    }}
+
+    /* As linhas de item: uma borda de baixo separa uma da outra, e a última
+       não tem — quem fecha o cartão é a moldura. */
+    QFrame#mesaDetColunas {{
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid {t['mesa_detalhe_divisor']};
+    }}
+    QLabel#mesaDetColunaRotulo {{
+      color: {t['mesa_detalhe_rotulo']};
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.4px;
+      background: transparent;
+    }}
+    QFrame#mesaDetLinha {{
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid {t['mesa_detalhe_divisor']};
+    }}
+    QFrame#mesaDetLinha[ultima="true"] {{ border-bottom: none; }}
+    QLabel#mesaDetItemNome {{
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#mesaDetItemObs {{
+      color: {t['texto_fraco']};
+      font-size: 11px;
+      background: transparent;
+    }}
+    QLabel#mesaDetItemValor, QLabel#mesaDetItemQtd {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QLabel#mesaDetItemQtd {{ color: {t['texto']}; font-weight: 700; }}
+    QLabel#mesaDetItemTotal {{
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QPushButton#mesaDetAcaoItem {{
+      padding: 5px 6px 5px 27px;
+      background: transparent;
+      border: none;
+      border-radius: 8px;
+      color: {t['mesa_detalhe_perigo_texto']};
+      font-size: 11px;
+      font-weight: 700;
+    }}
+    QPushButton#mesaDetAcaoItem:hover {{ background: {t['mesa_detalhe_perigo_hover_bg']}; }}
+    QPushButton#mesaDetAcaoItem:disabled {{ color: {t['pilula_disabled_texto']}; }}
+    QLabel#mesaDetVazio {{
+      color: {t['texto_fraquissimo']};
+      font-size: 12px;
+      padding: 10px 0 8px 0;
+      background: transparent;
+    }}
+
+    QFrame#mesaDetResumoLinha {{
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid {t['mesa_detalhe_divisor']};
+    }}
+    QLabel#mesaDetResumoRotulo {{
+      color: {t['texto_fraco']};
+      font-size: 12px;
+      background: transparent;
+    }}
+    QLabel#mesaDetResumoValor {{
+      color: {t['texto']};
+      font-size: 13px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#mesaDetResumoValor[tom="pendente"] {{ color: {t['mesa_detalhe_pendente_destaque']}; }}
+    QFrame#mesaDetTotalCard {{
+      background: {t['mesa_detalhe_total_bg']};
+      border: none;
+      border-radius: 12px;
+    }}
+    QLabel#mesaDetTotalRotulo {{
+      color: {t['mesa_detalhe_total_rotulo']};
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1.6px;
+      background: transparent;
+    }}
+    QLabel#mesaDetTotalValor {{
+      color: {t['mesa_detalhe_total_texto']};
+      font-size: 28px;
+      font-weight: 800;
+      background: transparent;
+    }}
+    QLabel#mesaDetTotalNota {{
+      color: {t['mesa_detalhe_total_rotulo']};
+      font-size: 11px;
+      background: transparent;
+    }}
+
+    QPushButton#mesaDetBotaoFechar {{
+      padding: 12px 16px 12px 37px;
+      background: {t['acento']};
+      border: 1px solid {t['acento']};
+      border-radius: 12px;
+      color: {t['acento_texto']};
+      font-size: 13px;
+      font-weight: 800;
+    }}
+    QPushButton#mesaDetBotaoFechar:hover {{
+      background: {t['acento_hover']};
+      border-color: {t['acento_hover']};
+    }}
+    QPushButton#mesaDetBotaoReceber {{
+      padding: 11px 16px 11px 37px;
+      background: {t['mesa_detalhe_receber_bg']};
+      border: 1px solid {t['mesa_detalhe_receber_borda']};
+      border-radius: 12px;
+      color: {t['mesa_detalhe_receber_texto']};
+      font-size: 13px;
+      font-weight: 800;
+    }}
+    QPushButton#mesaDetBotaoReceber:hover {{ background: {t['mesa_detalhe_receber_hover']}; }}
+    QPushButton#mesaDetBotaoNeutro {{
+      padding: 9px 16px 9px 37px;
+      background: {t['mesa_detalhe_neutro_bg']};
+      border: 1px solid {t['mesa_detalhe_neutro_borda']};
+      border-radius: 12px;
+      color: {t['texto']};
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    QPushButton#mesaDetBotaoNeutro:hover {{ background: {t['mesa_detalhe_neutro_hover']}; }}
+    QPushButton#mesaDetBotaoCancelar {{
+      padding: 8px 16px 8px 37px;
+      background: transparent;
+      border: none;
+      border-radius: 12px;
+      color: {t['mesa_detalhe_perigo_texto']};
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    QPushButton#mesaDetBotaoCancelar:hover {{ background: {t['mesa_detalhe_perigo_hover_bg']}; }}
+    /* Desligado é desligado em todos: sem cor de ação, para ninguém clicar num
+       botão que não vai fazer nada. */
+    QPushButton#mesaDetBotaoFechar:disabled, QPushButton#mesaDetBotaoReceber:disabled,
+    QPushButton#mesaDetBotaoNeutro:disabled, QPushButton#mesaDetBotaoCancelar:disabled {{
+      background: {t['pilula_disabled_bg']};
+      border-color: {t['pilula_disabled_bg']};
+      color: {t['pilula_disabled_texto']};
+    }}
+    QPushButton#mesaDetBotaoCancelar:disabled {{ background: transparent; }}
+    QFrame#mesaDetDivisor {{ background: {t['mesa_detalhe_divisor']}; border: none; }}
 
     /* ---- Conferencia da mesa (`conferencia_dialog.py`, §9.23) ----
        Decimo segundo modal em cartao. Cabecalho, cartao e rodape seguem o

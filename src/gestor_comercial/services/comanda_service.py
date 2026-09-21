@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from enum import IntEnum
 
 from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.enums import StatusComanda, StatusMesa
@@ -51,6 +52,120 @@ class PreviaDeConferencia:
     def total(self) -> Decimal:
         """O que vai sair na pré-conta: os itens lançados, e nada mais."""
         return dinheiro(self.subtotal)
+
+
+class EtapaDaComanda(IntEnum):
+    """Onde a conta está na esteira do cabeçalho da mesa (§9.27).
+
+    `IntEnum` porque a esteira pinta pela ORDEM: toda etapa antes da atual já foi
+    feita, e toda etapa depois ainda não chegou.
+    """
+
+    ATENDIMENTO = 1
+    PRODUCAO = 2
+    CONFERENCIA = 3
+    PAGAMENTO = 4
+
+
+@dataclass(frozen=True, slots=True)
+class LinhaDoPainel:
+    """Uma linha das listas de itens da tela da mesa.
+
+    `item_ids` é uma tupla porque a lista de enviados AGRUPA: três lançamentos
+    de "Coca-Cola" pelo mesmo preço viram uma linha só de quantidade 3, e o
+    Cancelar dessa linha precisa cancelar os três `ItemComanda` por baixo, um a
+    um — cancelamento é registro de auditoria por item.
+    """
+
+    item_ids: tuple[int, ...]
+    nome: str
+    observacao: str | None
+    preco_unit: Decimal
+    quantidade: int
+
+    @property
+    def total(self) -> Decimal:
+        return dinheiro(self.preco_unit * self.quantidade)
+
+
+@dataclass(frozen=True, slots=True)
+class PainelDaComanda:
+    """O instantâneo que a tela da mesa mostra (§9.27).
+
+    Imutável e montado de uma vez, pela lição do §9.4 (todo commit expira as
+    instâncias do SQLAlchemy): a tela recarrega a cada item lançado pelo modal
+    "Adicionar item", e ler a `Comanda` na hora de pintar levaria a tela ao
+    banco a cada repintura. É o mesmo arranjo do `ContaParaPagamento` (§9.25).
+
+    `total` é a soma dos itens não cancelados, enviados ou não, e nada mais —
+    sem taxa nenhuma desde o §9.26. Um teste confere que é o mesmo número de
+    `calcular_total`.
+    """
+
+    comanda_id: int
+    status: StatusComanda
+    # `None` na comanda de balcão.
+    mesa_numero: int | None
+    # O instante do primeiro item lançado (`lancar_item` o regrava), e não o do
+    # clique na mesa: é o "aberta há" do cabeçalho.
+    aberta_em: datetime
+    atendente_id: int | None
+    atendente_nome: str | None
+    atendente_cargo: str | None
+    # Ainda não foram para a produção: uma linha por item, cada uma removível.
+    pendentes: tuple[LinhaDoPainel, ...]
+    # Já foram: agrupados por produto e preço, cancelados com PIN.
+    enviados: tuple[LinhaDoPainel, ...]
+    total_pago: Decimal
+
+    @property
+    def origem(self) -> str:
+        """"Mesa 12" ou "Balcão" — como a tela e o cupom chamam a conta."""
+        return "Balcão" if self.mesa_numero is None else f"Mesa {self.mesa_numero}"
+
+    @property
+    def aberta(self) -> bool:
+        return self.status is StatusComanda.ABERTA
+
+    @property
+    def em_conferencia(self) -> bool:
+        return self.status is StatusComanda.EM_CONFERENCIA
+
+    @property
+    def tem_itens(self) -> bool:
+        return bool(self.pendentes or self.enviados)
+
+    @property
+    def total_pendente(self) -> Decimal:
+        return dinheiro(sum((linha.total for linha in self.pendentes), ZERO))
+
+    @property
+    def total_enviado(self) -> Decimal:
+        return dinheiro(sum((linha.total for linha in self.enviados), ZERO))
+
+    @property
+    def total(self) -> Decimal:
+        return dinheiro(self.total_pendente + self.total_enviado)
+
+    @property
+    def unidades_enviadas(self) -> int:
+        return sum(linha.quantidade for linha in self.enviados)
+
+    @property
+    def etapa(self) -> EtapaDaComanda | None:
+        """A etapa acesa na esteira. `None` na comanda cancelada, que não anda.
+
+        Atendimento enquanto nada foi para a cozinha; Produção a partir do
+        primeiro envio; Conferência com a pré-conta emitida; Pagamento quando a
+        conta em conferência já recebeu parte do dinheiro (e na fechada).
+        """
+        if self.status is StatusComanda.CANCELADA:
+            return None
+        if self.status is StatusComanda.FECHADA or (self.em_conferencia and self.total_pago > ZERO):
+            return EtapaDaComanda.PAGAMENTO
+        if self.em_conferencia:
+            return EtapaDaComanda.CONFERENCIA
+        return EtapaDaComanda.PRODUCAO if self.enviados else EtapaDaComanda.ATENDIMENTO
 
 
 @transacional
@@ -177,19 +292,66 @@ class ComandaService:
         """
         return self.uow.comandas.listar_abertas_por_mesa()
 
-    @staticmethod
-    def hora_primeiro_envio(itens: list[ItemComanda]) -> datetime | None:
-        """Instante em que a cozinha viu o primeiro item da comanda.
+    def painel_da_comanda(self, comanda_id: int) -> PainelDaComanda:
+        """O instantâneo completo da tela da mesa (§9.27). Não grava nada.
 
-        Usado pela UI (grade de mesas e detalhe da comanda) para não fazer o
-        relógio de "tempo de espera" correr enquanto o pedido ainda é
-        rascunho — numa mesa grande, lançar todos os itens pode levar
-        minutos, e isso não é atraso de cozinha nenhum.
+        Consultas fixas, qualquer que seja o tamanho da conta: a comanda, a
+        mesa, o atendente, os itens com os produtos (um `selectinload`) e os
+        pagamentos. A tela antiga fazia uma consulta por item para ler o nome do
+        produto, e ainda relia a lista de funcionários a cada item lançado.
         """
-        enviados = [
-            item.impresso_em for item in itens if not item.cancelado and item.impresso_em is not None
-        ]
-        return min(enviados) if enviados else None
+        comanda = self.buscar(comanda_id)
+        itens = self.uow.itens.listar_ativos_com_produto(comanda_id)
+        pendentes = tuple(
+            LinhaDoPainel(
+                item_ids=(item.id,),
+                nome=item.produto.nome,
+                observacao=item.observacao,
+                preco_unit=dinheiro(item.preco_unit_congelado),
+                quantidade=item.quantidade,
+            )
+            for item in itens
+            if item.impresso_em is None
+        )
+        enviados = self._agrupar_enviados([item for item in itens if item.impresso_em is not None])
+        pago = ZERO
+        for pagamento in self.uow.pagamentos.listar_por_comanda(comanda_id):
+            pago += dinheiro(pagamento.valor)
+        atendente = comanda.atendente
+        return PainelDaComanda(
+            comanda_id=comanda.id,
+            status=comanda.status,
+            mesa_numero=comanda.mesa.numero if comanda.mesa else None,
+            aberta_em=comanda.aberta_em,
+            atendente_id=atendente.id if atendente else None,
+            atendente_nome=atendente.nome if atendente else None,
+            atendente_cargo=atendente.cargo if atendente else None,
+            pendentes=pendentes,
+            enviados=enviados,
+            total_pago=dinheiro(pago),
+        )
+
+    @staticmethod
+    def _agrupar_enviados(itens: list[ItemComanda]) -> tuple[LinhaDoPainel, ...]:
+        """Os itens que já foram para a produção, somados por (produto, preço).
+
+        Na ordem do primeiro lançamento de cada grupo. A observação só aparece
+        quando o grupo tem um item: somar dois lançamentos com observações
+        diferentes numa linha e mostrar só uma delas mentiria sobre o outro.
+        """
+        grupos: dict[tuple[int, Decimal], list[ItemComanda]] = {}
+        for item in itens:
+            grupos.setdefault((item.produto_id, dinheiro(item.preco_unit_congelado)), []).append(item)
+        return tuple(
+            LinhaDoPainel(
+                item_ids=tuple(item.id for item in grupo),
+                nome=grupo[0].produto.nome,
+                observacao=grupo[0].observacao if len(grupo) == 1 else None,
+                preco_unit=preco,
+                quantidade=sum(item.quantidade for item in grupo),
+            )
+            for (_produto_id, preco), grupo in grupos.items()
+        )
 
     def calcular_total(self, comanda_id: int) -> Decimal:
         """Soma dos itens não cancelados, pelo preço congelado no lançamento.

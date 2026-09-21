@@ -1,4 +1,7 @@
-"""Esvaziar um layout do Qt — a versão única e correta.
+"""Esvaziar um layout do Qt — a versão única e correta — e a rolagem de coluna.
+
+`rolagem_vertical` mora aqui desde o §9.27: a tela de pagamento e a tela da
+mesa montavam a mesma `QScrollArea` sem moldura, cada uma com a sua cópia.
 
 Ver `REMASTERIZACAO-V1.md` §3.7. O projeto tinha de quatro a seis cópias deste
 laço, com comportamentos divergentes: duas já corrigidas
@@ -17,7 +20,25 @@ o widget da árvore na hora, antes mesmo de o GC de verdade acontecer.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QLayout
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QFrame, QLayout, QScrollArea, QWidget
+
+
+def rolagem_vertical(conteudo: QWidget, nome_objeto: str) -> QScrollArea:
+    """Põe `conteudo` numa rolagem só vertical, sem moldura.
+
+    É a saída para coluna que não cabe inteira em 768px: sem rolagem o Qt não
+    corta, ele ESPREME (§9.1, Fase 7) — e abaixo do tamanho natural para de
+    desenhar o texto dos botões. A barra horizontal fica desligada porque a
+    coluna acompanha a largura da rolagem (`setWidgetResizable`).
+    """
+    rolagem = QScrollArea()
+    rolagem.setObjectName(nome_objeto)
+    rolagem.setWidget(conteudo)
+    rolagem.setWidgetResizable(True)
+    rolagem.setFrameShape(QFrame.Shape.NoFrame)
+    rolagem.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    return rolagem
 
 
 def limpar_layout(layout: QLayout, *, manter_ao_final: int = 0) -> None:

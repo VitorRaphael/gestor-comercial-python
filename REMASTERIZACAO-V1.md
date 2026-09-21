@@ -5210,6 +5210,209 @@ Perguntadas antes de começar, porque mudavam o tamanho do trabalho:
 
 ---
 
+### 9.27 A tela da mesa em duas colunas: itens à esquerda, resumo e ações à direita ✅ CONCLUÍDO — 2026-09-21
+
+Pedido do Vitor, com um mockup no padrão "Solvix POS": trocar a barra de botões
+do topo da tela da comanda por painéis em duas colunas — no cabeçalho a mesa, o
+tempo de abertura, o "+ Adicionar item", o garçom responsável e a esteira
+Atendimento → Produção → Conferência → Pagamento; à esquerda "Aguardando envio"
+(com o "Enviar à produção") e "Itens em produção"; à direita o resumo com o
+TOTAL ESTIMADO e o painel de ações em pé. O pedido nomeou as peças
+(`MesaDetalheView`, `ComandaResumoWidget`, `PainelAcoesWidget`) e exigiu:
+DRY, descarte estrito de widget e sinal na troca de mesa, total = soma dos
+itens (sem taxa, §9.26) e a suíte provando que cada botão chama o backend
+certo.
+
+#### Antes
+
+- **`ComandaView`** (841 linhas): seis pílulas do mesmo peso no cabeçalho
+  ("+ Item", "2ª via", "Fechar conta", "Reabrir", "Receber pagamento",
+  "Cancelar comanda" — a destrutiva colada na de receber), a linha "Atendeu:"
+  com um combo, duas `QTableWidget` com widget por célula e a barra "TOTAL"
+  solta no pé.
+- **A cada recarga** — e a tela recarrega a cada item lançado pelo modal
+  "Adicionar item" — ela relia a `Comanda`, fazia uma consulta POR ITEM para o
+  nome do produto (N+1), relia a lista inteira de funcionários para repovoar o
+  combo, e destruía e refazia todas as células com widget (miniatura, nome,
+  botão), ligando um `lambda` novo por linha que capturava o `ItemComanda`.
+- Um rótulo "Na cozinha desde…" era calculado a cada recarga e ficava
+  **oculto** (`hide()`); `ComandaService.hora_primeiro_envio` existia só para
+  ele.
+
+#### Decisão do Vitor
+
+**O Reabrir ganha botão próprio.** Ele não estava no mockup nem na lista do
+pedido, e tirá-lo seria regressão: é o único caminho de volta de uma conta em
+conferência (PIN de gerente). Perguntado antes de começar entre "no `··· Mais`
+do mockup", "troca de lugar com o Fechar" e "botão próprio, só em
+conferência": **botão próprio**.
+
+#### O desenho
+
+- **Service — `ComandaService.painel_da_comanda` → `PainelDaComanda`**,
+  instantâneo imutável no arranjo do `ContaParaPagamento` (§9.25): status, mesa,
+  `aberta_em`, garçom (id, nome e cargo), `pendentes` (uma `LinhaDoPainel` por
+  item, removível), `enviados` (somados por produto e preço, com os `item_ids`
+  de todos por baixo — o Cancelar da linha grava o cancelamento item a item, que
+  é registro de auditoria) e `total_pago`. `total` é propriedade: a soma dos
+  itens, o mesmo número de `calcular_total` e de `calcular_total_a_pagar`, sem
+  acréscimo nenhum. O agrupamento, que morava na view, desceu para o service.
+  `hora_primeiro_envio` saiu (sem leitor).
+- **`EtapaDaComanda`** (`IntEnum`, porque a esteira pinta pela ORDEM):
+  Atendimento enquanto nada foi para a cozinha, Produção a partir do primeiro
+  envio, Conferência com a pré-conta, Pagamento com pagamento parcial (e na
+  conta quitada); cancelada não anda (`None`).
+- **Repositório — `listar_ativos_com_produto`**, com `selectinload`:
+  5 consultas por recarga, qualquer que seja o tamanho da conta (a antiga
+  fazia 9 com 4 itens e 25 com 20).
+  `listar_por_comanda` ficou sem ele, porque quem o chama só soma preço e
+  quantidade.
+- **`views/mesa_detalhe_view.py` — `MesaDetalheView`**, montada uma vez no
+  boot (§3.2); `carregar_comanda` troca os dados. A API pública é a da tela
+  antiga (`voltar`, `pagamento_solicitado`, `comanda_cancelada`,
+  `tentar_sair`, `possui_itens_pendentes`, `atualizar`), então a `MainWindow`
+  só trocou o nome — e cada botão chama o MESMO método de service de antes.
+- **As peças**, em `ui/widgets/`: `itens_da_comanda.py` (`CartaoDeItens` e
+  `LinhaDeItem` — o mesmo cartão duas vezes, com outras palavras dentro, onde a
+  tela antiga montava duas tabelas e dois preenchimentos), `comanda_resumo.py`
+  (`ComandaResumoWidget`), `painel_acoes.py` (`PainelAcoesWidget`: cinco sinais
+  e nenhum service), `esteira_de_status.py` (`EsteiraDeStatus`) e
+  `seletor_de_garcom.py` (`SeletorDeGarcom`).
+- **Linhas recicladas.** Cada linha é widget (tem controle de verdade, a regra
+  do §9.15), mas não é refeita a cada recarga: `mostrar()` troca o texto das que
+  existem, cria só as que faltam e destrói NA HORA as que sobram — desligadas
+  pelo nome, fora do layout, sem pai e com `deleteLater()`, o arranjo do
+  `composicao_combo_dialog`. O botão da linha é ligado UMA vez, a um método da
+  própria linha, que guarda o instantâneo (ids), e não o `ItemComanda`. As
+  miniaturas saíram (o mockup não as tem).
+- **Garçom.** O combo mostra só o nome do instantâneo e lê a lista de
+  funcionários quando ABRE (`showPopup`), não a cada item lançado. Escolher o
+  mesmo não grava; o desativado continua na lista da comanda dele (§3.11).
+- **"aberta há".** De `aberta_em` (o primeiro item): "aberta agora", "aberta
+  há 42 min", "aberta há 1h05" e, de 24h em diante, "aberta desde 01/09 às
+  09:00". Um `QTimer` de 30s atualiza só esse rótulo, só com a tela visível, e
+  não lê o banco.
+- **DRY com a tela de pagamento.** `badge_com_glifo` (`cardapio_cartoes`),
+  `rolagem_vertical` (`layout_utils`) e `rotulo_do_operador`
+  (`rotulo_identidade`) saíram de dentro da `PagamentoView` e servem as duas
+  telas.
+- **`BotaoComGlifo(centrado=True)`**: o glifo colado ao texto, no meio do
+  botão, como no mockup. O QSS do botão centrado dá 21px a mais de padding na
+  esquerda (`DESLOCAMENTO_CENTRADO_PX`, glifo de 13 + folga de 8), o que empurra
+  o texto meia-folga — trancado por teste seletor a seletor.
+- **Glifos novos**: relógio, avião de papel, panela e cadeado aberto.
+- **Tema**: família `mesa_detalhe_*` (35 tokens) nos dois temas,
+  pela lição do §9.5. Saíram os seletores QSS que só a tela antiga usava
+  (tabela, seções, barra de total, combo "Atendeu", botões de linha, título e
+  horário) e os 18 tokens que só eles liam. Os dois temas seguem espelhados, com
+  269 chaves (252 + 35 − 18).
+
+#### Achados no caminho
+
+1. **"Enviar e Sair" não saía** — defeito da tela antiga, provado com uma sonda
+   antes de apagá-la. A saída decidia pela linha de mensagem VAZIA, e o envio
+   que dá certo escreve "Pedido enviado… com sucesso!" nela: o pedido ia para a
+   cozinha e o operador ficava na mesa — e a navegação que tinha disparado a
+   pergunta (barra lateral, Caixa, logout) não acontecia. `_imprimir_producao`
+   passou a devolver se o pedido foi registrado, e é isso que o "Enviar e Sair"
+   pergunta. Teste de regressão.
+2. **A coluna das ações transbordava em conferência** (renderização a
+   1366x738): com o Reabrir e a linha "Já recebido" ela pedia mais que os 535px
+   úteis, ganhava rolagem e escondia o "Cancelar comanda". O "Fechar para
+   conferência", que em conferência nunca pode ser usado, passou a sumir nela —
+   pela mesma razão da decisão do Reabrir (botão sempre apagado é ruído). Os
+   dois trocam de lugar, o painel tem sempre quatro botões e a coluna pede no
+   máximo 509px.
+3. **~70px de altura perdidos**: a linha de erro e o aviso de impressão, vazios,
+   ocupavam uma faixa própria entre o garçom e as colunas — exatamente a altura
+   que faltava para a coluna das ações caber. Foram para o cabeçalho, no vão
+   entre o título e os botões.
+4. **Pílula quadrada**: o "← Mesas" tem raio de 18px e ~31px de altura natural
+   — a armadilha do §9.15 (raio maior que meia altura, o Qt desenha o botão
+   quadrado). Os dois botões do cabeçalho ganharam altura fixa de 36px. A mesma
+   variante continua quadrada no "← Voltar à mesa" da tela de pagamento, que
+   não foi tocado aqui.
+5. **"Aguardando envio" vazio em petróleo** diria que há o que mandar para a
+   cozinha: a moldura só acende com item dentro.
+6. **"aberta há 479h12"** na bancada (datas congeladas no dia 1) mostrou o caso
+   da comanda esquecida de um dia para o outro — daí a forma "desde".
+
+#### Não seguido ao pé da letra
+
+- **"Não inclui taxa de serviço"** (a nota do total no mockup): a nota diz
+  "Soma dos itens da comanda". Falar de uma taxa que o sistema não tem mais
+  (§9.26) confundiria, e um teste varre a tela atrás de "taxa", "serviço" e
+  "comissão".
+- **O botão "··· Mais"** do mockup: não existe (a decisão acima).
+- **"Botão verde"** (texto do pedido) no "Enviar à produção": ficou no petróleo
+  do mockup, em família própria (`mesa_detalhe_enviar_*`).
+- **A sidebar do mockup** (Visão Geral, Fechamento, Delivery, Estoque…): telas
+  que não existem — a mesma decisão do §9.9 e do §9.25.
+- **"RAM otimizado (~90 MB)"**: como o §9.11 registrou, o processo já mede ~100
+  MB antes de qualquer tela; o que esta tela garante é não crescer — ver a
+  conferência.
+
+#### Conferência
+
+- **Suíte 2449, 0 falhas** (de 2354), **95 testes novos**:
+  `tests/unit/test_painel_da_comanda.py` (21: os números do mockup, total = o do
+  service, preço congelado, agrupamento e observação, item cancelado, as seis
+  etapas e as consultas fixas) e `tests/ui/test_mesa_detalhe_view.py` (74: o
+  mockup frase a frase; **cada botão conferido no banco** — Adicionar item,
+  Enviar à produção e os dois atalhos, Remover, Cancelar item com PIN certo,
+  errado e desistido, Fechar para conferência, Receber pagamento, Reabrir, 2ª
+  via, Cancelar comanda e o garçom; a saída com pendências nas três respostas;
+  os botões estado a estado; a esteira; o ciclo de vida; o desenho).
+- **33 mutações, as 33 reprovam** — regra da etapa, agrupamento, N+1,
+  total, cada regra de botão, o "Enviar e Sair" antigo de volta, o relógio,
+  a reciclagem e o descarte das linhas, o combo preguiçoso, o glifo centrado e
+  o padding dele, a pílula na altura natural. Uma sobreviveu à primeira passada
+  e virou teste: "o grupo mostra a observação do PRIMEIRO item" passava, porque
+  no cenário do mockup o primeiro item de cada grupo não tinha observação. (E
+  uma lição de bancada: a primeira versão desse teste novo tinha asserções
+  coladas por engano no teste vizinho e reprovava a mutação por `NameError`, não
+  pela regra — corrigido e a mutação repetida antes de contá-la.)
+- **Medido antes × depois**, na bancada com a `MainWindow` real (árvore de
+  trabalho com e sem este item):
+
+  | | antes | depois |
+  |---|---|---|
+  | recarga, conta de 4 itens | 9 consultas, 25,2 ms | 5 consultas, 8,1 ms |
+  | recarga, conta de 20 itens | 25 consultas, 80,9 ms | 5 consultas, 10,4 ms |
+  | lançar 1 item pelo cartão (a tela recarrega atrás) | 63,6 ms | 36,4 ms |
+
+  Em 1.000 trocas de mesa (4 ↔ 20 itens), widgets e objetos Python ficam
+  **planos** nas duas árvores — nenhum vazamento. O RSS oscila e sobe devagar
+  nas DUAS (+30 MB na antiga, +4 MB na nova, da 1ª à 10ª centena), sem vir de
+  widget nem de objeto Python: fica registrado como está, sem atribuir causa.
+- **Bancada visual** (`tools/comparar_telas.py`, 1366x738): **22 das 24 telas
+  idênticas byte a byte**, diferindo só as duas da comanda, que é a tela
+  refeita. A tela de pagamento, que a bancada não cobre e que ganhou o DRY, foi
+  renderizada à parte: **idêntica byte a byte** nos dois temas. Os 2 cupons
+  (`comparar_cupons.py`) idênticos linha a linha.
+- **Renderização** da tela nova com a fonte da marca, nos dois temas, em três
+  estados (o mockup; conferência com pagamento parcial; mesa de 14 itens) — foi
+  ela que pegou os achados 2, 3, 4 e 6.
+- **Tempo da suíte**, medido em duas cópias do projeto (com e sem este item):
+  antes 13min22s; depois 19min53s — dos quais ~10 min em duas paradas nos
+  testes do cartão de impressora (um teardown de 497s e um setup de 84s). Numa
+  rodada anterior a parada foi de 233s, também num teste de impressora. Não é
+  deste item: `test_impressora_dialog.py` roda ANTES da suíte nova na ordem, e
+  sozinho leva 74s antes e 60s depois, sem teste acima de 2s. Descontadas as
+  paradas, a suíte nova leva ~10 min. Ficou registrado como achado à parte.
+
+#### Ficou de fora
+
+- **Regerar o `.exe`**: precisa ser gerado de novo para levar isto (e os §9.23
+  a §9.26).
+- **As pílulas quadradas das outras telas** (`pilula-voltar` e
+  `pilula-secundario` na tela de pagamento e em Relatórios): mesma armadilha do
+  achado 4, fora da tela pedida.
+- **O aviso de pendências ao sair** continua sendo a caixa de mensagem do
+  sistema (`QMessageBox`), não foi pedido em cartão.
+
+---
+
 ## 10. As melhores mudanças que o programa teve — em português de balcão
 
 > **Por que esta seção existe.** Todo o resto do documento é escrito para quem

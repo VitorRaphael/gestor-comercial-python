@@ -53,12 +53,12 @@ def test_toda_pagina_empilhada_e_alcancavel(janela):
     memória e no `.exe`, sem nenhum caminho de usuário até ela.
 
     Duas exceções legítimas, as duas telas de DETALHE do fluxo de venda:
-    a Comanda, alcançada por um cartão de mesa, e o Pagamento (§9.25),
+    a da Mesa (§9.27), alcançada por um cartão de mesa, e o Pagamento (§9.25),
     alcançado pelo "Receber pagamento" da comanda. Nenhuma das duas tem item de
     navegação — e é por isso que elas entram na lista à mão.
     """
     alcancaveis = {id(fabrica()[0]) for fabrica in janela._destinos_nav.values()}
-    alcancaveis.add(id(janela._comanda_view))
+    alcancaveis.add(id(janela._mesa_detalhe_view))
     alcancaveis.add(id(janela._pagamento_view))
 
     fantasmas = [

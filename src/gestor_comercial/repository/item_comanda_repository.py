@@ -79,6 +79,23 @@ class ItemComandaRepository(Repository[ItemComanda]):
         stmt = select(ItemComanda).where(ItemComanda.comanda_id == comanda_id).order_by(ItemComanda.id)
         return list(self.session.scalars(stmt))
 
+    def listar_ativos_com_produto(self, comanda_id: int) -> list[ItemComanda]:
+        """Itens não cancelados da comanda, com o produto de cada um já carregado.
+
+        Serve o `PainelDaComanda` (§9.27), que lê o nome do produto de todo item:
+        sem o `selectinload` era uma consulta por item, a cada recarga da tela da
+        mesa — e a tela recarrega a cada item lançado pelo modal "Adicionar
+        item". `listar_por_comanda` continua sem ele porque quem o chama só soma
+        preço e quantidade, e pagaria uma consulta a mais por nada.
+        """
+        stmt = (
+            select(ItemComanda)
+            .where(ItemComanda.comanda_id == comanda_id, ItemComanda.cancelado.is_(False))
+            .order_by(ItemComanda.id)
+            .options(selectinload(ItemComanda.produto))
+        )
+        return list(self.session.scalars(stmt))
+
     def listar_nao_impressos_por_comanda(self, comanda_id: int) -> list[ItemComanda]:
         """Itens que ainda não foram pra produção — a via de acréscimo (§3.12).
 

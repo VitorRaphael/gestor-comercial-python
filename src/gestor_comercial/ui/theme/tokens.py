@@ -150,23 +150,12 @@ TEMA_ESCURO: dict[str, str] = {
     "pill_comanda_sucesso": "#5EEAD4",
     "pill_comanda_sucesso_bg": "#241416",
     "pill_comanda_perigo_texto": "#F87171",
-    "secao_pendentes_bg": "#161514",
-    "secao_pendentes_borda": "#183D39",
-    "secao_pendentes_titulo": "#2DD4BF",
-    "secao_lancados_bg": "#242220",
-    "secao_lancados_acento": "#2DD4BF",
-    "secao_texto_fraco": "#78716C",
     "barra_total_bg": "#DF9F3D",
-    "barra_total_texto": "#573A08",
-    "barra_total_texto_forte": "#0E0B05",
-    "combo_atendente_borda": "#A8A29E",
-    "combo_atendente_bg": "#1C1B19",
     "ranking_barra_bg": "#1C1C1A",
     "ranking_barra_acento": "#22D3EE",
     "ciano_acao": "#0891b2",
     "ciano_acao_hover": "#06b6d4",
     "ciano_acao_texto": "#ecfeff",
-    "perigo_tabela_bg": "#DC2626",
     "pilula_disabled_bg": "#2A2723",
     "pilula_disabled_texto": "#6B655D",
     "pilula_voltar_disabled_borda": "#3A362E",
@@ -179,13 +168,6 @@ TEMA_ESCURO: dict[str, str] = {
     "enviar_pedido_bg": "#5EEAD4",
     "enviar_pedido_texto": "#082F2C",
     "enviar_pedido_hover": "#7ff2df",
-    "remover_tabela_bg": "#241416",
-    "remover_tabela_texto": "#F87171",
-    "remover_tabela_borda": "#4C1D24",
-    "remover_tabela_hover": "#341c20",
-    "tabela_comanda_borda": "#242220",
-    "tabela_comanda_texto": "#FFFFFF",
-    "tabela_comanda_selecionado_bg": "#1E1D1B",
     "pilula_ciano2_texto": "#072228",
     "pilula_ciano2_hover": "#67e8f9",
     "badge_vazio_bg": "#3f3d3a",
@@ -546,9 +528,56 @@ TEMA_ESCURO: dict[str, str] = {
     # O troco em coral: é dinheiro que SAI da gaveta, e o operador precisa achar
     # esse número de longe quando o cliente estende a nota.
     "pagamento_troco_texto": "#F87171",
-    # O card do garçom. O "paga" é o verde de repasse feito; o "não paga" é o
-    # âmbar de pendência — e não vermelho, que é erro: deixar para depois é uma
-    # escolha legítima, não um defeito.
+    # ---- Tela da mesa (`views/mesa_detalhe_view.py`, §9.27) ----
+    # Família PRÓPRIA, pela lição do §9.5: vários hex coincidem com os de
+    # `pagamento_*`, porque é o mesmo desenho, e é exatamente por isso que não
+    # se empresta — a tela onde o garçom lança item não pode mudar de cor
+    # porque alguém ajustou a tela de recebimento.
+    "mesa_detalhe_cartao_bg": "#161615",
+    "mesa_detalhe_cartao_borda": "rgba(255, 255, 255, 0.08)",
+    "mesa_detalhe_badge_bg": "#1F1A13",
+    "mesa_detalhe_badge_borda": "rgba(229, 169, 60, 0.2)",
+    "mesa_detalhe_badge_glifo": "#E5A93C",
+    "mesa_detalhe_rotulo": "#71717A",
+    "mesa_detalhe_divisor": "rgba(255, 255, 255, 0.06)",
+    "mesa_detalhe_pilula_bg": "#1C1C1B",
+    # "Aguardando envio" em petróleo, como no mockup: não é o âmbar da marca
+    # nem o vermelho de erro — é o "ainda não saiu daqui" que o operador tem
+    # que achar antes de sair da mesa. O mesmo tom pinta o glifo, o valor
+    # pendente do resumo e a moldura do cartão.
+    "mesa_detalhe_pendente_destaque": "#5EEAD4",
+    "mesa_detalhe_pendente_borda": "rgba(94, 234, 212, 0.4)",
+    "mesa_detalhe_pendente_bg": "#121A19",
+    "mesa_detalhe_pendente_badge_bg": "#10201E",
+    "mesa_detalhe_enviar_bg": "#5EEAD4",
+    "mesa_detalhe_enviar_texto": "#082F2C",
+    "mesa_detalhe_enviar_hover": "#7FF2DF",
+    # A esteira do cabeçalho: feita, atual e a caminho.
+    "mesa_detalhe_etapa_bg": "#1C1C1B",
+    "mesa_detalhe_etapa_borda": "rgba(255, 255, 255, 0.08)",
+    "mesa_detalhe_etapa_texto": "#71717A",
+    "mesa_detalhe_etapa_feita": "#4ADE80",
+    "mesa_detalhe_etapa_feita_texto": "#A1A1AA",
+    "mesa_detalhe_etapa_atual": "#E5A93C",
+    "mesa_detalhe_etapa_atual_bg": "rgba(229, 169, 60, 0.14)",
+    "mesa_detalhe_etapa_seta": "#3F3F46",
+    # O TOTAL ESTIMADO é o único bloco CHEIO da tela, na cor da marca.
+    "mesa_detalhe_total_bg": "#E5A93C",
+    "mesa_detalhe_total_texto": "#0C0E12",
+    "mesa_detalhe_total_rotulo": "#5C4214",
+    # "Receber pagamento" contornado em ciano: é a segunda ação, e não pode
+    # disputar com o âmbar cheio do "Fechar para conferência".
+    "mesa_detalhe_receber_bg": "#0F1A1C",
+    "mesa_detalhe_receber_borda": "rgba(34, 211, 238, 0.5)",
+    "mesa_detalhe_receber_texto": "#22D3EE",
+    "mesa_detalhe_receber_hover": "#13242A",
+    "mesa_detalhe_neutro_bg": "#141413",
+    "mesa_detalhe_neutro_borda": "rgba(255, 255, 255, 0.08)",
+    "mesa_detalhe_neutro_hover": "#1E1E1D",
+    # Remover/Cancelar das linhas e o "Cancelar comanda": texto vermelho sem
+    # fundo, que só acende ao passar o mouse.
+    "mesa_detalhe_perigo_texto": "#F87171",
+    "mesa_detalhe_perigo_hover_bg": "rgba(248, 113, 113, 0.10)",
 }
 
 TEMA_CLARO: dict[str, str] = {
@@ -596,8 +625,9 @@ TEMA_CLARO: dict[str, str] = {
     "logo_escura": "#8991a8",
     # ---- Chaves adicionadas no polimento do tema claro "Vívido" p/
     # eliminar cores hex "órfãs" que ficavam fixas em modo escuro dentro
-    # de qss_app.py (pílulas de comanda, seções pendentes/lançados, barra
-    # de total, combo de atendente, pílula ciano/ranking).
+    # de qss_app.py (pílulas, pílula destaque, pílula ciano/ranking). As das
+    # seções, da tabela e da barra de total da comanda saíram com a tela antiga
+    # (§9.27): a tela da mesa tem a família `mesa_detalhe_*`.
     "pill_comanda_bg": "#FEF3C7",
     "pill_comanda_texto": "#78350F",
     "pill_comanda_bg_2": "#E9E8E2",
@@ -606,23 +636,12 @@ TEMA_CLARO: dict[str, str] = {
     "pill_comanda_sucesso": "#0F766E",
     "pill_comanda_sucesso_bg": "#CCFBF1",
     "pill_comanda_perigo_texto": "#EF4444",
-    "secao_pendentes_bg": "#FFFFFF",
-    "secao_pendentes_borda": "#99F6E4",
-    "secao_pendentes_titulo": "#0F766E",
-    "secao_lancados_bg": "#F0EFE9",
-    "secao_lancados_acento": "#0F766E",
-    "secao_texto_fraco": "#78716C",
     "barra_total_bg": "#FEF3C7",
-    "barra_total_texto": "#78350F",
-    "barra_total_texto_forte": "#451A03",
-    "combo_atendente_borda": "#CBD5C0",
-    "combo_atendente_bg": "#FFFFFF",
     "ranking_barra_bg": "#E9E8E2",
     "ranking_barra_acento": "#0891B2",
     "ciano_acao": "#0891B2",
     "ciano_acao_hover": "#0E7490",
     "ciano_acao_texto": "#ecfeff",
-    "perigo_tabela_bg": "#DC2626",
     "pilula_disabled_bg": "#E9E8E2",
     "pilula_disabled_texto": "#94A3B8",
     "pilula_voltar_disabled_borda": "#D8D6CC",
@@ -635,13 +654,6 @@ TEMA_CLARO: dict[str, str] = {
     "enviar_pedido_bg": "#14B8A6",
     "enviar_pedido_texto": "#FFFFFF",
     "enviar_pedido_hover": "#0D9488",
-    "remover_tabela_bg": "#FEE2E2",
-    "remover_tabela_texto": "#DC2626",
-    "remover_tabela_borda": "#FCA5A5",
-    "remover_tabela_hover": "#FECACA",
-    "tabela_comanda_borda": "#E2E1D9",
-    "tabela_comanda_texto": "#09090B",
-    "tabela_comanda_selecionado_bg": "#E9E8E2",
     "pilula_ciano2_texto": "#FFFFFF",
     "pilula_ciano2_hover": "#0891B2",
     "badge_vazio_bg": "#E9E8E2",
@@ -893,4 +905,42 @@ TEMA_CLARO: dict[str, str] = {
     "pagamento_campo_bg": "#FAF9F5",
     "pagamento_troco_bg": "#FAF9F5",
     "pagamento_troco_texto": "#DC2626",
+    # ---- Tela da mesa (`views/mesa_detalhe_view.py`, §9.27) ----
+    # Ver o comentário gêmeo em TEMA_ESCURO. No claro: pastel com o glifo
+    # escuro, e o bloco do total num âmbar que ainda lê texto escuro por cima.
+    "mesa_detalhe_cartao_bg": "#FFFFFF",
+    "mesa_detalhe_cartao_borda": "#E2E1D9",
+    "mesa_detalhe_badge_bg": "#FEF3C7",
+    "mesa_detalhe_badge_borda": "#FDE68A",
+    "mesa_detalhe_badge_glifo": "#B45309",
+    "mesa_detalhe_rotulo": "#64748B",
+    "mesa_detalhe_divisor": "#EFEEE8",
+    "mesa_detalhe_pilula_bg": "#F1F0EA",
+    "mesa_detalhe_pendente_destaque": "#0F766E",
+    "mesa_detalhe_pendente_borda": "#5EEAD4",
+    "mesa_detalhe_pendente_bg": "#F0FDFA",
+    "mesa_detalhe_pendente_badge_bg": "#CCFBF1",
+    "mesa_detalhe_enviar_bg": "#14B8A6",
+    "mesa_detalhe_enviar_texto": "#FFFFFF",
+    "mesa_detalhe_enviar_hover": "#0D9488",
+    "mesa_detalhe_etapa_bg": "#F1F0EA",
+    "mesa_detalhe_etapa_borda": "#E2E1D9",
+    "mesa_detalhe_etapa_texto": "#94A3B8",
+    "mesa_detalhe_etapa_feita": "#16A34A",
+    "mesa_detalhe_etapa_feita_texto": "#475569",
+    "mesa_detalhe_etapa_atual": "#B45309",
+    "mesa_detalhe_etapa_atual_bg": "#FEF3C7",
+    "mesa_detalhe_etapa_seta": "#CBD5E1",
+    "mesa_detalhe_total_bg": "#FBBF24",
+    "mesa_detalhe_total_texto": "#1C1917",
+    "mesa_detalhe_total_rotulo": "#78350F",
+    "mesa_detalhe_receber_bg": "#ECFEFF",
+    "mesa_detalhe_receber_borda": "#0891B2",
+    "mesa_detalhe_receber_texto": "#0E7490",
+    "mesa_detalhe_receber_hover": "#CFFAFE",
+    "mesa_detalhe_neutro_bg": "#FAF9F5",
+    "mesa_detalhe_neutro_borda": "#E2E1D9",
+    "mesa_detalhe_neutro_hover": "#F1F0EA",
+    "mesa_detalhe_perigo_texto": "#DC2626",
+    "mesa_detalhe_perigo_hover_bg": "#FEF2F2",
 }

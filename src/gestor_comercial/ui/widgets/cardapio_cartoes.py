@@ -61,6 +61,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFrame,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -140,6 +141,14 @@ GLIFO_CEDULA = "cedula"
 GLIFO_CARTAO = "cartao"
 GLIFO_CELULAR = "celular"
 GLIFO_PESSOA = "pessoa"
+# Os quatro da tela da mesa (§9.27): o relógio de "Aguardando envio", o avião
+# de papel do "Enviar à produção", a panela de "Itens em produção" (e da etapa
+# Produção da esteira) e o cadeado aberto do "Reabrir comanda". ⏱ ✈ 🍲 🔓 moram
+# no bloco de emoji — coloridos, chapados e fora do tema, como sempre.
+GLIFO_RELOGIO = "relogio"
+GLIFO_ENVIAR = "enviar"
+GLIFO_PANELA = "panela"
+GLIFO_CADEADO_ABERTO = "cadeado_aberto"
 
 # Os glifos são traçados numa grade de 24x24 e escalados para o tamanho pedido,
 # então um desenho só serve a insígnia de 40px e a seta de 12px.
@@ -453,6 +462,49 @@ def _caminho_do_glifo(nome: str) -> QPainterPath:
         p.lineTo(16.0, 10.5)
         p.moveTo(12.0, 14.5)
         p.lineTo(12.0, 17.0)
+    elif nome == GLIFO_CADEADO_ABERTO:
+        # O mesmo cadeado com a perna direita da alça fora do corpo: destravado.
+        # Caminho próprio, e não o do `GLIFO_CADEADO` com um traço a menos — o
+        # `lru_cache` devolve o mesmo `QPainterPath` a quem pedir o fechado.
+        p.addRoundedRect(QRectF(5.0, 10.5, 14.0, 10.5), 2.5, 2.5)
+        p.moveTo(8.0, 10.5)
+        p.lineTo(8.0, 7.5)
+        p.arcTo(QRectF(8.0, 3.5, 8.0, 8.0), 180.0, -180.0)
+        p.lineTo(16.0, 8.0)
+        p.moveTo(12.0, 14.5)
+        p.lineTo(12.0, 17.0)
+    elif nome == GLIFO_RELOGIO:
+        # O mostrador e os dois ponteiros, marcando pouco depois das três.
+        p.addEllipse(QPointF(12.0, 12.0), 9.0, 9.0)
+        p.moveTo(12.0, 7.0)
+        p.lineTo(12.0, 12.0)
+        p.lineTo(15.5, 14.0)
+    elif nome == GLIFO_ENVIAR:
+        # O avião de papel: o contorno em flecha e a dobra que vai da ponta ao
+        # meio da asa.
+        p.moveTo(21.0, 3.0)
+        p.lineTo(14.6, 20.6)
+        p.lineTo(10.8, 13.2)
+        p.lineTo(3.4, 9.4)
+        p.closeSubpath()
+        p.moveTo(21.0, 3.0)
+        p.lineTo(10.8, 13.2)
+    elif nome == GLIFO_PANELA:
+        # A panela: a borda com as duas alças, o corpo e a tampa em cúpula com o
+        # pegador.
+        p.moveTo(2.5, 11.0)
+        p.lineTo(21.5, 11.0)
+        p.moveTo(4.5, 11.0)
+        p.lineTo(4.5, 18.5)
+        p.quadTo(4.5, 20.5, 6.5, 20.5)
+        p.lineTo(17.5, 20.5)
+        p.quadTo(19.5, 20.5, 19.5, 18.5)
+        p.lineTo(19.5, 11.0)
+        p.moveTo(5.5, 8.5)
+        p.quadTo(12.0, 3.5, 18.5, 8.5)
+        p.closeSubpath()
+        p.moveTo(12.0, 5.8)
+        p.lineTo(12.0, 4.2)
     elif nome == GLIFO_CEDULA:
         # A nota com o valor no meio e as duas marcas d'água nas pontas.
         p.addRoundedRect(QRectF(2.5, 6.5, 19.0, 11.0), 2.0, 2.0)
@@ -648,6 +700,13 @@ class BotaoComGlifo(QPushButton):
 
     LADO_GLIFO_PX = 13
     X_GLIFO_PX = 16
+    # Com `centrado`, o vão entre o glifo e a primeira letra.
+    FOLGA_GLIFO_PX = 8
+    # O quanto o QSS de um botão `centrado` põe de padding a MAIS na esquerda
+    # que na direita. O Qt centraliza o texto entre os dois paddings, então essa
+    # diferença empurra o texto meia-folga para a direita — e o par glifo+texto
+    # fica no meio do botão, como nos botões da tela da mesa (§9.27).
+    DESLOCAMENTO_CENTRADO_PX = LADO_GLIFO_PX + FOLGA_GLIFO_PX
 
     def __init__(
         self,
@@ -656,11 +715,23 @@ class BotaoComGlifo(QPushButton):
         token_ligado: str,
         token_desligado: str,
         parent: QWidget | None = None,
+        *,
+        centrado: bool = False,
     ) -> None:
         super().__init__(texto, parent)
         self._glifo = glifo
         self._token_ligado = token_ligado
         self._token_desligado = token_desligado
+        self._centrado = centrado
+
+    def _x_do_glifo(self) -> float:
+        if not self._centrado:
+            return float(self.X_GLIFO_PX)
+        # Mede com a fonte do próprio botão depois de polido: é a do QSS que
+        # pinta o texto (a segunda armadilha do §9.8).
+        self.ensurePolished()
+        largura_texto = self.fontMetrics().horizontalAdvance(self.text())
+        return (self.width() - largura_texto - self.DESLOCAMENTO_CENTRADO_PX) / 2.0
 
     @nao_deixa_escapar()
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (override Qt)
@@ -668,7 +739,7 @@ class BotaoComGlifo(QPushButton):
         tokens = ThemeController.instancia().tokens_atuais
         token = self._token_ligado if self.isEnabled() else self._token_desligado
         lado = float(self.LADO_GLIFO_PX)
-        alvo = QRectF(float(self.X_GLIFO_PX), (self.height() - lado) / 2.0, lado, lado)
+        alvo = QRectF(self._x_do_glifo(), (self.height() - lado) / 2.0, lado, lado)
         pintor = QPainter(self)
         desenhar_glifo(pintor, self._glifo, alvo, cor_do_token(tokens[token]), 2.0)
         pintor.end()
@@ -705,6 +776,32 @@ class GlifoSolto(QWidget):
         pintor = QPainter(self)
         desenhar_glifo(pintor, self._glifo, QRectF(self.rect()), cor, espessura=2.0)
         pintor.end()
+
+
+def badge_com_glifo(
+    glifo: str,
+    nome_objeto: str,
+    token: str,
+    *,
+    lado: int = 38,
+    lado_glifo: int = 18,
+    tom: str = "",
+) -> QFrame:
+    """O quadrado de cantos arredondados com um glifo no meio.
+
+    O cabeçalho dos cartões da tela de pagamento (§9.25) e da tela da mesa
+    (§9.27). Quem pinta o quadrado é o QSS do `nome_objeto`; `tom` vira a
+    propriedade que o QSS lê para a variante (o petróleo do "Aguardando envio").
+    """
+    badge = QFrame()
+    badge.setObjectName(nome_objeto)
+    if tom:
+        badge.setProperty("tom", tom)
+    badge.setFixedSize(lado, lado)
+    dentro = QHBoxLayout(badge)
+    dentro.setContentsMargins(0, 0, 0, 0)
+    dentro.addWidget(GlifoSolto(glifo, lado_glifo, token), 0, Qt.AlignmentFlag.AlignCenter)
+    return badge
 
 
 def campo_de_busca(texto_de_ajuda: str, parent: QWidget | None = None) -> QLineEdit:

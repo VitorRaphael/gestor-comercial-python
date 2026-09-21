@@ -4,7 +4,7 @@ Ver `REMASTERIZACAO-V1.md` §3.15.
 
 O Qt calcula o estilo de um widget **uma vez**, no primeiro `polish`. Depois
 disso, mudar uma propriedade lida por seletor (`QLabel[tom="sucesso"]`,
-`QPushButton[variante="perigo-tabela"]`) não repinta nada sozinho: o
+`QLabel#mesaDetEtapaRotulo[estado="atual"]`) não repinta nada sozinho: o
 `setProperty` entra no objeto, e o QSS continua mostrando a regra antiga até
 alguém pedir o recálculo. Por isso `setProperty` sem `unpolish`/`polish` é um
 bug silencioso — o valor está certo no objeto e errado na tela.

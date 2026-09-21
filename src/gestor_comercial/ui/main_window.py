@@ -43,7 +43,7 @@ from gestor_comercial.services.pagamento_service import PagamentoService
 from gestor_comercial.ui.rotulo_identidade import rotulo_identidade
 from gestor_comercial.ui.views.caixa_view import CaixaView
 from gestor_comercial.ui.views.cardapio_view import CardapioView
-from gestor_comercial.ui.views.comanda_view import ComandaView
+from gestor_comercial.ui.views.mesa_detalhe_view import MesaDetalheView
 from gestor_comercial.ui.views.configuracoes_view import ConfiguracoesView
 from gestor_comercial.ui.views.funcionarios_view import FuncionariosView
 from gestor_comercial.ui.views.impressoras_view import ImpressorasView
@@ -138,12 +138,12 @@ class MainWindow(QMainWindow):
         self._mesas_view = MesasView(comanda_service)
         self._mesas_view.comanda_aberta.connect(self._abrir_comanda)
 
-        self._comanda_view = ComandaView(
+        self._mesa_detalhe_view = MesaDetalheView(
             comanda_service, cardapio_service, self._impressao, self._funcionarios
         )
-        self._comanda_view.voltar.connect(self._voltar_para_mesas)
-        self._comanda_view.comanda_cancelada.connect(self._ao_comanda_cancelada)
-        self._comanda_view.pagamento_solicitado.connect(self._abrir_pagamento)
+        self._mesa_detalhe_view.voltar.connect(self._voltar_para_mesas)
+        self._mesa_detalhe_view.comanda_cancelada.connect(self._ao_comanda_cancelada)
+        self._mesa_detalhe_view.pagamento_solicitado.connect(self._abrir_pagamento)
 
         # O recebimento virou TELA no §9.25 (era o último diálogo de fábrica do
         # fluxo de venda): entra na pilha como as outras, com "← Voltar à mesa"
@@ -175,7 +175,7 @@ class MainWindow(QMainWindow):
         self._paginas = QStackedWidget()
         for pagina in (
             self._mesas_view,
-            self._comanda_view,
+            self._mesa_detalhe_view,
             self._pagamento_view,
             self._caixa_view,
             self._cardapio_view,
@@ -315,9 +315,9 @@ class MainWindow(QMainWindow):
     def _navegar(self, rotulo: str) -> None:
         # A sidebar troca de página direto, sem passar pelo botão "← Mesas"
         # da comanda — sem este desvio, o guard de itens pendentes (§
-        # ComandaView.tentar_sair) nunca disparava para quem saía por aqui.
-        if self._paginas.currentWidget() is self._comanda_view:
-            self._comanda_view.tentar_sair(lambda: self._navegar_agora(rotulo))
+        # MesaDetalheView.tentar_sair) nunca disparava para quem saía por aqui.
+        if self._paginas.currentWidget() is self._mesa_detalhe_view:
+            self._mesa_detalhe_view.tentar_sair(lambda: self._navegar_agora(rotulo))
             return
         self._navegar_agora(rotulo)
 
@@ -325,8 +325,8 @@ class MainWindow(QMainWindow):
         """Ponto de entrada comum para o botão "Central de Loja" da sidebar
         e para cada card do hub (ver `_ROTULOS_LOJA`) -- todos atrás do
         mesmo PIN de supervisor, exigido a cada acesso."""
-        if self._paginas.currentWidget() is self._comanda_view:
-            self._comanda_view.tentar_sair(lambda: self._abrir_area_loja(rotulo))
+        if self._paginas.currentWidget() is self._mesa_detalhe_view:
+            self._mesa_detalhe_view.tentar_sair(lambda: self._abrir_area_loja(rotulo))
             return
         if not self._loja_desbloqueada:
             # Reautenticação a cada acesso, não só na primeira vez: um PIN
@@ -342,8 +342,8 @@ class MainWindow(QMainWindow):
         self._loja_desbloqueada = False
 
     def _abrir_caixa(self) -> None:
-        if self._paginas.currentWidget() is self._comanda_view:
-            self._comanda_view.tentar_sair(self._abrir_caixa)
+        if self._paginas.currentWidget() is self._mesa_detalhe_view:
+            self._mesa_detalhe_view.tentar_sair(self._abrir_caixa)
             return
         if not self._caixa_desbloqueada:
             # Reautenticação a cada acesso, mesmo raciocínio da Loja (ver
@@ -391,8 +391,8 @@ class MainWindow(QMainWindow):
             aplicar_propriedade(botao, "ativo", "true" if nome == rotulo else "false")
 
     def _abrir_comanda(self, comanda: Comanda) -> None:
-        self._comanda_view.carregar_comanda(comanda)
-        self._mostrar_pagina(self._comanda_view)
+        self._mesa_detalhe_view.carregar_comanda(comanda)
+        self._mostrar_pagina(self._mesa_detalhe_view)
         # Comanda é uma tela de detalhe, alcançada a partir de Mesas — não
         # tem item próprio na sidebar, então nenhum botão de nav fica aceso.
         self._marcar_nav_ativo(None)
@@ -419,8 +419,8 @@ class MainWindow(QMainWindow):
     def _voltar_para_comanda(self) -> None:
         """O "← Voltar à mesa": a conta continua em conferência, com o que já
         foi recebido lançado nela."""
-        self._comanda_view.atualizar()
-        self._mostrar_pagina(self._comanda_view)
+        self._mesa_detalhe_view.atualizar()
+        self._mostrar_pagina(self._mesa_detalhe_view)
 
     def _ao_pagamento_concluido(self, comanda_id: int) -> None:
         """Conta quitada: a mesa some do salão e a grade recarrega.
@@ -472,8 +472,8 @@ class MainWindow(QMainWindow):
         self._navegar("Mesas")
 
     def _deslogar(self) -> None:
-        if self._paginas.currentWidget() is self._comanda_view:
-            self._comanda_view.tentar_sair(self._deslogar_agora)
+        if self._paginas.currentWidget() is self._mesa_detalhe_view:
+            self._mesa_detalhe_view.tentar_sair(self._deslogar_agora)
             return
         self._deslogar_agora()
 

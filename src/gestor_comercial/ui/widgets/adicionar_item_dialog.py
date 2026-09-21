@@ -144,7 +144,7 @@ from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 from gestor_comercial.ui.widgets.flow_layout import FlowLayout
 from gestor_comercial.ui.widgets.thumbnail_cache import FORMATO_CIRCULO, obter_pixmap
 
-# Os mesmos quatro erros que `comanda_view` já tratava ao lançar item: eles
+# Os mesmos quatro erros que a tela da mesa (`mesa_detalhe_view`) trata ao lançar item: eles
 # viram texto na linha de aviso do rodapé, nunca exceção subindo pro Qt.
 _ERROS_SERVICE = (
     RegraDeNegocioError,

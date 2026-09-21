@@ -62,7 +62,7 @@ def cardapio_de_teste(uow):
 
 
 class _Lancamentos:
-    """Faz as vezes de `ComandaView._lancar_item_do_modal`, guardando as chamadas."""
+    """Faz as vezes de `MesaDetalheView._lancar_item_do_modal`, guardando as chamadas."""
 
     def __init__(self, erro: Exception | None = None) -> None:
         self.chamadas: list[tuple[int, int, str | None]] = []

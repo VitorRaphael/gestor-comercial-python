@@ -30,7 +30,6 @@ from gestor_comercial.services.impressao_service import ImpressaoService
 from gestor_comercial.services.pagamento_service import PagamentoService
 from gestor_comercial.ui.views.caixa_view import CaixaView
 from gestor_comercial.ui.views.cardapio_view import CardapioView
-from gestor_comercial.ui.views.comanda_view import ComandaView
 from gestor_comercial.ui.views.configuracoes_view import ConfiguracoesView
 from gestor_comercial.ui.views.dashboard_mensal_view import DashboardMensalView
 from gestor_comercial.ui.views.funcionarios_view import FuncionariosView
@@ -38,6 +37,7 @@ from gestor_comercial.ui.views.historico_caixa_view import HistoricoCaixaView
 from gestor_comercial.ui.views.impressoras_view import ImpressorasView
 from gestor_comercial.ui.views.loja_hub_view import LojaHubView
 from gestor_comercial.ui.views.login_view import LoginView
+from gestor_comercial.ui.views.mesa_detalhe_view import MesaDetalheView
 from gestor_comercial.ui.views.mesas_view import MesasView
 from gestor_comercial.ui.views.pagamento_view import PagamentoView
 from gestor_comercial.ui.views.relatorios_view import RelatoriosView
@@ -122,7 +122,7 @@ def todas_as_telas(
     return {
         "Login": LoginView(auth),
         "Mesas": MesasView(comandas),
-        "Comanda": ComandaView(comandas, cardapio, impressao, funcionarios),
+        "Detalhe da Mesa": MesaDetalheView(comandas, cardapio, impressao, funcionarios),
         "Pagamento": PagamentoView(pagamentos, impressao),
         "Caixa": CaixaView(caixas_service, impressao),
         "Histórico de Caixa": HistoricoCaixaView(caixas_service, auth, impressao, funcionarios),
