@@ -7,9 +7,22 @@
 ```
 
 Roda a suíte, gera `dist\GestorComercial.exe` com o cardápio e as fotos
-embutidos, e abre o `.exe` de verdade numa pasta de usuário descartável para
-provar que ele sobe. Termina com **BUILD APROVADO** ou **BUILD REPROVADO** e o
-motivo. Nenhum passo manual.
+embutidos, abre o `.exe` de verdade numa pasta de usuário descartável para
+provar que ele sobe, monta a pasta `App_Pendrive\` (o `.exe` + o banco limpo +
+as fotos) e prova que ela roda sozinha de qualquer lugar. Termina com **BUILD
+APROVADO** ou **BUILD REPROVADO** e o motivo. Nenhum passo manual.
+
+Com vendas de teste no banco de trabalho (o build recusa — abaixo):
+
+```
+.venv\Scripts\python.exe tools\limpar_vendas.py
+.venv\Scripts\python.exe packaging\gerar_exe.py
+```
+
+Ou, sem fechar o programa nem mexer no banco de trabalho, a partir de uma cópia
+limpa: `tools\limpar_vendas.py --banco <cópia>` e depois
+`packaging\gerar_exe.py --origem <cópia>` (a cópia precisa de
+`uploads\thumbnails\` ao lado, com as fotos).
 
 ---
 
@@ -31,7 +44,9 @@ mudar o cardápio que vai para o pai: abra o programa em dev
 - o banco tem **movimento de venda** (caixa, comanda, pagamento…) — a semente é
   só cadastro. Um teste feito na tela antes do build faria o programa do pai
   nascer com vendas que não aconteceram. Nada é apagado: a mensagem diz quais
-  tabelas têm linhas, e a decisão de limpar é sua;
+  tabelas têm linhas, e a decisão de limpar é sua — `tools\limpar_vendas.py`
+  (feche o programa antes; ele guarda uma cópia do banco de antes ao lado, apaga
+  só as vendas e a numeração de caixa e comanda volta ao 1);
 - um produto aponta para uma **foto que não está em disco**;
 - o banco está **corrompido** ou com referência quebrada.
 
@@ -65,16 +80,47 @@ consegue alterar o seu banco.
 
 Desinstalar o programa não apaga `%APPDATA%\GestorComercial_V2\`.
 
+### Modo portátil: `gestor_comercial.db` ao lado do `.exe`
+
+Se existe `gestor_comercial.db` **na mesma pasta do `.exe`**, a pasta de dados
+é a própria pasta do `.exe` — banco, fotos (`uploads\thumbnails\`), `backups\`,
+`logs\` e `cupons\` ficam ali, e `%APPDATA%` não é lido nem criado. É a pasta
+`App_Pendrive\`:
+
+```
+App_Pendrive\
+├── GestorComercial.exe
+├── gestor_comercial.db        ← o cardápio, sem venda nenhuma (é a semente)
+├── uploads\thumbnails\        ← fotos dos produtos
+└── LEIA-ME.txt                ← o que o pai precisa saber, em uma tela
+```
+
+O caminho é lido do `.exe` em execução, nunca gravado: a pasta funciona no
+pendrive (qualquer letra), copiada para `C:\` ou movida depois. É a pasta do
+`.exe`, não a pasta atual do processo — um atalho com "Iniciar em" apontando
+para outro lugar não troca o banco. Sem o banco ao lado (o `.exe` sozinho, ou o
+instalado em `Program Files`), vale `%APPDATA%` como acima.
+
+Rodar **direto do pendrive** funciona, mas o banco de vendas grava nele: tirar o
+pendrive com o programa aberto pode perder a venda em andamento. O recomendado é
+copiar a pasta inteira para o disco da máquina (ex.: `C:\GestorComercial\`).
+
+O `gerar_exe.py` recusa sobrescrever uma `App_Pendrive` cujo banco já tenha
+venda — se alguém usou o programa de dentro dela, as vendas são dela.
+
 ---
 
 ## Levar para a máquina do pai
 
-1. Copie **só** `dist\GestorComercial.exe` (pendrive, ou o instalador — abaixo).
-2. Na máquina do pai, coloque numa pasta local fora do OneDrive e dê duplo
-   clique. O SmartScreen pode avisar ("Windows protegeu seu PC" → Mais
-   informações → Executar assim mesmo): é esperado num `.exe` sem assinatura.
-3. Não copie `.db` nenhum. O cardápio já está dentro do `.exe`.
-4. Siga `docs/checklist-maquina-limpa.md`.
+1. Copie a pasta **`App_Pendrive` inteira** para o pendrive.
+2. Na máquina do pai, copie a pasta para o disco, fora do OneDrive (ex.:
+   `C:\GestorComercial\`), e dê duplo clique no `.exe`. O SmartScreen pode
+   avisar ("Windows protegeu seu PC" → Mais informações → Executar assim
+   mesmo): é esperado num `.exe` sem assinatura.
+3. Siga `docs/checklist-maquina-limpa.md`.
+
+(O caminho antigo continua valendo: copiar **só** `dist\GestorComercial.exe`,
+que cria o banco em `%APPDATA%` a partir da semente embutida.)
 
 ### Instalador (opcional)
 
@@ -94,7 +140,8 @@ Gera `packaging\output\GestorComercial-Setup.exe` (atalho no Menu Iniciar e na
 Feche o programa e apague (ou renomeie) `%APPDATA%\GestorComercial_V2\`. Na
 próxima abertura ele nasce de novo da semente embutida. **Isso descarta as
 vendas daquela pasta** — faça uma cópia antes (Configurações → Cópia de
-Segurança).
+Segurança). No modo portátil, é trocar a pasta inteira por uma `App_Pendrive`
+nova — com o mesmo cuidado de guardar a antiga antes.
 
 ---
 
@@ -113,12 +160,13 @@ viram transparentes) e guarda a arte em `packaging\app_icon_fonte.png`.
 
 | Arquivo | Papel |
 |---|---|
-| `packaging/gerar_exe.py` | fluxo completo: ícone → testes → build → prova de fumaça |
+| `packaging/gerar_exe.py` | fluxo completo: ícone → testes → build → prova de fumaça → `App_Pendrive` → prova do modo portátil |
+| `tools/limpar_vendas.py` | apaga as vendas de teste de um banco e mantém o cadastro (regras em `repository/limpeza_de_vendas.py`) |
 | `packaging/app.spec` | PyInstaller: prepara a semente, empacota, poda o Qt que o app não usa |
 | `packaging/preparar_semente.py` | gera `build/semente/` (roda sozinho para conferir o cardápio sem gerar o `.exe`) |
 | `src/gestor_comercial/repository/preparo_da_semente.py` | regras do que entra e do que é recusado na semente |
 | `src/gestor_comercial/core/banco_semente.py` | a cópia da semente no primeiro boot |
-| `src/gestor_comercial/core/caminhos.py` | onde o programa lê recursos e grava dados, em dev e no `.exe` |
+| `src/gestor_comercial/core/caminhos.py` | onde o programa lê recursos e grava dados, em dev, no `.exe` e no modo portátil |
 
 Para depurar um `.exe` que não abre: troque `console=False` por `console=True`
 em `packaging/app.spec`, gere de novo e rode pelo terminal. Volte para

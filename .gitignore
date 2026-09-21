@@ -37,6 +37,10 @@ packaging/dist/
 packaging/output/
 *.manifest
 
+# Pasta portátil montada pelo gerar_exe.py (o .exe, o banco e as fotos)
+App_Pendrive/
+App_Pendrive.montando/
+
 # IDEs
 .vscode/
 .idea/

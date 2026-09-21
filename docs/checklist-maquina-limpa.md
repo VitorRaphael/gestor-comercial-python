@@ -1,25 +1,29 @@
 # Checklist — Teste em Máquina Limpa (Fase 5)
 
-> Objetivo: provar que `dist/GestorComercial.exe` roda sozinho numa máquina
+> Objetivo: provar que a pasta `App_Pendrive` roda sozinha numa máquina
 > Windows **sem Python, sem venv, sem nada deste repositório instalado** —
-> só o `.exe` copiado. É a única forma de saber se o `app.spec` esqueceu
+> só a pasta copiada. É a única forma de saber se o `app.spec` esqueceu
 > alguma dependência que só existia por acidente na máquina de dev.
 
-## 0. Preparar o .exe (na máquina de dev)
+## 0. Preparar a pasta (na máquina de dev)
 - [ ] `.venv\Scripts\python.exe packaging\gerar_exe.py` terminou com
-      **BUILD APROVADO** (suíte, build e prova de fumaça — ver `DEPLOYMENT.md`)
-- [ ] Copiar **só** `dist\GestorComercial.exe` (não a pasta `dist` toda, não o
-      repo, **nenhum `.db`**) para um pendrive/pasta compartilhada — se algo
-      além do `.exe` for necessário, isso já seria uma falha do empacotamento.
+      **BUILD APROVADO** (suíte, build, prova de fumaça, `App_Pendrive` e prova
+      do modo portátil — ver `DEPLOYMENT.md`)
+- [ ] Copiar a pasta **`App_Pendrive` inteira** (o `.exe`, o
+      `gestor_comercial.db`, `uploads\` e o `LEIA-ME.txt` — e nada do repo)
+      para o pendrive — se algo além dela for necessário, isso já seria uma
+      falha do empacotamento.
 
 ## 1. Máquina limpa — pré-condições
 - [ ] Confirmar que a máquina **não tem Python instalado** (`python
       --version` deve falhar/não existir)
 - [ ] Confirmar que é a mesma arquitetura (Windows 64-bit) — o build é
       `win_amd64`
-- [ ] Copiar o `.exe` para uma pasta local (ex.: `Área de Trabalho\`), fora
-      de qualquer pasta sincronizada (OneDrive pode bloquear/atrasar o
-      arquivo)
+- [ ] Copiar a pasta inteira para o disco local (ex.: `C:\GestorComercial\`),
+      fora de qualquer pasta sincronizada (OneDrive pode bloquear/atrasar o
+      arquivo). Rodar do pendrive também funciona, mas o banco de vendas
+      grava nele — tirar o pendrive com o programa aberto pode perder a venda
+      em andamento
 
 ## 2. Primeira execução
 - [ ] Dar duplo-clique no `.exe`
@@ -31,20 +35,21 @@
 - [ ] O botão na barra de tarefas mostra o ícone **GC dourado** (não o do
       Python nem o genérico do Windows)
 - [ ] Entrar e abrir o **Cardápio**: as categorias, subcategorias, combos e
-      as **fotos** são as do cardápio do Vitor, sem ter copiado banco nenhum
-      (vieram da semente embutida no `.exe`)
+      as **fotos** são as do cardápio do Vitor (vieram do
+      `gestor_comercial.db` e do `uploads\` da pasta)
+- [ ] A tela de **Caixa** não mostra caixa aberto nem venda nenhuma: o banco
+      da pasta sai do build sem movimento
 - [ ] Se aparecer o diálogo **"Erro ao iniciar"**: anotar a mensagem exata
       (é o único canal de erro nesse build — não tem console). Ver seção
       "Se der erro" no fim deste checklist.
 
-## 3. Confirmar que o banco foi criado no lugar certo
+## 3. Confirmar que o banco usado é o da pasta
 - [ ] Fechar o app
-- [ ] Abrir `%APPDATA%\GestorComercial_V2\` no Explorer (colar na barra de
-      endereço)
-- [ ] Confirmar que existe `gestor_comercial.db` e que o tamanho é > 0 KB
-- [ ] Confirmar que `uploads\thumbnails\` tem as fotos e que
-      `logs\gestor.log` diz "banco criado a partir da semente" na primeira
-      abertura
+- [ ] Na pasta do programa, confirmar que apareceu `logs\gestor.log` e que ele
+      diz "banco existente preservado" com o caminho do `gestor_comercial.db`
+      **desta pasta**
+- [ ] Colar `%APPDATA%\GestorComercial_V2\` na barra de endereço do Explorer:
+      a pasta **não deve existir** — no modo portátil nada é gravado lá
 - [ ] Se a máquina já rodou o `.exe` antigo: `%USERPROFILE%\.gestor_comercial\`
       continua como estava (mesma data de modificação) — a versão nova não lê
       nem grava lá
@@ -64,9 +69,8 @@
 - [ ] Fechar a comanda com um pagamento (dinheiro, com troco)
 - [ ] Registrar uma sangria/reforço no Caixa
 - [ ] Fechar o Caixa no fim
-- [ ] Conferir que apareceu um arquivo em
-      `%APPDATA%\GestorComercial_V2\backups\gestor_backup_*.db` — o backup
-      automático do fechamento
+- [ ] Conferir que apareceu um arquivo em `backups\gestor_backup_*.db`, dentro
+      da pasta do programa — o backup automático do fechamento
 - [ ] Em **Configurações → Cópia de Segurança**, clicar em "Gerar cópia agora"
       e conferir que o caminho aparece na tela (é o backup que vai pro pendrive)
 - [ ] Testar 1 impressão com impressora tipo **ARQUIVO** (ver

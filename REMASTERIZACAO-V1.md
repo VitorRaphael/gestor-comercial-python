@@ -5538,13 +5538,87 @@ Perguntadas antes de começar.
   banco foi barrada pela permissão da sessão. Pela tela: editar "Caixa" para
   "Caixa Turno - Noite" (o par se forma) e depois de volta para "Caixa" (os
   dois mudam juntos). Precisa ser feito antes do próximo `.exe`, porque a
-  semente sai deste banco.
+  semente sai deste banco. *(Resolvido pelo Vitor na tela antes do §9.29: em
+  2026-09-21 o banco tem funcionário "Caixa" e login "Caixa", id 2.)*
 - **O tema gravado viaja na semente**: `preferencias` inteira vai para o
   `.exe`, então a máquina do pai nasce no último tema escolhido na máquina de
   desenvolvimento, como já acontece com `ultimo_operador_id`.
 - **O sobrescrito "GERENTE" da tela de Caixa** é texto fixo de seção, não
   identidade, e continua fixo.
 - **Regerar o `.exe`**.
+
+### 9.29 A pasta do pendrive: vendas de teste fora, cardápio dentro, e o banco ao lado do `.exe` ✅ CONCLUÍDO — 2026-09-21
+
+Pedido do Vitor: limpar as vendas de teste mantendo o cardápio e as
+configurações, zerar a numeração, gerar o `.exe` e montar uma pasta
+`App_Pendrive` com o `.exe` e o banco limpo, com o programa lendo e gravando o
+banco na pasta de onde for executado.
+
+#### Antes
+
+- O build **recusava** a semente com venda gravada (§ do `preparo_da_semente`)
+  e, de propósito, não apagava nada — mas não existia ferramenta para apagar.
+  O banco de trabalho tinha 1 caixa aberto, 7 comandas, 16 itens e 8
+  pagamentos de teste.
+- O `.exe` só conhecia `%APPDATA%\GestorComercial_V2\`; um `.db` copiado ao
+  lado dele era ignorado.
+
+#### O desenho
+
+- **`repository/limpeza_de_vendas.py`** (`limpar_vendas`, `contar_movimento`,
+  só `sqlite3`) + **`tools/limpar_vendas.py`**. Apaga exatamente as
+  `TABELAS_DE_MOVIMENTO` do preparo da semente (a mesma lista nas duas pontas),
+  das folhas para a raiz, com `foreign_keys=ON` numa transação só; zera
+  `funcionarios.saldo_devedor` e volta mesa ocupada para `LIVRE`. Nenhuma
+  tabela usa `AUTOINCREMENT`, então tabela vazia volta a numerar do 1 (e, se um
+  dia usar, a linha de `sqlite_sequence` sai junto). Guarda antes uma cópia
+  consolidada ao lado (`<banco>.antes-da-limpeza-<data>`). **Recusa com o
+  programa aberto**: sair do WAL exige que nenhuma outra conexão exista — é o
+  próprio SQLite dizendo se o programa está fechado; o modo volta no fim.
+- **Modo portátil em `core/caminhos.py`** (`portatil`, `pasta_do_executavel`):
+  no `.exe`, se `gestor_comercial.db` existe na pasta do próprio `.exe`, ela é a
+  pasta de dados (banco, fotos, backups, log, cupons). É a pasta do `.exe`
+  (`sys.executable`), não a pasta atual do processo. Sem o banco ao lado —
+  `.exe` sozinho ou instalado em `Program Files` —, `%APPDATA%` como antes. Um
+  lugar só: banco, log, fotos e cupons já derivavam todos de `caminhos`.
+- **`packaging/gerar_exe.py`**: dois passos novos depois da prova de fumaça —
+  monta `App_Pendrive/` (`.exe` + `banco_seed.db` como `gestor_comercial.db` +
+  fotos em `uploads\thumbnails\` + `LEIA-ME.txt`; montada ao lado e renomeada
+  no fim; recusa sobrescrever uma `App_Pendrive` cujo banco tenha venda) e a
+  **prova do modo portátil**: abre o `.exe` de uma CÓPIA da pasta com a pasta
+  atual do processo em outro lugar e `APPDATA`/`GESTOR_COMERCIAL_DB` falsos,
+  confere no log o caminho do banco usado e que nada foi gravado fora da pasta;
+  grava um marcador, MOVE a cópia para outro caminho e reabre — o marcador
+  continua lá. Opção nova `--origem`: gera a semente de outro banco (só o passo
+  de build recebe a variável; a suíte roda nos bancos dela).
+
+#### Execução
+
+O programa estava aberto em modo dev no banco de trabalho (e uma comanda nova
+entrou durante a inspeção), então o banco de trabalho **não foi tocado**: cópia
+consolidada somente leitura em `build/banco_limpo/` (+ fotos), limpeza nela
+(32 linhas de venda), cadastro conferido tabela a tabela contra o original (11
+tabelas, hash idêntico), e `gerar_exe.py --origem build/banco_limpo/...`.
+
+#### Métricas
+
+- Suíte **2497 passed**, 0 falhas (de 2480; 11 da limpeza + 6 do modo portátil).
+- Mutações: 10 na limpeza e 5 no modo portátil — as 15 reprovam.
+- `.exe` 41,4 MB. Prova de fumaça (`%APPDATA%`): janela em 17,0s / 12,1s.
+  Prova portátil: 14,5s / 12,6s, 188 produtos e 177 fotos no banco ao lado.
+- `App_Pendrive`: 180 arquivos, 42,3 MB; banco = semente byte a byte (modo
+  `delete`, íntegro, revisão `c5d9e17a24b8`), 0 linhas de venda, 177/177 fotos.
+
+#### Ficou de fora
+
+- **O banco de trabalho continua com as vendas de teste** (o programa estava
+  aberto). Para limpar: fechar o programa e rodar `tools\limpar_vendas.py`.
+- **A impressora "klm"** (tipo ARQUIVO, padrão) viaja no banco apontando para
+  `C:\Users\vitor\.gestor_comercial\cupons\klm.txt`. Mantida por ser
+  configuração; na máquina do pai, cadastrar a impressora térmica real e
+  desativar/excluir a "klm".
+- **Rodar direto do pendrive** funciona, mas grava as vendas nele; o `LEIA-ME`
+  e o `DEPLOYMENT.md` recomendam copiar a pasta para o disco.
 
 ---
 

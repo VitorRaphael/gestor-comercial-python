@@ -31,6 +31,8 @@ def empacotado(tmp_path, monkeypatch):
     """Simula o processo de dentro do `.exe`, com uma variável esquecida apontando para o banco velho."""
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path / "_MEI123"), raising=False)
+    (tmp_path / "Downloads").mkdir()
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "Downloads" / "GestorComercial.exe"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
     monkeypatch.setenv(caminhos.VARIAVEL_DO_BANCO, str(Path.home() / ".gestor_comercial" / "gestor_comercial.db"))
     return tmp_path
@@ -72,6 +74,65 @@ def test_empacotado_sem_appdata_cai_no_roaming_do_usuario(empacotado, monkeypatc
     monkeypatch.delenv("APPDATA")
 
     assert caminhos.pasta_de_dados() == Path.home() / "AppData" / "Roaming" / "GestorComercial_V2"
+
+
+@pytest.fixture
+def pendrive(empacotado, monkeypatch):
+    """A pasta `App_Pendrive`: o `.exe` com o banco ao lado."""
+    pasta = empacotado / "E" / "App_Pendrive"
+    pasta.mkdir(parents=True)
+    (pasta / "gestor_comercial.db").write_bytes(b"")
+    monkeypatch.setattr(sys, "executable", str(pasta / "GestorComercial.exe"))
+    return pasta
+
+
+def test_exe_sem_banco_ao_lado_nao_e_portatil(empacotado):
+    assert caminhos.portatil() is False
+    assert caminhos.pasta_de_dados() == empacotado / "AppData" / "Roaming" / "GestorComercial_V2"
+
+
+def test_exe_com_o_banco_ao_lado_grava_tudo_na_propria_pasta(pendrive):
+    assert caminhos.portatil() is True
+    assert caminhos.pasta_de_dados() == pendrive
+    assert caminhos.caminho_do_banco() == pendrive / "gestor_comercial.db"
+    assert resilience.caminho_do_log() == pendrive / "logs" / "gestor.log"
+
+
+def test_portatil_segue_o_exe_e_nao_a_pasta_atual(pendrive, tmp_path, monkeypatch):
+    """Um atalho com "Iniciar em" apontando para outro lugar não troca o banco."""
+    outra = tmp_path / "Desktop"
+    outra.mkdir()
+    (outra / "gestor_comercial.db").write_bytes(b"")
+    monkeypatch.chdir(outra)
+
+    assert caminhos.caminho_do_banco() == pendrive / "gestor_comercial.db"
+
+
+def test_portatil_acompanha_a_pasta_quando_ela_e_copiada(pendrive, tmp_path, monkeypatch):
+    """Do pendrive (E:) para o C:: o caminho é lido do `.exe` em execução, nunca gravado."""
+    copia = tmp_path / "C" / "GestorComercial"
+    copia.mkdir(parents=True)
+    (copia / "gestor_comercial.db").write_bytes(b"")
+    monkeypatch.setattr(sys, "executable", str(copia / "GestorComercial.exe"))
+
+    assert caminhos.caminho_do_banco() == copia / "gestor_comercial.db"
+
+
+def test_portatil_so_vale_no_exe(pendrive, monkeypatch):
+    """Rodando do código-fonte, um banco esquecido ao lado do `python.exe` não muda nada."""
+    monkeypatch.delattr(sys, "frozen")
+    monkeypatch.delenv(caminhos.VARIAVEL_DO_BANCO)
+
+    assert caminhos.portatil() is False
+    assert caminhos.caminho_do_banco() == Path.home() / ".gestor_comercial" / "gestor_comercial.db"
+
+
+def test_pasta_com_algo_chamado_gestor_comercial_db_que_nao_e_arquivo_nao_e_portatil(empacotado, monkeypatch):
+    pasta = empacotado / "Estranha"
+    (pasta / "gestor_comercial.db").mkdir(parents=True)
+    monkeypatch.setattr(sys, "executable", str(pasta / "GestorComercial.exe"))
+
+    assert caminhos.portatil() is False
 
 
 def test_empacotado_le_recursos_da_pasta_de_extracao(empacotado):

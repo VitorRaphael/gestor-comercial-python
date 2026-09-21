@@ -14,7 +14,8 @@ São duas raízes, e confundi-las é o defeito que este módulo existe para impe
 A máquina do food truck já rodou um `.exe` anterior (o de 2026-09-01), que
 gravou banco, fotos e log em `%USERPROFILE%\\.gestor_comercial\\`. Aqueles
 dados são de uma fase de testes e não podem chegar à produção. O `.exe` atual
-grava em `%APPDATA%\\GestorComercial_V2\\` e **não conhece outro lugar**:
+grava em `%APPDATA%\\GestorComercial_V2\\` (ou na própria pasta, no modo
+portátil abaixo) e **não conhece outro lugar**:
 
 - não existe fallback para `~/.gestor_comercial` — se a pasta nova estiver
   vazia, quem a preenche é a semente embutida (`core/banco_semente.py`), nunca
@@ -24,6 +25,21 @@ grava em `%APPDATA%\\GestorComercial_V2\\` e **não conhece outro lugar**:
   antigo sugeria usá-la para fixar o caminho na máquina do pai — uma variável
   dessas esquecida no Windows dele levaria o programa novo direto para o banco
   velho.
+
+## Modo portátil: o banco ao lado do `.exe`
+
+A exceção é uma só, e é decidida por um arquivo: se existe
+`gestor_comercial.db` **na pasta do próprio `.exe`**, aquela pasta é a pasta de
+dados — banco, fotos, backups, log e cupons ficam ao lado do programa. É a
+pasta `App_Pendrive` que o `packaging/gerar_exe.py` monta: o `.exe`, o banco
+limpo e as fotos, que funcionam juntos em qualquer lugar para onde a pasta for
+copiada (pendrive, `C:\\`, outra letra de unidade), porque o caminho é lido do
+`.exe` em execução e nunca gravado.
+
+É a pasta do `.exe`, e não a pasta atual do processo: um atalho com "Iniciar
+em" apontando para outro lugar não pode levar o programa para outro banco.
+Sem o banco ao lado — o `.exe` sozinho, ou instalado em `Program Files`, onde
+nem daria para gravar —, vale `%APPDATA%` como acima.
 
 Em desenvolvimento nada mudou: `~/.gestor_comercial/` continua sendo a pasta de
 trabalho do Vitor, e a variável continua valendo.
@@ -66,9 +82,21 @@ def recurso(relativo: str | Path) -> Path:
     return raiz_de_recursos() / relativo
 
 
+def pasta_do_executavel() -> Path:
+    """A pasta onde está o `.exe` em execução (no `.exe` de arquivo único, `sys.executable` é ele)."""
+    return Path(sys.executable).resolve().parent
+
+
+def portatil() -> bool:
+    """`True` rodando do `.exe` com o banco ao lado dele — ver "Modo portátil" acima."""
+    return empacotado() and (pasta_do_executavel() / NOME_DO_BANCO).is_file()
+
+
 def pasta_de_dados() -> Path:
     """A pasta de dados do usuário, derivada em runtime e nunca gravada."""
     if empacotado():
+        if portatil():
+            return pasta_do_executavel()
         appdata = os.environ.get("APPDATA")
         base = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
         return base / NOME_DA_PASTA_DE_PRODUCAO
