@@ -54,7 +54,7 @@ def test_toda_pagina_empilhada_e_alcancavel(janela):
 
     Duas exceções legítimas, as duas telas de DETALHE do fluxo de venda:
     a da Mesa (§9.27), alcançada por um cartão de mesa, e o Pagamento (§9.25),
-    alcançado pelo "Receber pagamento" da comanda. Nenhuma das duas tem item de
+    alcançado pelo "Fechar Mesa" da comanda. Nenhuma das duas tem item de
     navegação — e é por isso que elas entram na lista à mão.
     """
     alcancaveis = {id(fabrica()[0]) for fabrica in janela._destinos_nav.values()}
@@ -88,3 +88,14 @@ def test_todo_card_da_central_de_loja_navega_para_algum_lugar(janela):
     sem_destino = sorted(cards - set(janela._destinos_nav))
 
     assert not sem_destino, f"cards da Central de Loja que não levam a lugar nenhum: {sem_destino}"
+
+
+def test_pagamento_concluido_imprime_o_comprovante_e_volta_as_mesas(janela, impressao, monkeypatch):
+    """A impressão é etapa obrigatória do fechamento: não há botão para pular."""
+    chamadas: list[int] = []
+    monkeypatch.setattr(janela, "_imprimir_recibo", chamadas.append)
+
+    janela._pagamento_view.pagamento_concluido.emit(42)
+
+    assert chamadas == [42]
+    assert janela._paginas.currentWidget() is janela._mesas_view

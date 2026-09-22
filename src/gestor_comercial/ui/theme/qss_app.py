@@ -920,10 +920,11 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background: transparent;
     }}
 
-    /* Bobina e colunas por linha: o mesmo segmento, ambar quando escolhido
+    /* Bobina, colunas por linha e tamanho da fonte: o mesmo segmento, ambar quando escolhido
        (o #E5A93C e o #1C1914 do mockup sao os tokens `impressora_opcao_ativa_*`
        do Escuro). */
-    QPushButton#impDialogBobina, QPushButton#impDialogColunas {{
+    QPushButton#impDialogBobina, QPushButton#impDialogColunas,
+    QPushButton#impDialogEscala {{
       padding: 0 12px;
       background: {t['impressora_opcao_bg']};
       border: 1px solid {t['impressora_opcao_borda']};
@@ -932,39 +933,19 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-size: 13px;
       font-weight: 700;
     }}
-    QPushButton#impDialogBobina:hover, QPushButton#impDialogColunas:hover {{
+    QPushButton#impDialogBobina:hover, QPushButton#impDialogColunas:hover,
+    QPushButton#impDialogEscala:hover {{
       border: 1px solid {t['borda']};
       color: {t['texto']};
     }}
     QPushButton#impDialogBobina[selecionada="true"],
-    QPushButton#impDialogColunas[selecionada="true"] {{
+    QPushButton#impDialogColunas[selecionada="true"],
+    QPushButton#impDialogEscala[selecionada="true"] {{
       background: {t['impressora_opcao_ativa_bg']};
       border: 1px solid {t['impressora_opcao_ativa_borda']};
       color: {t['impressora_opcao_ativa_glifo']};
     }}
 
-    /* Espessura da letra: o mesmo segmento, com glifo e palavra juntos no
-       meio. Cada palavra tem o peso que promete -- a grossa em negrito. */
-    QFrame#impDialogEspessura {{
-      background: {t['impressora_opcao_bg']};
-      border: 1px solid {t['impressora_opcao_borda']};
-      border-radius: 12px;
-    }}
-    QFrame#impDialogEspessura:hover {{ border: 1px solid {t['borda']}; }}
-    QFrame#impDialogEspessura[selecionada="true"] {{
-      background: {t['impressora_opcao_ativa_bg']};
-      border: 1px solid {t['impressora_opcao_ativa_borda']};
-    }}
-    QLabel#impDialogEspessuraTexto {{
-      color: {t['impressora_opcao_texto']};
-      font-size: 13px;
-      font-weight: 500;
-      background: transparent;
-    }}
-    QLabel#impDialogEspessuraTexto[espessura="grossa"] {{ font-weight: 800; }}
-    QLabel#impDialogEspessuraTexto[selecionada="true"] {{
-      color: {t['impressora_opcao_ativa_glifo']};
-    }}
     QLabel#impDialogTag {{
       color: {t['texto_fraquissimo']};
       font-size: 8px;
@@ -1528,16 +1509,6 @@ def construir_qss_app(t: dict[str, str]) -> str:
       background: {t['acento_hover']};
       border-color: {t['acento_hover']};
     }}
-    QPushButton#pagBotaoRegistrarImprimir {{
-      padding: 10px 20px 10px 44px;
-      background: {t['pagamento_opcao_bg']};
-      border: 1px solid {t['pagamento_opcao_borda']};
-      border-radius: 12px;
-      color: {t['texto']};
-      font-size: 12px;
-      font-weight: 700;
-    }}
-    QPushButton#pagBotaoRegistrarImprimir:hover {{ background: {t['botao_circular_hover']}; }}
 
     /* ---- Tela da mesa (`views/mesa_detalhe_view.py`, §9.27) ----
        Cabeçalho, a faixa do garçom com a esteira, os dois cartões de itens à

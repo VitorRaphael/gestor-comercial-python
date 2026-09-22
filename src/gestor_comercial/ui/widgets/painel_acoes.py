@@ -4,19 +4,22 @@ Substitui a fileira de seis pílulas do cabeçalho da tela antiga, onde "Receber
 pagamento" e "Cancelar comanda" moravam lado a lado com o mesmo peso. Aqui a
 ordem é a do fluxo, de cima para baixo:
 
-1. **Fechar para conferência** — o âmbar cheio, a ação principal da mesa aberta;
-2. **Receber pagamento** — contornado, liga quando a pré-conta saiu;
+1. **Gerar Conta** — o âmbar cheio: imprime a pré-conta e passa a conta para
+   conferência num clique só, sem modal de confirmação;
+2. **Fechar Mesa** — contornado, SEMPRE ligado: o operador pode ir direto ao
+   pagamento sem gerar a conta antes (a `MesaDetalheView` põe a conta em
+   conferência por baixo);
 3. **Reabrir comanda** — só EXISTE com a conta em conferência (decisão do
    Vitor, perguntada antes de começar: botão próprio, e não escondido num menu
    "Mais"). Numa mesa aberta ele seria um botão sempre apagado — e pelo mesmo
-   motivo o "Fechar para conferência" some quando a conta JÁ está em
-   conferência: os dois trocam de lugar, e o painel tem sempre quatro botões.
-   Com os cinco, a coluna não cabia nos 738px úteis do monitor do food truck e
-   ganhava rolagem justamente na hora de receber (medido na renderização);
-4. **2ª via** — o cupom da cozinha inteiro de novo;
-5. **Cancelar comanda** — isolado na base, depois de um divisor, em texto
+   motivo o "Gerar Conta" some quando a conta JÁ está em conferência: os dois
+   trocam de lugar, e o painel tem sempre três botões;
+4. **Cancelar comanda** — isolado na base, depois de um divisor, em texto
    vermelho sem fundo: é destrutivo e exige PIN, e não pode estar a um
-   escorregão do "Receber pagamento".
+   escorregão do "Fechar Mesa".
+
+A "2ª via" da cozinha saiu do painel: era a quarta opção de impressão perto
+do fechamento e confundia com a pré-conta.
 
 O painel NÃO conhece service nenhum: emite um sinal por botão, e quem decide o
 que cada clique faz é a `MesaDetalheView`. As regras de quando cada botão liga
@@ -33,7 +36,6 @@ from gestor_comercial.ui.widgets.cardapio_cartoes import (
     GLIFO_CADEADO_ABERTO,
     GLIFO_CIFRAO,
     GLIFO_DOCUMENTO_VISTO,
-    GLIFO_IMPRESSORA,
     GLIFO_LIXEIRA,
     BotaoComGlifo,
 )
@@ -51,12 +53,11 @@ def _botao(texto: str, glifo: str, token: str, nome_objeto: str, dica: str) -> B
 
 
 class PainelAcoesWidget(PainelPontilhado):
-    """Os cinco botões da mesa, na ordem do fluxo."""
+    """Os botões da mesa, na ordem do fluxo."""
 
     fechar_conferencia = Signal()
     receber_pagamento = Signal()
     reabrir = Signal()
-    segunda_via = Signal()
     cancelar_comanda = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -72,21 +73,21 @@ class PainelAcoesWidget(PainelPontilhado):
         coluna.addSpacing(2)
 
         self.botao_fechar = _botao(
-            "Fechar para conferência",
+            "Gerar Conta",
             GLIFO_DOCUMENTO_VISTO,
             "acento_texto",
             "mesaDetBotaoFechar",
-            "Trava novos itens e emite a pré-conta para o cliente conferir na mesa.",
+            "Imprime a pré-conta na impressora do caixa e trava novos itens.",
         )
         self.botao_fechar.clicked.connect(self.fechar_conferencia)
         coluna.addWidget(self.botao_fechar)
 
         self.botao_receber = _botao(
-            "Receber pagamento",
+            "Fechar Mesa",
             GLIFO_CIFRAO,
             "mesa_detalhe_receber_texto",
             "mesaDetBotaoReceber",
-            "Abre o recebimento da conta. Liga depois que a pré-conta sai.",
+            "Vai direto para o recebimento da conta.",
         )
         self.botao_receber.clicked.connect(self.receber_pagamento)
         coluna.addWidget(self.botao_receber)
@@ -101,16 +102,6 @@ class PainelAcoesWidget(PainelPontilhado):
         self.botao_reabrir.clicked.connect(self.reabrir)
         self.botao_reabrir.setVisible(False)
         coluna.addWidget(self.botao_reabrir)
-
-        self.botao_segunda_via = _botao(
-            "2ª via",
-            GLIFO_IMPRESSORA,
-            "texto",
-            "mesaDetBotaoNeutro",
-            "Repete a comanda inteira, para cupom rasgado ou perdido.",
-        )
-        self.botao_segunda_via.clicked.connect(self.segunda_via)
-        coluna.addWidget(self.botao_segunda_via)
 
         coluna.addSpacing(2)
         divisor = QFrame()
@@ -132,13 +123,11 @@ class PainelAcoesWidget(PainelPontilhado):
         """Liga e mostra cada botão pelo estado da conta.
 
         As regras são as da tela antiga, uma a uma: fechar só a aberta com item;
-        receber só em conferência (a aberta ainda pode ganhar item); cancelar só
-        a aberta (o service recusa as outras); 2ª via com qualquer item — o cupom
-        da cozinha some ou rasga depois do pagamento também.
+        "Fechar Mesa" sempre ligado — ir ao pagamento não depende da pré-conta;
+        cancelar só a aberta (o service recusa as outras).
         """
         self.botao_fechar.setEnabled(painel.aberta and painel.tem_itens)
         self.botao_fechar.setVisible(not painel.em_conferencia)
-        self.botao_receber.setEnabled(painel.em_conferencia)
+        self.botao_receber.setEnabled(True)
         self.botao_reabrir.setVisible(painel.em_conferencia)
-        self.botao_segunda_via.setEnabled(painel.tem_itens)
         self.botao_cancelar.setEnabled(painel.aberta)

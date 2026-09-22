@@ -77,7 +77,6 @@ from gestor_comercial.ui.widgets.cardapio_cartoes import (
     BotaoComGlifo,
 )
 from gestor_comercial.ui.widgets.comanda_resumo import ComandaResumoWidget
-from gestor_comercial.ui.widgets.conferencia_dialog import ConferenciaMesaDialog
 from gestor_comercial.ui.widgets.esteira_de_status import EsteiraDeStatus
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 from gestor_comercial.ui.widgets.itens_da_comanda import CartaoDeItens
@@ -89,8 +88,7 @@ from gestor_comercial.ui.widgets.seletor_de_garcom import SEM_GARCOM, OpcaoDeGar
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
 _NADA_NOVO_PARA_IMPRIMIR = (
-    "Nada novo para a produção: todos os itens desta comanda já foram enviados. "
-    "Use '2ª via' para repetir o cupom inteiro."
+    "Nada novo para a produção: todos os itens desta comanda já foram enviados."
 )
 
 # A coluna do resumo e das ações tem largura fixa: são botões e três números,
@@ -328,10 +326,9 @@ class MesaDetalheView(QWidget):
         self._resumo = ComandaResumoWidget()
         dentro.addWidget(self._resumo)
         self._acoes = PainelAcoesWidget()
-        self._acoes.fechar_conferencia.connect(self._fechar_para_conferencia)
+        self._acoes.fechar_conferencia.connect(self._gerar_conta)
         self._acoes.receber_pagamento.connect(self._solicitar_pagamento)
         self._acoes.reabrir.connect(self._reabrir_comanda)
-        self._acoes.segunda_via.connect(self._imprimir_segunda_via)
         self._acoes.cancelar_comanda.connect(self._cancelar_comanda)
         dentro.addWidget(self._acoes)
         dentro.addStretch()
@@ -553,43 +550,21 @@ class MesaDetalheView(QWidget):
         self._aviso_impressao.mostrar(resultados, vazio=_NADA_NOVO_PARA_IMPRIMIR)
         return True
 
-    def _imprimir_segunda_via(self) -> None:
-        """Repete a comanda inteira sem mexer no que já foi marcado como impresso."""
-        if self._comanda_id is None:
-            return
-        comanda_id = self._comanda_id
-        self._label_erro.setText("")
-        try:
-            resultados = executar_impressao(lambda: self._impressao_service.reimprimir_comanda(comanda_id))
-        except _ERROS_SERVICE as erro:
-            self._mostrar_mensagem(str(erro), sucesso=False)
-            return
-        self._aviso_impressao.mostrar(resultados, vazio="Esta comanda não tem itens para reimprimir.")
-
     # ------------------------------------------------------------------
     # Conta
     # ------------------------------------------------------------------
 
-    def _fechar_para_conferencia(self) -> None:
-        """Mostra a prévia da pré-conta, trava os itens e a imprime na impressora padrão.
+    def _gerar_conta(self) -> None:
+        """"Gerar Conta": trava os itens e imprime a pré-conta, sem modal.
 
-        O cartão (§9.23) só mostra o total e pede a confirmação; quem grava o
-        status é o `fechar_para_conferencia` do service.
+        O cartão de confirmação (§9.23) saiu: o clique já é a intenção, e o
+        operador via o mesmo total que está no resumo ao lado. Quem grava o
+        status continua sendo o `fechar_para_conferencia` do service.
         """
         if self._comanda_id is None:
             return
         comanda_id = self._comanda_id
         self._label_erro.setText("")
-        try:
-            previa = self._comanda_service.previa_de_conferencia(comanda_id)
-        except _ERROS_SERVICE as erro:
-            self._mostrar_mensagem(str(erro), sucesso=False)
-            return
-
-        modal = ConferenciaMesaDialog(previa, self)
-        if executar_modal(modal) != QDialog.DialogCode.Accepted:
-            return
-
         try:
             self._comanda_service.fechar_para_conferencia(comanda_id)
         except _ERROS_SERVICE as erro:
@@ -606,10 +581,7 @@ class MesaDetalheView(QWidget):
         self.atualizar()
         self._aviso_impressao.mostrar([resultado])
         if resultado.sucesso:
-            self._mostrar_mensagem(
-                "Conta fechada para conferência. Pré-conta impressa — leve até a mesa.",
-                sucesso=True,
-            )
+            self._mostrar_mensagem("Conta gerada. Pré-conta impressa — leve até a mesa.", sucesso=True)
 
     def _reabrir_comanda(self) -> None:
         """Volta a comanda para ABERTA, com PIN de gerente — a pré-conta já foi emitida."""
@@ -630,8 +602,33 @@ class MesaDetalheView(QWidget):
         self._mostrar_mensagem("Comanda reaberta. Itens liberados novamente.", sucesso=True)
 
     def _solicitar_pagamento(self) -> None:
-        if self._comanda_id is not None:
+        """"Fechar Mesa": vai ao pagamento, com ou sem pré-conta emitida.
+
+        O `PagamentoService` só recebe conta em conferência — é o que impede
+        item novo entrar numa conta sendo paga. Se o operador pulou o "Gerar
+        Conta", a tela faz a mesma transição por baixo, sem imprimir. Item
+        ainda não enviado à cozinha passa antes pelo aviso de pendências: a
+        conferência trava a comanda, e ele ficaria preso sem ir para a chapa.
+        """
+        if self._comanda_id is None or self._painel is None:
+            return
+        if not self._painel.aberta:
             self.pagamento_solicitado.emit(self._comanda_id)
+            return
+        self.tentar_sair(self._conferir_e_ir_ao_pagamento)
+
+    def _conferir_e_ir_ao_pagamento(self) -> None:
+        assert self._comanda_id is not None
+        comanda_id = self._comanda_id
+        self._label_erro.setText("")
+        try:
+            self._comanda_service.fechar_para_conferencia(comanda_id)
+        except _ERROS_SERVICE as erro:
+            self.atualizar()
+            self._mostrar_mensagem(str(erro), sucesso=False)
+            return
+        self.atualizar()
+        self.pagamento_solicitado.emit(comanda_id)
 
     def _cancelar_comanda(self) -> None:
         if self._comanda_id is None:

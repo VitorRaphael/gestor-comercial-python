@@ -7,13 +7,20 @@ recebia não via o que o cliente estava pagando — a lista de itens ficava na t
 de trás — e o troco só aparecia depois de registrar.
 
 O mockup do Vitor é uma TELA, não um modal: sai do fluxo de janela sobre janela
-e entra na navegação do shell, com "← Voltar à mesa" e "Imprimir 2ª via" no
-cabeçalho. Duas colunas:
+e entra na navegação do shell, com "← Voltar à mesa" no cabeçalho. Duas colunas:
 
 * **esquerda, "Consumo da mesa"** — os itens, o subtotal, o bloco âmbar do
   total e o "dividir por", que só mostra quanto dá por pessoa;
 * **direita, "Registrar pagamento"** — as cinco formas em cards, o valor
-  recebido, o troco ao vivo e os dois botões.
+  recebido, o troco ao vivo e um único botão, "Registrar Pagamento".
+
+## Registrar = gravar + imprimir
+
+Não existe mais "registrar sem papel": quitada a conta, o comprovante com os
+pagamentos confirmados sai sempre, no mesmo clique. Quem imprime é o
+`MainWindow` ao receber `pagamento_concluido` — ainda síncrono, dentro do
+clique —, porque é o aviso DELE que continua visível depois que a tela volta
+para Mesas.
 
 ## A conta vem pronta do service
 
@@ -79,7 +86,7 @@ from gestor_comercial.services.pagamento_service import (
 )
 from gestor_comercial.ui.formatacao import formatar_reais
 from gestor_comercial.ui.rotulo_identidade import rotulo_do_operador
-from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
+from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao
 from gestor_comercial.ui.widgets.campo_moeda import CampoMoeda
 from gestor_comercial.ui.widgets.cardapio_cartoes import (
     GLIFO_ARQUIVO_TEXTO,
@@ -87,7 +94,6 @@ from gestor_comercial.ui.widgets.cardapio_cartoes import (
     GLIFO_CEDULA,
     GLIFO_CELULAR,
     GLIFO_CIFRAO,
-    GLIFO_IMPRESSORA,
     GLIFO_PESSOA,
     GLIFO_VISTO,
     BotaoComGlifo,
@@ -234,11 +240,6 @@ class PagamentoView(QWidget):
         self._botao_voltar.clicked.connect(self.voltar.emit)
         cabecalho.addWidget(self._botao_voltar, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        self._botao_segunda_via = QPushButton("Imprimir 2ª via")
-        self._botao_segunda_via.setProperty("variante", "pilula-secundario")
-        self._botao_segunda_via.setToolTip("Repete o recibo do cliente desta conta.")
-        self._botao_segunda_via.clicked.connect(self._imprimir_recibo)
-        cabecalho.addWidget(self._botao_segunda_via, alignment=Qt.AlignmentFlag.AlignVCenter)
         return cabecalho
 
     def _montar_coluna_consumo(self) -> QWidget:
@@ -381,23 +382,14 @@ class PagamentoView(QWidget):
         coluna.addStretch()
 
         self._botao_registrar = BotaoComGlifo(
-            "Registrar pagamento", GLIFO_VISTO, "acento_texto", "pilula_disabled_texto"
+            "Registrar Pagamento", GLIFO_VISTO, "acento_texto", "pilula_disabled_texto"
         )
         self._botao_registrar.setObjectName("pagBotaoRegistrar")
         self._botao_registrar.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._botao_registrar.clicked.connect(self._registrar)
+        self._botao_registrar.setToolTip("Grava o pagamento e imprime o comprovante.")
+        self._botao_registrar.clicked.connect(self.processar_pagamento)
         coluna.addWidget(self._botao_registrar)
 
-        self._botao_registrar_imprimir = BotaoComGlifo(
-            "Registrar e imprimir comprovante",
-            GLIFO_IMPRESSORA,
-            "texto",
-            "pilula_disabled_texto",
-        )
-        self._botao_registrar_imprimir.setObjectName("pagBotaoRegistrarImprimir")
-        self._botao_registrar_imprimir.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._botao_registrar_imprimir.clicked.connect(self._registrar_e_imprimir)
-        coluna.addWidget(self._botao_registrar_imprimir)
         return cartao
 
     @staticmethod
@@ -541,13 +533,17 @@ class PagamentoView(QWidget):
     # Registro
     # ------------------------------------------------------------------
 
-    def _registrar(self) -> None:
-        self._registrar_pagamento(imprimir=False)
+    def processar_pagamento(self) -> None:
+        """Grava o pagamento; se quitou a conta, fecha a mesa e o comprovante sai.
 
-    def _registrar_e_imprimir(self) -> None:
-        self._registrar_pagamento(imprimir=True)
+        1. valida e registra no SQLite (`PagamentoService.registrar`);
+        2. quitada, emite `pagamento_concluido` — o `MainWindow` imprime o
+           comprovante obrigatoriamente e volta para Mesas mostrando o
+           resultado da impressão.
 
-    def _registrar_pagamento(self, *, imprimir: bool) -> None:
+        Pagamento parcial fica na tela com o que falta, sem papel: o
+        comprovante é da conta fechada.
+        """
         if self._comanda_id is None or self._conta is None:
             return
         self._label_erro.setText("")
@@ -591,8 +587,6 @@ class PagamentoView(QWidget):
             )
             return
 
-        if imprimir:
-            self._imprimir_recibo()
         self.pagamento_concluido.emit(comanda_id)
 
     def _pedir_assinatura(self, valor: Decimal) -> str | None:
@@ -611,15 +605,3 @@ class PagamentoView(QWidget):
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return None
         return modal.traco_json
-
-    def _imprimir_recibo(self) -> None:
-        if self._comanda_id is None:
-            return
-        comanda_id = self._comanda_id
-        self._label_erro.setText("")
-        try:
-            resultado = executar_impressao(lambda: self._impressao.imprimir_recibo(comanda_id))
-        except _ERROS_SERVICE as erro:
-            self._label_erro.setText(str(erro))
-            return
-        self._aviso_impressao.mostrar_um(resultado, contexto="Recibo do cliente")

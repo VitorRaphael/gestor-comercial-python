@@ -218,6 +218,17 @@ def test_registrar_fecha_a_conta_e_avisa_a_navegacao(uow, tela, conta):
     assert uow.comandas.buscar_por_id(conta.id).status is StatusComanda.FECHADA
 
 
+def test_um_unico_botao_de_registrar(tela):
+    """O "Registrar e imprimir comprovante" e o "Imprimir 2ª via" saíram: o
+    comprovante é obrigatório, não é escolha do operador."""
+    textos = _textos(tela)
+
+    assert tela._botao_registrar.text() == "Registrar Pagamento"
+    assert "Registrar e imprimir comprovante" not in textos
+    assert "Imprimir 2ª via" not in textos
+    assert not hasattr(tela, "_botao_registrar_imprimir")
+
+
 def test_o_parcial_mantem_a_tela_e_diz_o_que_falta(uow, tela, conta):
     recebidos = _recebidos(tela)
     tela._campo_valor.definir_valor(Decimal("100.00"))

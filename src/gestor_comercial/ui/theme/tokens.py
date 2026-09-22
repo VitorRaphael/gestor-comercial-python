@@ -565,8 +565,8 @@ TEMA_ESCURO: dict[str, str] = {
     "mesa_detalhe_total_bg": "#E5A93C",
     "mesa_detalhe_total_texto": "#0C0E12",
     "mesa_detalhe_total_rotulo": "#5C4214",
-    # "Receber pagamento" contornado em ciano: é a segunda ação, e não pode
-    # disputar com o âmbar cheio do "Fechar para conferência".
+    # "Fechar Mesa" contornado em ciano: é a segunda ação, e não pode
+    # disputar com o âmbar cheio do "Gerar Conta".
     "mesa_detalhe_receber_bg": "#0F1A1C",
     "mesa_detalhe_receber_borda": "rgba(34, 211, 238, 0.5)",
     "mesa_detalhe_receber_texto": "#22D3EE",

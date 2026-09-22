@@ -430,13 +430,13 @@ class MainWindow(QMainWindow):
         self._mostrar_pagina(self._mesa_detalhe_view)
 
     def _ao_pagamento_concluido(self, comanda_id: int) -> None:
-        """Conta quitada: a mesa some do salão e a grade recarrega.
+        """Conta quitada: o comprovante sai, a mesa some do salão e a grade recarrega.
 
-        O recibo NÃO sai daqui desde o §9.25: quem imprime é o botão
-        "Registrar e imprimir comprovante" da própria tela, porque nem toda
-        conta precisa de papel e a bobina é do food truck.
+        A impressão é obrigatória — o "Registrar Pagamento" é o único botão
+        da tela de pagamento. Ela sai daqui, e não da `PagamentoView`, porque
+        o aviso do shell é o que continua visível depois de voltar para Mesas.
         """
-        del comanda_id
+        self._imprimir_recibo(comanda_id)
         self._voltar_para_mesas()
 
     def _imprimir_recibo(self, comanda_id: int) -> None:

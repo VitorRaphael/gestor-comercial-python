@@ -10,8 +10,8 @@ O que esta suíte cobra:
 1. **o mockup** — cada frase da tela, e o total sendo a soma dos itens, sem
    vestígio da taxa de serviço (§9.26);
 2. **cada botão chama o backend certo** — o pedido explícito: Adicionar item,
-   Enviar à produção (e os atalhos), Remover, Cancelar item, Fechar para
-   conferência, Receber pagamento, Reabrir, 2ª via, Cancelar comanda e a troca
+   Enviar à produção (e os atalhos), Remover, Cancelar item, Gerar
+   Conta, Fechar Mesa, Reabrir, Cancelar comanda e a troca
    de garçom, cada um conferido no BANCO e não só na tela;
 3. **a saída da mesa** — o aviso de pendências, com o "Enviar e Sair" que a
    tela antiga não deixava sair;
@@ -63,7 +63,6 @@ from gestor_comercial.ui.widgets.cardapio_cartoes import (
     RotuloComReticencias,
     _caminho_do_glifo,
 )
-from gestor_comercial.ui.widgets.conferencia_dialog import ConferenciaMesaDialog
 from gestor_comercial.ui.widgets.esteira_de_status import EstadoDaEtapa, estado_da_etapa
 from gestor_comercial.ui.widgets.itens_da_comanda import CartaoDeItens, LinhaDeItem
 from tests.conftest import PIN_GERENTE
@@ -376,26 +375,29 @@ def test_desistir_do_cancelamento_nao_mexe_em_nada(tela, uow):
     assert not uow.itens.buscar_por_id(item_id).cancelado
 
 
-def test_fechar_para_conferencia_trava_a_conta(tela, uow, mesa_12):
-    with respondendo(ConferenciaMesaDialog, lambda modal: modal.accept()) as abertos:
-        tela._acoes.botao_fechar.click()
+def test_gerar_conta_imprime_a_pre_conta_sem_modal(tela, uow, impressao, mesa_12, monkeypatch):
+    """Um clique: trava a conta e manda a pré-conta à impressora, sem cartão."""
+    chamadas: list[int] = []
+    original = impressao.imprimir_pre_conta
 
-    assert len(abertos) == 1
+    def espiao(comanda_id: int):
+        chamadas.append(comanda_id)
+        return original(comanda_id)
+
+    monkeypatch.setattr(impressao, "imprimir_pre_conta", espiao)
+
+    assert tela._acoes.botao_fechar.text() == "Gerar Conta"
+    tela._acoes.botao_fechar.click()  # um modal aqui travaria o teste no exec()
+
+    assert chamadas == [mesa_12.id]
     uow.session.rollback()
     assert uow.comandas.buscar_por_id(mesa_12.id).status is StatusComanda.EM_CONFERENCIA
     assert tela._esteira.estado(EtapaDaComanda.CONFERENCIA) is EstadoDaEtapa.ATUAL
     assert tela._resumo._rotulo_total.text() == "TOTAL DA CONTA"
+    assert tela._aviso_impressao.text()
 
 
-def test_desistir_da_conferencia_deixa_a_conta_aberta(tela, uow, mesa_12):
-    with respondendo(ConferenciaMesaDialog, lambda modal: modal.reject()):
-        tela._acoes.botao_fechar.click()
-
-    uow.session.rollback()
-    assert uow.comandas.buscar_por_id(mesa_12.id).status is StatusComanda.ABERTA
-
-
-def test_receber_pagamento_avisa_a_navegacao(tela, comandas, mesa_12):
+def test_fechar_mesa_em_conferencia_vai_direto_ao_pagamento(tela, comandas, mesa_12):
     comandas.fechar_para_conferencia(mesa_12.id)
     tela.atualizar()
     pedidos = _sinais(tela.pagamento_solicitado)
@@ -405,13 +407,37 @@ def test_receber_pagamento_avisa_a_navegacao(tela, comandas, mesa_12):
     assert pedidos == [mesa_12.id]
 
 
-def test_receber_pagamento_nao_existe_com_a_conta_aberta(tela):
+def test_fechar_mesa_sem_gerar_conta_vai_ao_pagamento(tela, uow, impressao, mesa_12, monkeypatch):
+    """Não depende da pré-conta: a tela põe a conta em conferência por baixo,
+    sem imprimir nada."""
+    impressao.imprimir_comanda(mesa_12.id)
+    tela.atualizar()
+    pre_contas: list[int] = []
+    monkeypatch.setattr(impressao, "imprimir_pre_conta", pre_contas.append)
     pedidos = _sinais(tela.pagamento_solicitado)
 
+    assert tela._acoes.botao_receber.text() == "Fechar Mesa"
+    assert tela._acoes.botao_receber.isEnabled()
     tela._acoes.botao_receber.click()
 
-    assert not tela._acoes.botao_receber.isEnabled()
+    assert pedidos == [mesa_12.id]
+    assert pre_contas == []
+    uow.session.rollback()
+    assert uow.comandas.buscar_por_id(mesa_12.id).status is StatusComanda.EM_CONFERENCIA
+
+
+def test_fechar_mesa_com_pendencia_passa_pelo_aviso(tela, uow, mesa_12):
+    """O Anel de Cebola ainda não foi à cozinha: travar a conta sem perguntar
+    o deixaria preso fora da chapa."""
+    pedidos = _sinais(tela.pagamento_solicitado)
+
+    with respondendo(QMessageBox, _clicar_na_caixa("Continuar Editando")) as abertos:
+        tela._acoes.botao_receber.click()
+
+    assert len(abertos) == 1
     assert pedidos == []
+    uow.session.rollback()
+    assert uow.comandas.buscar_por_id(mesa_12.id).status is StatusComanda.ABERTA
 
 
 def test_reabrir_pede_o_pin_e_devolve_a_conta(tela, uow, comandas, mesa_12):
@@ -426,22 +452,6 @@ def test_reabrir_pede_o_pin_e_devolve_a_conta(tela, uow, comandas, mesa_12):
     assert uow.comandas.buscar_por_id(mesa_12.id).status is StatusComanda.ABERTA
     assert tela._label_erro.text() == "Comanda reaberta. Itens liberados novamente."
     assert tela._botao_add_item.isEnabled()
-
-
-def test_segunda_via_reimprime_a_comanda_inteira(tela, impressao, mesa_12, monkeypatch):
-    chamadas: list[int] = []
-    original = impressao.reimprimir_comanda
-
-    def espiao(comanda_id: int):
-        chamadas.append(comanda_id)
-        return original(comanda_id)
-
-    monkeypatch.setattr(impressao, "reimprimir_comanda", espiao)
-
-    tela._acoes.botao_segunda_via.click()
-
-    assert chamadas == [mesa_12.id]
-    assert tela._aviso_impressao.text()
 
 
 def test_cancelar_a_comanda_pede_o_pin_e_avisa_a_navegacao(tela, uow, mesa_12):
@@ -615,7 +625,6 @@ def _estado_dos_botoes(tela: MesaDetalheView) -> dict[str, str]:
         "fechar": estado(acoes.botao_fechar),
         "receber": estado(acoes.botao_receber),
         "reabrir": estado(acoes.botao_reabrir),
-        "2via": estado(acoes.botao_segunda_via),
         "cancelar": estado(acoes.botao_cancelar),
     }
 
@@ -625,9 +634,8 @@ def test_a_mesa_aberta_com_itens(tela):
         "adicionar": "liga",
         "enviar": "liga",
         "fechar": "liga",
-        "receber": "apaga",
+        "receber": "liga",
         "reabrir": "some",
-        "2via": "liga",
         "cancelar": "liga",
     }
     assert all(linha.botao.isEnabled() for linha in tela._cartao_enviados.linhas)
@@ -643,9 +651,8 @@ def test_a_mesa_aberta_sem_item(qapp, uow, comandas, cardapio, impressao, funcio
             "adicionar": "liga",
             "enviar": "apaga",
             "fechar": "apaga",
-            "receber": "apaga",
+            "receber": "liga",
             "reabrir": "some",
-            "2via": "apaga",
             "cancelar": "liga",
         }
         assert view._cartao_pendentes._vazio.isVisibleTo(view)
@@ -657,7 +664,7 @@ def test_a_mesa_aberta_sem_item(qapp, uow, comandas, cardapio, impressao, funcio
 def test_a_conta_em_conferencia_troca_o_fechar_pelo_reabrir(tela, comandas, mesa_12, impressao):
     """Decisão do Vitor: o Reabrir é botão próprio, só em conferência. E o
     Fechar, que ali nunca poderia ser usado, sai do lugar — o painel tem sempre
-    quatro botões, e a coluna cabe nos 738px (ver o teste de desenho)."""
+    três botões, e a coluna cabe nos 738px (ver o teste de desenho)."""
     impressao.imprimir_comanda(mesa_12.id)
     comandas.fechar_para_conferencia(mesa_12.id)
     tela.atualizar()
@@ -668,7 +675,6 @@ def test_a_conta_em_conferencia_troca_o_fechar_pelo_reabrir(tela, comandas, mesa
         "fechar": "some",
         "receber": "liga",
         "reabrir": "liga",
-        "2via": "liga",
         "cancelar": "apaga",
     }
     assert not any(linha.botao.isEnabled() for linha in tela._cartao_enviados.linhas)
