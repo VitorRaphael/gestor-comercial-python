@@ -1,22 +1,14 @@
-"""O modal de fechamento do caixa: duas contagens, a diferença ao vivo e a gravação.
+"""O modal de fechamento do caixa: duas contagens às cegas e a gravação.
 
 É a tela mais cara do sistema: o único momento em que a gaveta física e o banco
-de dados se encontram. Um número errado aqui vira quebra de caixa no relatório
-impresso, com o turno já encerrado e ninguém conseguindo explicar. Os testes
-cobrem, nessa ordem:
+de dados se encontram. Os testes cobrem, nessa ordem:
 
-1. **o teclado tem um destino só por vez, e ele é dito em voz alta** — o rótulo
-   da direita e o anel do cartão ativo são o único sinal de para onde vai o
-   próximo dígito. Sem eles, o extrato da maquininha é digitado por cima da
-   contagem da gaveta e nada avisa;
-2. **a prévia da diferença é a MESMA conta que o service grava** — provado
-   fechando o caixa de verdade e comparando com `ResumoCaixa.diferenca_total`;
-3. **as duas contagens chegam ao banco na ordem certa** — trocar dinheiro por
-   maquininha produziria duas diferenças simétricas que se cancelam no total e
-   não aparecem em lugar nenhum;
-4. **o atalho de preencher não inventa número** — inclusive no caso do esperado
-   negativo, que a gaveta física não tem como ter;
-5. **nada sobra na memória**, e o valor NÃO é apagado no fechamento do modal.
+1. **o teclado tem um destino só por vez, e ele é dito em voz alta**;
+2. **fechamento cego** — o modal não recebe, não mostra e não calcula o
+   esperado nem a diferença; não há atalho que preencha o apurado;
+3. **as duas contagens chegam ao banco na ordem certa, e a diferença é
+   apurada pelo service** na gravação;
+4. **nada sobra na memória**, e o valor NÃO é apagado no fechamento do modal.
 """
 
 from __future__ import annotations
@@ -27,7 +19,7 @@ from decimal import Decimal
 import pytest
 from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QKeyEvent, QMouseEvent
-from PySide6.QtWidgets import QDialog, QLabel, QWidget
+from PySide6.QtWidgets import QDialog, QLabel, QPushButton, QWidget
 
 from gestor_comercial.domain.comanda import Comanda
 from gestor_comercial.domain.enums import FormaPagamento, StatusComanda
@@ -38,17 +30,14 @@ from gestor_comercial.ui.widgets.cartao_de_turno import PAPEL_FECHAMENTO
 from gestor_comercial.ui.widgets.cartao_modal import Backdrop
 from gestor_comercial.ui.widgets.fechamento_caixa_dialog import (
     CONTAGENS,
-    TOM_EXATO,
-    TOM_FALTA,
-    TOM_SOBRA,
     FechamentoCaixaDialog,
 )
 
 ALTURA_UTIL_PX = 728
 
-# Os números do mockup, e não são arbitrários: R$ 970,00 esperados na gaveta,
-# R$ 1.600,00 esperados na maquininha. Com a maquininha em zero, a diferença é
-# -R$ 1.600,00 — exatamente a tela que o Vitor mandou.
+# O que o service apura para o turno de `turno_com_venda`: R$ 970,00 na gaveta
+# e R$ 1.600,00 na maquininha. O modal nunca vê estes números — os testes usam
+# para conferir a diferença que o service grava.
 ESPERADO_DINHEIRO = Decimal("970.00")
 ESPERADO_MAQUININHA = Decimal("1600.00")
 
@@ -58,8 +47,8 @@ def abrir(qapp):
     """Monta o modal sem `exec()` — e o descarta no fim do teste."""
     criados: list[FechamentoCaixaDialog] = []
 
-    def _abrir(dinheiro_esperado=ESPERADO_DINHEIRO, maquininha=ESPERADO_MAQUININHA, pai=None):
-        modal = FechamentoCaixaDialog(dinheiro_esperado, maquininha, pai)
+    def _abrir(pai=None):
+        modal = FechamentoCaixaDialog(pai)
         criados.append(modal)
         return modal
 
@@ -147,19 +136,34 @@ def test_o_cartao_veste_o_papel_de_fechamento(abrir):
     assert modal._botao_confirmar.property("papel") == PAPEL_FECHAMENTO
 
 
-def test_as_duas_contagens_mostram_o_que_o_sistema_apurou(abrir):
-    """O "Esperado R$ X,XX" é o que o operador confere contra a gaveta e contra
-    a filipeta. Sai de `formatar_reais`, o mesmo do resto do app e do papel."""
+def test_o_modal_nao_mostra_nenhum_valor_esperado(abrir):
+    """Fechamento cego: o único dinheiro na tela é o que o operador digitou.
+    Com as contagens zeradas, todo texto com "R$" tem que ser "R$ 0,00"."""
     modal = abrir()
 
-    esperados = [
-        filho.text()
-        for cartao in modal._cartoes
-        for filho in cartao.findChildren(QLabel)
-        if filho.objectName() == "turnoContagemEsperado"
-    ]
+    textos = [label.text() for label in modal.findChildren(QLabel)]
 
-    assert esperados == ["Esperado R$ 970,00", "Esperado R$ 1.600,00"]
+    assert not any("Esperado" in texto for texto in textos)
+    assert not any("diferença" in texto.lower() for texto in textos)
+    assert {texto for texto in textos if "R$" in texto} == {"R$ 0,00"}
+
+
+def test_nao_existe_atalho_para_preencher_o_apurado(abrir):
+    modal = abrir()
+
+    textos = [botao.text().upper() for botao in modal.findChildren(QPushButton)]
+
+    assert not any("PREENCHER" in texto for texto in textos)
+    assert not hasattr(modal, "_botao_preencher")
+
+
+def test_o_modal_nao_tem_esperado_nem_previa_de_diferenca(abrir):
+    """Não basta esconder: se o número estivesse no objeto, bastaria um
+    tooltip ou um log para ele vazar. O modal simplesmente não o recebe."""
+    modal = abrir()
+
+    assert not hasattr(modal, "_esperados")
+    assert not hasattr(modal, "diferenca")
 
 
 def test_as_duas_contagens_comecam_zeradas(abrir):
@@ -275,98 +279,6 @@ def test_tocar_num_cartao_traz_o_foco_de_volta_do_campo(qapp, abrir):
 
 
 # ---------------------------------------------------------------------------
-# A diferença
-# ---------------------------------------------------------------------------
-
-
-def test_a_diferenca_comeca_acusando_tudo_o_que_falta(abrir):
-    """Com as duas contagens zeradas, falta o turno inteiro. É a tela do
-    mockup: -R$ 2.570,00 antes de o operador contar qualquer coisa."""
-    modal = abrir()
-
-    assert modal.diferenca() == -(ESPERADO_DINHEIRO + ESPERADO_MAQUININHA)
-    assert modal._label_diferenca.property("tom") == TOM_FALTA
-
-
-def test_falta_aparece_em_vermelho_com_o_sinal_antes_do_simbolo(abrir):
-    modal = abrir()
-
-    _digitar(modal, "97000")
-    _tocar(modal, 1)
-
-    assert modal._label_diferenca.text() == "-R$ 1.600,00"
-    assert modal._label_diferenca.property("tom") == TOM_FALTA
-
-
-def test_turno_exato_e_lido_como_noticia_e_nao_como_numero(abrir):
-    """Zero aqui é a notícia boa e merece leitura diferente de um valor
-    apurado — mesmo critério do travessão que `formatar_reais_com_sinal` usa nos
-    relatórios."""
-    modal = abrir()
-
-    _digitar(modal, "97000")
-    _tocar(modal, 1)
-    _digitar(modal, "160000")
-
-    assert modal.diferenca() == Decimal("0.00")
-    assert "Sem diferença" in modal._label_diferenca.text()
-    assert modal._label_diferenca.property("tom") == TOM_EXATO
-
-
-def test_sobra_e_dado_a_conferir_e_nao_erro(abrir):
-    """Por isso ciano e não verde nem vermelho: sobra na gaveta é uma pergunta
-    ("de onde veio esse dinheiro?"), não um parabéns e não um alarme."""
-    modal = abrir()
-
-    _digitar(modal, "97000")
-    _tocar(modal, 1)
-    _digitar(modal, "165000")
-
-    assert modal.diferenca() == Decimal("50.00")
-    assert "Sobra" in modal._label_diferenca.text()
-    assert modal._label_diferenca.property("tom") == TOM_SOBRA
-
-
-def test_a_diferenca_se_refaz_a_cada_tecla(abrir):
-    """Mostrada enquanto se digita, e não depois de gravar: antes, o operador
-    confirmava às cegas e descobria a quebra no papel impresso."""
-    modal = abrir()
-
-    _digitar(modal, "9")
-    primeira = modal.diferenca()
-    _digitar(modal, "7")
-
-    assert primeira != modal.diferenca()
-
-
-# ---------------------------------------------------------------------------
-# Preencher com o apurado
-# ---------------------------------------------------------------------------
-
-
-def test_preencher_copia_o_apurado_para_as_duas_contagens(abrir):
-    modal = abrir()
-
-    modal._botao_preencher.click()
-
-    assert modal.resultado().dinheiro == ESPERADO_DINHEIRO
-    assert modal.resultado().maquininha == ESPERADO_MAQUININHA
-    assert modal.diferenca() == Decimal("0.00")
-
-
-def test_preencher_nao_copia_esperado_negativo(abrir):
-    """O saldo esperado fica negativo quando as sangrias passam do que entrou.
-    Preencher a contagem FÍSICA com um número negativo seria afirmar que a
-    gaveta deve dinheiro — e o numpad não teria como corrigir isso de volta."""
-    modal = abrir(dinheiro_esperado=Decimal("-30.00"))
-
-    modal._botao_preencher.click()
-
-    assert modal.resultado().dinheiro == Decimal("0.00")
-    assert modal.resultado().maquininha == ESPERADO_MAQUININHA
-
-
-# ---------------------------------------------------------------------------
 # Teclado e saída
 # ---------------------------------------------------------------------------
 
@@ -427,25 +339,6 @@ def _fechar_pela_tela(qapp, view, contado_dinheiro, contado_maquininha, observac
     qapp.processEvents()
 
 
-def test_a_tela_leva_os_esperados_do_resumo_para_o_modal(qapp, caixa_na_tela, caixas_service):
-    """Os dois números que o operador confere saem do `ResumoCaixa`, não de uma
-    conta feita na tela: saldo esperado da gaveta e total apurado na maquininha."""
-    vistos: list[tuple[Decimal, Decimal]] = []
-
-    def espiar() -> None:
-        modal = caixa_na_tela.findChildren(FechamentoCaixaDialog)[0]
-        vistos.append(tuple(modal._esperados))
-        modal.reject()
-
-    QTimer.singleShot(0, espiar)
-    caixa_na_tela._botao_fechar.click()
-    qapp.processEvents()
-
-    resumo = caixas_service.resumo(caixa_na_tela._caixa_id)
-    assert vistos == [(resumo.saldo_esperado, resumo.total_maquininha)]
-    assert vistos == [(ESPERADO_DINHEIRO, ESPERADO_MAQUININHA)]
-
-
 def test_a_tela_grava_as_duas_contagens_e_a_observacao(qapp, caixa_na_tela, caixas_service):
     """Cada contagem no seu campo. Trocar as duas produziria duas diferenças
     simétricas que se cancelam no total — e o erro não apareceria em lugar
@@ -460,36 +353,18 @@ def test_a_tela_grava_as_duas_contagens_e_a_observacao(qapp, caixa_na_tela, caix
     assert caixa.observacao_fechamento == "conferido com o gerente"
 
 
-def test_a_previa_da_diferenca_e_a_mesma_conta_que_o_service_grava(
-    qapp, caixa_na_tela, caixas_service
-):
-    """A promessa central do §9.7.
-
-    A prévia não pode chamar `resumo()`, porque nada foi gravado ainda — então a
-    igualdade não é garantida por código compartilhado, e sim por este teste:
-    fecha o caixa de verdade, com contagens que dão quebra, e compara o número
-    que o operador viu na tela com o `ResumoCaixa.diferenca_total` que sai do
-    banco. Se um dos dois lados mudar sozinho, é aqui que aparece.
-    """
+def test_a_diferenca_e_apurada_pelo_service_na_gravacao(qapp, caixa_na_tela, caixas_service):
+    """O modal só leva o contado; quem confronta com o apurado é o service.
+    Contagens que dão quebra nas duas pontas provam que cada diferença é
+    gravada no seu campo — e não se cancelam em silêncio."""
     caixa_id = caixa_na_tela._caixa_id
-    previstas: list[Decimal] = []
 
-    def operar() -> None:
-        modal = caixa_na_tela.findChildren(FechamentoCaixaDialog)[0]
-        _digitar(modal, "92000")  # R$ 920,00 na gaveta — faltam R$ 50,00
-        _tocar(modal, 1)
-        _digitar(modal, "165000")  # R$ 1.650,00 na maquininha — sobram R$ 50,00
-        previstas.append(modal.diferenca())
-        modal.accept()
-
-    QTimer.singleShot(0, operar)
-    caixa_na_tela._botao_fechar.click()
-    qapp.processEvents()
+    _fechar_pela_tela(qapp, caixa_na_tela, "92000", "165000")
 
     resumo = caixas_service.resumo(caixa_id)
-    assert previstas == [resumo.diferenca_total]
-    assert resumo.diferenca_dinheiro == Decimal("-50.00")
-    assert resumo.diferenca_maquininha == Decimal("50.00")
+    assert resumo.diferenca_dinheiro == Decimal("920.00") - ESPERADO_DINHEIRO
+    assert resumo.diferenca_maquininha == Decimal("1650.00") - ESPERADO_MAQUININHA
+    assert resumo.diferenca_total == Decimal("0.00")
 
 
 def test_cancelar_no_modal_deixa_o_turno_aberto(qapp, caixa_na_tela, caixas_service):
@@ -581,7 +456,7 @@ def test_fechar_solta_o_escurecedor_da_janela(qapp, assentar):
     pai.show()
 
     for _ in range(10):
-        modal = FechamentoCaixaDialog(ESPERADO_DINHEIRO, ESPERADO_MAQUININHA, pai)
+        modal = FechamentoCaixaDialog(pai)
         modal.show()
         qapp.processEvents()
         modal.reject()
@@ -593,7 +468,7 @@ def test_fechar_solta_o_escurecedor_da_janela(qapp, assentar):
 
 def test_trinta_aberturas_nao_deixam_nada_preso_a_view(qapp, assentar, caixa_na_tela):
     for _ in range(30):
-        modal = FechamentoCaixaDialog(ESPERADO_DINHEIRO, ESPERADO_MAQUININHA, caixa_na_tela)
+        modal = FechamentoCaixaDialog(caixa_na_tela)
         QTimer.singleShot(0, modal.reject)
         modal.exec()
         modal.deleteLater()

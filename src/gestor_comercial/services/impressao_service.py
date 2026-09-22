@@ -70,7 +70,7 @@ from gestor_comercial.services.caixa_service import (
 )
 from gestor_comercial.services.comanda_service import ComandaService
 from gestor_comercial.services.dinheiro import ZERO, dinheiro
-from gestor_comercial.services.exceptions import RecursoNaoEncontradoError
+from gestor_comercial.services.exceptions import RecursoNaoEncontradoError, RegraDeNegocioError
 from gestor_comercial.services.transacao import transacional
 
 # Assinatura da fábrica de driver que o `ImpressaoService` aceita. Existe para
@@ -259,9 +259,20 @@ class ImpressaoService:
     # ------------------------------------------------------------------
 
     def imprimir_fechamento_caixa(self, caixa_id: int) -> ResultadoImpressao:
-        """Relatório de conferência da gaveta, na impressora padrão."""
+        """Relatório de conferência da gaveta, na impressora padrão.
+
+        Só de turno FECHADO (fechamento cego): o relatório traz saldo esperado
+        e diferenças, e impresso com o turno aberto entregaria ao operador o
+        número que ele deveria contar. A tela desabilita o botão, mas a regra
+        mora aqui para valer para qualquer chamador.
+        """
         self.auth.usuario_atual()
         caixa = self._caixas.buscar(caixa_id)
+        if caixa.status is not StatusCaixa.FECHADO:
+            raise RegraDeNegocioError(
+                "O relatório de fechamento só pode ser impresso depois que o "
+                "caixa for fechado — com o turno aberto ele revelaria o saldo esperado."
+            )
 
         padrao = self.uow.impressoras.buscar_padrao()
         if padrao is None:

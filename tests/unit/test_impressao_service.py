@@ -35,6 +35,7 @@ from gestor_comercial.services.dinheiro import dinheiro
 from gestor_comercial.services.exceptions import (
     NaoAutorizadoError,
     RecursoNaoEncontradoError,
+    RegraDeNegocioError,
 )
 from gestor_comercial.services.funcionario_service import FuncionarioService
 from gestor_comercial.services.impressao_service import (
@@ -48,6 +49,20 @@ from tests.conftest import PIN_ATENDENTE, FabricaDeDriverFalso
 @pytest.fixture
 def impressao(uow, auth, driver):
     return ImpressaoService(uow, auth, abrir_driver=driver)
+
+
+def encerrar_turno(uow, caixa):
+    """Marca o caixa como FECHADO direto no repository, com contagens zeradas.
+
+    O relatório de fechamento só sai de turno encerrado (fechamento cego), e
+    passar por `CaixaService.fechar` aqui arrastaria regras que não são o
+    alvo destes testes (comanda em aberto, gerente, numeração do dia).
+    """
+    caixa.status = StatusCaixa.FECHADO
+    caixa.fechado_em = datetime(2026, 8, 21, 23, 0)
+    caixa.valor_contado_dinheiro = dinheiro("0.00")
+    caixa.valor_contado_maquininha = dinheiro("0.00")
+    return uow.caixas.salvar(caixa)
 
 
 def nova_impressora(uow, nome, padrao=False, ativa=True, colunas=32):
@@ -722,6 +737,7 @@ def test_falha_no_fechamento_nao_aborta_o_fechamento_do_caixa(
     impressao = ImpressaoService(uow, auth, abrir_driver=driver_que_falha)
     nova_impressora(uow, "Balcão", padrao=True)
 
+    encerrar_turno(uow, caixa_aberto)
     resultado = impressao.imprimir_fechamento_caixa(caixa_aberto.id)
 
     assert resultado.sucesso is False
@@ -892,6 +908,7 @@ def test_fechamento_usa_os_numeros_do_caixa_service(
         )
     )
 
+    encerrar_turno(uow, caixa_aberto)
     resultado = impressao.imprimir_fechamento_caixa(caixa_aberto.id)
     texto = driver.texto_de("Balcão")
 
@@ -914,6 +931,7 @@ def test_fechamento_de_caixa_inexistente(uow, impressao, gerente):
 def test_fechamento_sem_impressora_padrao(uow, impressao, gerente, caixa_aberto):
     nova_impressora(uow, "Cozinha")  # existe, mas ninguém é padrão
 
+    encerrar_turno(uow, caixa_aberto)
     resultado = impressao.imprimir_fechamento_caixa(caixa_aberto.id)
 
     assert resultado.sucesso is False
@@ -921,20 +939,16 @@ def test_fechamento_sem_impressora_padrao(uow, impressao, gerente, caixa_aberto)
     assert "padrão" in resultado.erro
 
 
-def test_fechamento_de_caixa_aberto_deixa_linha_para_anotar(
-    uow, impressao, driver, gerente, caixa_aberto
-):
-    """Conferência de meio de turno: o gerente conta a gaveta e anota na mão."""
+def test_fechamento_de_caixa_aberto_e_recusado(uow, impressao, driver, gerente, caixa_aberto):
+    """Fechamento cego: o relatório traz saldo esperado e diferenças, e com o
+    turno aberto ele entregaria ao operador o número que ele deveria contar.
+    A regra mora no service — a tela desabilitar o botão não basta."""
     nova_impressora(uow, "Balcão", padrao=True)
 
-    impressao.imprimir_fechamento_caixa(caixa_aberto.id)
-    texto = driver.texto_de("Balcão")
+    with pytest.raises(RegraDeNegocioError, match="aberto"):
+        impressao.imprimir_fechamento_caixa(caixa_aberto.id)
 
-    assert "Valor contado" in texto
-    assert "_____" in texto
-    assert "ABERTO" in texto
-    assert "em aberto" in texto  # ainda não tem hora de fechamento
-    assert "Diferença" not in texto
+    assert driver.texto_de("Balcão") == ""
 
 
 def test_fechamento_de_caixa_fechado_mostra_contado_e_diferenca(
@@ -1002,6 +1016,7 @@ def test_fechamento_sem_anotacao_de_abertura_nao_ganha_linha_em_branco(
     ganhar um "Obs. abertura:" pendurado no vazio por causa disso."""
     nova_impressora(uow, "Balcão", padrao=True)
 
+    encerrar_turno(uow, caixa_aberto)
     impressao.imprimir_fechamento_caixa(caixa_aberto.id)
 
     assert "Obs. abertura" not in driver.texto_de("Balcão")
@@ -1029,6 +1044,7 @@ def test_fechamento_separa_as_bandeiras_da_maquininha(
             )
         )
 
+    encerrar_turno(uow, caixa_aberto)
     impressao.imprimir_fechamento_caixa(caixa_aberto.id)
     texto = driver.texto_de("Balcão")
 
@@ -1063,6 +1079,7 @@ def item_cancelado(uow, comanda, produto, gerente, *, quantidade=1, cancelado_em
 def test_fechamento_sem_venda_mostra_indicacao(uow, impressao, driver, gerente, caixa_aberto):
     nova_impressora(uow, "Balcão", padrao=True)
 
+    encerrar_turno(uow, caixa_aberto)
     impressao.imprimir_fechamento_caixa(caixa_aberto.id)
     texto = driver.texto_de("Balcão")
 
@@ -1078,6 +1095,7 @@ def test_fechamento_mostra_quantidade_unitario_e_subtotal_por_produto(
     comanda = nova_comanda(uow, caixa_aberto, gerente, mesa)
     novo_item(uow, comanda, lanche, quantidade=8)
 
+    encerrar_turno(uow, caixa_aberto)
     impressao.imprimir_fechamento_caixa(caixa_aberto.id)
     texto = driver.texto_de("Balcão")
 
@@ -1090,6 +1108,7 @@ def test_fechamento_mostra_quantidade_unitario_e_subtotal_por_produto(
 def test_fechamento_sem_cancelamento_mostra_indicacao(uow, impressao, driver, gerente, caixa_aberto):
     nova_impressora(uow, "Balcão", padrao=True)
 
+    encerrar_turno(uow, caixa_aberto)
     impressao.imprimir_fechamento_caixa(caixa_aberto.id)
     texto = driver.texto_de("Balcão")
 
@@ -1110,6 +1129,7 @@ def test_fechamento_mostra_auditoria_de_cancelamentos(
         motivo="Desistência do cliente",
     )
 
+    encerrar_turno(uow, caixa_aberto)
     impressao.imprimir_fechamento_caixa(caixa_aberto.id)
     texto = driver.texto_de("Balcão")
 
@@ -1455,6 +1475,7 @@ def test_nome_comprido_de_funcionario_nao_estoura_a_bobina(
 
     impressao.imprimir_comanda(comanda.id)
     impressao.imprimir_recibo(comanda.id)
+    encerrar_turno(uow, caixa_aberto)
     impressao.imprimir_fechamento_caixa(caixa_aberto.id)
 
     assert blocos_que_estouraram(driver, 32) == []

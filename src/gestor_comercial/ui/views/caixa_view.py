@@ -126,9 +126,9 @@ class CaixaView(QWidget):
         self._caixa_service = caixa_service
         self._impressao_service = impressao_service
         self._caixa_id: int | None = None
-        # Guarda o último caixa conhecido mesmo depois de fechado: o relatório
-        # de fechamento é justamente o papel que some ou borra na hora errada,
-        # e sem isto o gerente perderia a reimpressão no instante em que fechou.
+        # O turno cujo relatório o botão "Imprimir fechamento" (re)imprime. Com
+        # o caixa fechado, vem do histórico do banco — e não da memória da
+        # sessão —, para que a reimpressão sobreviva a reiniciar o app.
         self._ultimo_caixa_id: int | None = None
 
         self._montar_layout()
@@ -185,7 +185,7 @@ class CaixaView(QWidget):
         self._botao_imprimir = QPushButton("Imprimir fechamento")
         self._botao_imprimir.setProperty("variante", "pilula-vazia")
         self._botao_imprimir.setToolTip(
-            "Relatório de conferência da gaveta. Funciona com o caixa ainda aberto."
+            "Relatório de conferência da gaveta. Só depois de o caixa ser fechado."
         )
         self._botao_imprimir.clicked.connect(self._imprimir_fechamento)
         cabecalho.addWidget(self._botao_imprimir, alignment=Qt.AlignmentFlag.AlignVCenter)
@@ -405,8 +405,9 @@ class CaixaView(QWidget):
             self._label_titulo.setText("Caixa — fechado")
             self._label_subtitulo.setText("Nenhum caixa aberto. Abra o caixa para começar o dia.")
             self.limpar_dados_turno_fechado()
+            historico = self._atualizar_fechamentos()
+            self._ultimo_caixa_id = historico[0].id if historico else None
             self._definir_acoes_disponiveis(caixa_aberto=False)
-            self._atualizar_fechamentos()
             return
 
         self._caixa_id = caixa.id
@@ -445,9 +446,12 @@ class CaixaView(QWidget):
     def _definir_acoes_disponiveis(self, *, caixa_aberto: bool) -> None:
         self._botao_abrir.setVisible(not caixa_aberto)
         self._botao_fechar.setEnabled(caixa_aberto)
-        # Reimprimir o relatório do caixa recém-fechado continua valendo, então
-        # este botão segue o último caixa conhecido, não o que está aberto.
-        self._botao_imprimir.setEnabled(self._ultimo_caixa_id is not None)
+        # Fechamento cego: o relatório traz saldo esperado e diferenças, então
+        # com o turno aberto ele entregaria ao operador o número que ele deveria
+        # contar. Só depois do fechamento, para reimprimir o último turno.
+        self._botao_imprimir.setEnabled(
+            not caixa_aberto and self._ultimo_caixa_id is not None
+        )
         for botao in self._botoes_movimento_por_tipo.values():
             botao.setEnabled(caixa_aberto)
 
@@ -501,7 +505,9 @@ class CaixaView(QWidget):
             self._caixa_service.resumo_cancelamentos(self._caixa_id)
         )
 
-    def _atualizar_fechamentos(self) -> None:
+    def _atualizar_fechamentos(self) -> list[Caixa]:
+        """Redesenha "Últimos fechamentos" e devolve o histórico lido (mais
+        recente primeiro), para quem precisar do último turno encerrado."""
         limpar_layout(self._layout_fechamentos)
         try:
             historico = self._caixa_service.listar_historico()
@@ -512,10 +518,11 @@ class CaixaView(QWidget):
             vazio = QLabel("Nenhum fechamento registrado ainda.")
             vazio.setProperty("variante", "fraco")
             self._layout_fechamentos.addWidget(vazio)
-            return
+            return historico
 
         for caixa in historico[:3]:
             self._layout_fechamentos.addWidget(self._criar_item_fechamento(caixa))
+        return historico
 
     def _criar_item_fechamento(self, caixa: Caixa) -> QFrame:
         item = QFrame()
@@ -658,7 +665,9 @@ class CaixaView(QWidget):
     def _imprimir_fechamento(self) -> None:
         """Relatório de conferência da gaveta, na impressora padrão."""
         caixa_id = self._ultimo_caixa_id
-        if caixa_id is None:
+        # Mesma regra do botão desabilitado, repetida aqui porque este método
+        # também é chamado por código: nunca imprimir com o turno aberto.
+        if caixa_id is None or self._caixa_id is not None:
             return
 
         try:

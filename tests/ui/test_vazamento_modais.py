@@ -35,7 +35,6 @@ O contrato dos utilitários em si é testado em `test_modais.py`. Aqui é o app.
 
 from __future__ import annotations
 
-from decimal import Decimal
 
 import pytest
 from PySide6.QtCore import QTimer
@@ -169,7 +168,7 @@ def test_fechamento_de_caixa_nao_acumula(qapp, assentar):
     pai = QWidget()
 
     _abrir_e_fechar(
-        lambda p: FechamentoCaixaDialog(Decimal("970.00"), Decimal("1600.00"), p), pai
+        lambda p: FechamentoCaixaDialog(p), pai
     )
     assentar()
 
@@ -194,7 +193,7 @@ def test_nenhum_qdialog_sobrevive_ao_fechamento(qapp, assentar, auth):
     )
     _abrir_e_fechar(lambda p: AberturaCaixaDialog("Turno da Noite", "Gerente", p), pai, vezes=10)
     _abrir_e_fechar(
-        lambda p: FechamentoCaixaDialog(Decimal("970.00"), Decimal("1600.00"), p), pai, vezes=10
+        lambda p: FechamentoCaixaDialog(p), pai, vezes=10
     )
     _abrir_e_fechar(
         lambda p: PinPadDialog.para_exclusao(auth, "Maria Entregas", p), pai, vezes=10
