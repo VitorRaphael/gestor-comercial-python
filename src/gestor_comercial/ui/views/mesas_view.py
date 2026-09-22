@@ -215,23 +215,15 @@ class MesasView(QWidget):
         linha.addLayout(bloco)
         linha.addStretch()
 
-        self._botao_balcao = QPushButton("Balcão")
-        self._botao_balcao.setObjectName("btn-balcao")
-        self._botao_balcao.setProperty("variante", "secundario")
-        self._botao_balcao.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._botao_balcao.clicked.connect(self._abrir_balcao)
-        linha.addWidget(self._botao_balcao)
-
-        botao_nova = QPushButton("+  Nova comanda")
-        botao_nova.setProperty("variante", "primario")
-        botao_nova.setCursor(Qt.CursorShape.PointingHandCursor)
-        # Mesma ação de "Balcão" por enquanto: o app só tem um fluxo de
-        # comanda sem mesa (ver `ComandaService.abrir_balcao`). O botão
-        # próprio existe pra bater com o layout de referência (dois pontos
-        # de entrada) e já fica pronto pra divergir no dia em que houver
-        # mais de um jeito de abrir uma comanda nova.
-        botao_nova.clicked.connect(self._abrir_balcao)
-        linha.addWidget(botao_nova)
+        # Único ponto de entrada da venda sem mesa (ver
+        # `ComandaService.abrir_balcao`, que reaproveita a comanda de balcão
+        # ainda vazia em vez de empilhar outra).
+        self._botao_pedido_balcao = QPushButton("+  Pedido Balcão")
+        self._botao_pedido_balcao.setObjectName("btn-pedido-balcao")
+        self._botao_pedido_balcao.setProperty("variante", "primario")
+        self._botao_pedido_balcao.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._botao_pedido_balcao.clicked.connect(self._abrir_balcao)
+        linha.addWidget(self._botao_pedido_balcao)
         return linha
 
     def _montar_filtros(self) -> QHBoxLayout:
