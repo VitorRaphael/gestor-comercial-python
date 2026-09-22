@@ -2078,7 +2078,7 @@ def construir_qss_app(t: dict[str, str]) -> str:
     QLabel[variante="badgeMovimento"] {{
       border: 1px solid;
       border-radius: 999px;
-      padding: 2px 10px;
+      padding: 2px 6px;
       font-size: 10px;
       font-weight: 700;
       letter-spacing: 0.5px;
@@ -3001,52 +3001,11 @@ def construir_qss_app(t: dict[str, str]) -> str:
       font-weight: 700;
       background: transparent;
     }}
-    QLabel#turnoContagemEsperado {{
-      color: {t['texto_fraquissimo']};
-      font-size: 10px;
-      background: transparent;
-    }}
     QLabel#turnoContagemValor {{
       color: {t['texto']};
       font-size: 17px;
       font-weight: 700;
       background: transparent;
-    }}
-
-    QFrame#turnoDiferenca {{
-      background: {t['superficie_2']};
-      border: 1px solid {t['borda']};
-      border-radius: 12px;
-    }}
-    QLabel#turnoDiferencaValor {{
-      color: {t['texto']};
-      font-size: 17px;
-      font-weight: 800;
-      background: transparent;
-    }}
-    /* Falta e a noticia ruim, sobra e um dado a explicar e zero e a noticia boa
-       -- tres leituras diferentes, e por isso tres cores e nao um numero com
-       sinal. `ciano_metrica` na sobra porque sobra e DADO a conferir (de onde
-       veio esse dinheiro?), nao erro. */
-    QLabel#turnoDiferencaValor[tom="falta"] {{ color: {t['perigo']}; }}
-    QLabel#turnoDiferencaValor[tom="exato"] {{ color: {t['sucesso']}; }}
-    QLabel#turnoDiferencaValor[tom="sobra"] {{ color: {t['ciano_metrica']}; }}
-
-    /* Botao fantasma de proposito: ele e o atalho que permite fechar o turno
-       sem contar a gaveta. Serve, mas nao convida. */
-    QPushButton#turnoPreencher {{
-      padding: 7px 10px;
-      background: transparent;
-      border: 1px solid {t['borda']};
-      border-radius: 8px;
-      color: {t['texto_fraquissimo']};
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 1px;
-    }}
-    QPushButton#turnoPreencher:hover {{
-      background: {t['superficie']};
-      color: {t['texto']};
     }}
 
     /* O anel de foco, nos tres lugares para onde o teclado pode estar

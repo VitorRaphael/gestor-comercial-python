@@ -75,15 +75,24 @@ class SecaoCancelamentos(QWidget):
         )
         layout.addWidget(self._tabela_detalhado)
 
+    def limpar(self) -> None:
+        """Estado vazio: sem totalizador e sem as duas tabelas.
+
+        É o que aparece num turno sem cancelamento e também o que a `CaixaView`
+        usa quando o caixa fecha — sem isto, os cancelados do turno encerrado
+        ficavam na tela até alguém abrir o próximo.
+        """
+        self._label_totais.setText("Nenhum item cancelado neste turno.")
+        self._label_por_produto.setVisible(False)
+        self._label_detalhado.setVisible(False)
+        self._tabela_por_produto.setVisible(False)
+        self._tabela_detalhado.setVisible(False)
+        limpar_tabela(self._tabela_por_produto)
+        limpar_tabela(self._tabela_detalhado)
+
     def carregar(self, resumo: ResumoCancelamentos) -> None:
         if resumo.quantidade_total == 0:
-            self._label_totais.setText("Nenhum item cancelado neste turno.")
-            self._label_por_produto.setVisible(False)
-            self._label_detalhado.setVisible(False)
-            self._tabela_por_produto.setVisible(False)
-            self._tabela_detalhado.setVisible(False)
-            limpar_tabela(self._tabela_por_produto)
-            limpar_tabela(self._tabela_detalhado)
+            self.limpar()
             return
 
         self._label_por_produto.setVisible(True)

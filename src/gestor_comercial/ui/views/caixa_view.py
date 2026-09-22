@@ -62,6 +62,14 @@ from gestor_comercial.ui.widgets.estilo import repolir
 from gestor_comercial.ui.widgets.tabelas import definir_celula, limpar_tabela
 
 _COLUNAS_MOVIMENTOS = ["Quando", "Tipo", "Descrição", "Valor"]
+_COL_QUANDO, _COL_TIPO, _COL_DESCRICAO, _COL_VALOR = range(len(_COLUNAS_MOVIMENTOS))
+
+# O badge é um widget dentro da célula, e `ResizeToContents` não o mede de
+# forma confiável — a coluna encolhia até o texto do cabeçalho ("Tipo") e o
+# "REFORÇO" saía com a borda cortada. Largura fixa com folga para o maior deles.
+_LARGURA_COLUNA_TIPO = 120
+
+_ZERO = Decimal("0")
 
 # O rótulo do tipo ("Sangria") e a chave de estilo do badge ("sangria") moram
 # em `movimentacao_caixa_dialog.OPERACOES`, junto do título, do subtítulo e das
@@ -82,6 +90,13 @@ _FORMAS_RECEBIMENTO = [
     (FormaPagamento.CREDITO, "Crédito"),
     (FormaPagamento.PIX, "Pix"),
 ]
+
+# Fechamento cego: com o turno aberto, nenhum total que permita deduzir o
+# esperado da gaveta aparece na tela — nem o valor, nem a proporção entre as
+# formas (as barras entregariam a mesma informação por outro caminho). Quem
+# confronta contado × esperado é o `CaixaService.fechar`, e o resultado sai no
+# relatório do gerente.
+_VALOR_OCULTO = "R$ ***"
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
@@ -227,7 +242,7 @@ class CaixaView(QWidget):
         card.setMinimumWidth(_LARGURA_MIN_RESUMO)
         card.setMaximumWidth(_LARGURA_MAX_RESUMO)
 
-        layout.addWidget(_rotulo_card("SALDO ESPERADO NA GAVETA"))
+        layout.addWidget(_rotulo_card("VALOR DE ABERTURA DO CAIXA"))
 
         self._label_saldo = QLabel("R$ 0,00")
         self._label_saldo.setObjectName("caixaValorGrande")
@@ -263,6 +278,7 @@ class CaixaView(QWidget):
             barra.setRange(0, 100)
             barra.setValue(0)
             barra.setTextVisible(False)
+            barra.setVisible(False)
             layout.addWidget(barra)
 
             self._barras_forma[forma] = (valor, barra)
@@ -342,7 +358,18 @@ class CaixaView(QWidget):
         self._tabela.verticalHeader().setVisible(False)
         self._tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._tabela.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        self._tabela.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        # Só a descrição estica: data, badge e valor têm largura conhecida, e
+        # deixar o Qt dividir a sobra entre eles era o que truncava a data com
+        # "..." e cortava a borda do badge.
+        cabecalho = self._tabela.horizontalHeader()
+        cabecalho.setSectionResizeMode(_COL_QUANDO, QHeaderView.ResizeMode.ResizeToContents)
+        cabecalho.setSectionResizeMode(_COL_TIPO, QHeaderView.ResizeMode.Fixed)
+        cabecalho.resizeSection(_COL_TIPO, _LARGURA_COLUNA_TIPO)
+        cabecalho.setSectionResizeMode(_COL_DESCRICAO, QHeaderView.ResizeMode.Stretch)
+        cabecalho.setSectionResizeMode(_COL_VALOR, QHeaderView.ResizeMode.ResizeToContents)
+        self._tabela.horizontalHeaderItem(_COL_VALOR).setTextAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         layout.addWidget(self._tabela)
         return card
 
@@ -377,7 +404,7 @@ class CaixaView(QWidget):
             self._caixa_id = None
             self._label_titulo.setText("Caixa — fechado")
             self._label_subtitulo.setText("Nenhum caixa aberto. Abra o caixa para começar o dia.")
-            limpar_tabela(self._tabela)
+            self.limpar_dados_turno_fechado()
             self._definir_acoes_disponiveis(caixa_aberto=False)
             self._atualizar_fechamentos()
             return
@@ -395,6 +422,26 @@ class CaixaView(QWidget):
         self._atualizar_cancelamentos()
         self._atualizar_fechamentos()
 
+    def limpar_dados_turno_fechado(self) -> None:
+        """Estado CAIXA_FECHADO: nada do turno encerrado fica na tela.
+
+        Zera saldo, recebimentos e ajustes e esvazia movimentos e cancelados.
+        Antes só a tabela de movimentos era limpa, e os cartões seguiam
+        mostrando os números do turno que acabou de fechar — o gerente olhava
+        o saldo do turno que acabou de fechar. Fica de fora só o
+        que é histórico ("Últimos fechamentos"), que `atualizar` recarrega.
+        """
+        self._label_saldo.setText(formatar_reais(_ZERO))
+        self._label_recebido.setText(formatar_reais(_ZERO))
+        self._label_comandas.setText("0")
+        for label_valor, barra in self._barras_forma.values():
+            label_valor.setText(formatar_reais(_ZERO))
+            barra.setValue(0)
+        for chave in self._labels_ajuste:
+            self._definir_valor_ajuste(chave, _ZERO, negativo=False)
+        limpar_tabela(self._tabela)
+        self._secao_cancelamentos.limpar()
+
     def _definir_acoes_disponiveis(self, *, caixa_aberto: bool) -> None:
         self._botao_abrir.setVisible(not caixa_aberto)
         self._botao_fechar.setEnabled(caixa_aberto)
@@ -409,30 +456,21 @@ class CaixaView(QWidget):
             return
         resumo = self._caixa_service.resumo(self._caixa_id)
         self._preencher_card_saldo(resumo)
-        self._preencher_card_recebimentos(resumo)
+        self._preencher_card_recebimentos()
         self._preencher_card_ajustes(resumo)
 
     def _preencher_card_saldo(self, resumo: ResumoCaixa) -> None:
-        self._label_saldo.setText(formatar_reais(resumo.saldo_esperado))
-        total_recebido = resumo.total_dinheiro + resumo.total_maquininha
-        self._label_recebido.setText(formatar_reais(total_recebido))
+        # Só o fundo de troco — número que o próprio operador digitou na
+        # abertura. Somar vendas e movimentos aqui seria entregar o esperado.
+        self._label_saldo.setText(formatar_reais(resumo.valor_abertura))
+        self._label_recebido.setText(_VALOR_OCULTO)
         self._label_comandas.setText(str(resumo.quantidade_comandas))
 
-    def _preencher_card_recebimentos(self, resumo: ResumoCaixa) -> None:
-        totais_forma = self._caixa_service.totais_por_forma(self._caixa_id)
-        valores: dict[FormaPagamento, Decimal] = {
-            FormaPagamento.DINHEIRO: resumo.total_dinheiro,
-            FormaPagamento.DEBITO: totais_forma.get(FormaPagamento.DEBITO, Decimal("0")),
-            FormaPagamento.CREDITO: totais_forma.get(FormaPagamento.CREDITO, Decimal("0")),
-            FormaPagamento.PIX: totais_forma.get(FormaPagamento.PIX, Decimal("0")),
-        }
-        maior = max(valores.values(), default=Decimal("0"))
-        for forma, _rotulo in _FORMAS_RECEBIMENTO:
-            valor = valores[forma]
-            label_valor, barra = self._barras_forma[forma]
-            label_valor.setText(formatar_reais(valor))
-            percentual = int((valor / maior) * 100) if maior > 0 else 0
-            barra.setValue(percentual)
+    def _preencher_card_recebimentos(self) -> None:
+        """Mascara os totais por forma; nem o service é consultado aqui."""
+        for label_valor, barra in self._barras_forma.values():
+            label_valor.setText(_VALOR_OCULTO)
+            barra.setValue(0)
 
     def _preencher_card_ajustes(self, resumo: ResumoCaixa) -> None:
         self._definir_valor_ajuste("abertura", resumo.valor_abertura, negativo=False)
@@ -587,16 +625,13 @@ class CaixaView(QWidget):
     def _fechar_caixa(self) -> None:
         """Abre o cartão de conferência e fecha o turno com o que ele devolver.
 
-        O `resumo` é lido ANTES de abrir o modal porque é dele que saem os dois
-        esperados que o operador confere (saldo da gaveta e total da
-        maquininha). É leitura, não gravação: quem apura de verdade continua
-        sendo o service, que recalcula tudo dentro de `fechar` — a prévia da
-        diferença que o modal mostra é conferência visual, não a conta gravada.
+        Fechamento cego: o modal não recebe o `resumo`, então não tem esperado
+        para mostrar nem diferença para prever. O operador informa o que contou
+        e quem confronta com o apurado é o service, dentro de `fechar`.
         """
         if self._caixa_id is None:
             return
-        resumo = self._caixa_service.resumo(self._caixa_id)
-        modal = FechamentoCaixaDialog(resumo.saldo_esperado, resumo.total_maquininha, self)
+        modal = FechamentoCaixaDialog(self)
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return
         dados = modal.resultado()
@@ -708,9 +743,10 @@ def _criar_mini_stat(rotulo_texto: str) -> tuple[QFrame, QLabel]:
 def _criar_badge_movimento(tipo: TipoMovimento, texto: str) -> QWidget:
     container = QWidget()
     layout = QHBoxLayout(container)
-    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setContentsMargins(4, 0, 4, 0)
 
     badge = QLabel(texto.upper())
+    badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
     badge.setProperty("variante", "badgeMovimento")
     badge.setProperty("tipo", papel_do_movimento(tipo))
     layout.addWidget(badge)

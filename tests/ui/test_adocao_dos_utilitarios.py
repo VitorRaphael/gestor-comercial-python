@@ -51,8 +51,9 @@ ARQUIVO_DO_HELPER = "modais.py"
 # passaram a abrir o MESMO cartão por um site só (`_abrir_cadastro`); +2 com a
 # assinatura do consumo interno: a Gestão de Consumo abre o detalhe da retirada
 # e o PIN da baixa (a assinatura trocou o PIN do caixa e a própria Gestão trocou
-# o antigo modal de baixa, site por site).
-SITES_ESPERADOS = 39
+# o antigo modal de baixa, site por site); −1 com a remoção intencional do modal
+# de impressora.
+SITES_ESPERADOS = 38
 
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
 
