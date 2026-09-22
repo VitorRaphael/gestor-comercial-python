@@ -21,9 +21,10 @@ from collections.abc import Callable, Sequence
 from typing import TypeVar
 
 from PySide6.QtCore import QEventLoop, Qt
-from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from gestor_comercial.services.impressao_service import GRUPO_SEM_IMPRESSORA, ResultadoImpressao
+from gestor_comercial.ui.widgets.aviso_temporario import AvisoTemporario
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 
 
@@ -117,12 +118,14 @@ def aguardar_repintando(thread: threading.Thread, teto_s: float) -> None:
         _esperando = False
 
 
-class AvisoDeImpressao(QLabel):
+class AvisoDeImpressao(AvisoTemporario):
     """Linha de status que conta o que saiu — ou não — no papel.
 
     Verde quando tudo imprimiu, âmbar quando algum cupom falhou. Âmbar e não
     vermelho de propósito: vermelho é a cor de erro que interrompe a operação
     (`_label_erro` das views), e impressão que falha não interrompe nada.
+
+    Como todo aviso da interface, some sozinho em 3 s (`AvisoTemporario`).
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:

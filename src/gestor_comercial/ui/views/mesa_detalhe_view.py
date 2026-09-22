@@ -69,6 +69,7 @@ from gestor_comercial.ui.rotulo_identidade import rotulo_do_operador
 from gestor_comercial.ui.views.cancelamento_dialog import CancelamentoDialog
 from gestor_comercial.ui.widgets.adicionar_item_dialog import AdicionarItemDialog
 from gestor_comercial.ui.widgets.aviso_impressao import AvisoDeImpressao, executar_impressao
+from gestor_comercial.ui.widgets.aviso_temporario import AvisoTemporario
 from gestor_comercial.ui.widgets.cardapio_cartoes import (
     GLIFO_ENVIAR,
     GLIFO_MAIS,
@@ -214,7 +215,7 @@ class MesaDetalheView(QWidget):
         # caber sem rolagem (medido na renderização).
         mensagens = QVBoxLayout()
         mensagens.setSpacing(2)
-        self._label_erro = QLabel("")
+        self._label_erro = AvisoTemporario("")
         self._label_erro.setObjectName("labelErro")
         self._label_erro.setWordWrap(True)
         self._label_erro.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
