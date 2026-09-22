@@ -97,8 +97,8 @@ from gestor_comercial.ui.widgets.cardapio_cartoes import (
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
 from gestor_comercial.ui.widgets.layout_utils import limpar_layout, rolagem_vertical
 from gestor_comercial.ui.widgets.modais import executar_modal
+from gestor_comercial.ui.widgets.modal_assinatura_manuscrita import ModalAssinaturaManuscrita
 from gestor_comercial.ui.widgets.painel_pontilhado import PainelPontilhado
-from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
 
 _ERROS_SERVICE = (RegraDeNegocioError, RecursoNaoEncontradoError, NaoAutorizadoError, AcessoNegadoError)
 
@@ -558,15 +558,15 @@ class PagamentoView(QWidget):
             self._label_erro.setText("Informe o valor recebido.")
             return
 
-        pin_gerente = None
+        traco_assinatura = None
         funcionario_id = None
         if self._forma is FormaPagamento.CONSUMO_INTERNO:
             funcionario_id = self._combo_funcionario.currentData()
             if funcionario_id is None:
                 self._label_erro.setText("Escolha o funcionário do consumo.")
                 return
-            pin_gerente = self._pedir_pin_gerente()
-            if pin_gerente is None:
+            traco_assinatura = self._pedir_assinatura(valor)
+            if traco_assinatura is None:
                 return
 
         comanda_id = self._comanda_id
@@ -575,8 +575,8 @@ class PagamentoView(QWidget):
                 comanda_id,
                 self._forma,
                 valor,
-                pin_gerente=pin_gerente,
                 funcionario_consumo_id=funcionario_id,
+                traco_assinatura=traco_assinatura,
             )
         except _ERROS_SERVICE as erro:
             self._label_erro.setText(str(erro))
@@ -595,18 +595,22 @@ class PagamentoView(QWidget):
             self._imprimir_recibo()
         self.pagamento_concluido.emit(comanda_id)
 
-    def _pedir_pin_gerente(self) -> str | None:
-        """O PIN do Nível 2 que autoriza o consumo interno, devolvido para o service.
+    def _pedir_assinatura(self, valor: Decimal) -> str | None:
+        """O traço do colaborador, em JSON, que autoriza o consumo interno.
 
-        O cartão de PIN confere a credencial na hora (é o `validador` dele), e
-        esta tela guarda o que passou só para repassar ao `PagamentoService` —
-        que reconfere antes de gravar. Quem manda é o service: a tela não
-        autoriza nada, só coleta.
+        Substituiu o PIN do gerente: quem prova a retirada é quem pegou. A tela
+        só coleta — o `PagamentoService` revalida o traço antes de gravar.
         """
-        modal = PinPadDialog.para_consumo_interno(self._auth, self)
+        assert self._conta is not None
+        modal = ModalAssinaturaManuscrita(
+            self._combo_funcionario.currentText(),
+            sum(item.quantidade for item in self._conta.itens),
+            min(valor, self._conta.restante),
+            self,
+        )
         if executar_modal(modal) != QDialog.DialogCode.Accepted:
             return None
-        return modal.pin_confirmado
+        return modal.traco_json
 
     def _imprimir_recibo(self) -> None:
         if self._comanda_id is None:

@@ -54,6 +54,7 @@ from gestor_comercial.ui.formatacao import (
     safe_decimal,
 )
 from gestor_comercial.ui.theme.controller import ThemeController
+from gestor_comercial.ui.views.gestao_consumo_view import GestaoConsumoView
 from gestor_comercial.ui.widgets.modais import executar_modal
 from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
 from gestor_comercial.ui.widgets.estilo import aplicar_propriedade
@@ -153,11 +154,6 @@ class FuncionariosView(QWidget):
         cabecalho.addLayout(bloco_titulo)
         cabecalho.addStretch()
 
-        botao_baixa = QPushButton("Dar baixa no consumo")
-        botao_baixa.setProperty("variante", "pilula-vazia")
-        botao_baixa.clicked.connect(self._quitar)
-        cabecalho.addWidget(botao_baixa, alignment=Qt.AlignmentFlag.AlignVCenter)
-
         botao_novo = QPushButton("Novo funcionário")
         botao_novo.setProperty("variante", "primario")
         botao_novo.clicked.connect(self._criar)
@@ -219,7 +215,7 @@ class FuncionariosView(QWidget):
     def _montar_painel_detalhe(self) -> QFrame:
         self._painel_detalhe = _PainelDetalheFuncionario()
         self._painel_detalhe.editar_solicitado.connect(self._editar_id)
-        self._painel_detalhe.baixa_solicitada.connect(self._quitar_id)
+        self._painel_detalhe.baixa_solicitada.connect(self._ver_consumo_id)
         self._painel_detalhe.alternar_status_solicitado.connect(self._alternar_status_id)
         self._painel_detalhe.excluir_solicitado.connect(self._excluir_id)
         return self._painel_detalhe
@@ -428,33 +424,14 @@ class FuncionariosView(QWidget):
         self._selecionado_id = None
         self.atualizar()
 
-    def _quitar(self) -> None:
-        self._quitar_id(self._selecionado_id)
-
-    def _quitar_id(self, funcionario_id: int | None) -> None:
+    def _ver_consumo_id(self, funcionario_id: int | None) -> None:
+        """Abre a Gestão de Consumo do funcionário — retiradas, assinaturas e a baixa."""
         funcionario = self._funcionario_por_id(funcionario_id)
         if funcionario is None:
-            self._label_erro.setText("Selecione um funcionário na lista para dar baixa no consumo.")
+            self._label_erro.setText("Selecione um funcionário na lista para ver o consumo.")
             return
-        saldo = self._saldos.get(funcionario.id, Decimal("0"))
-        if saldo <= 0:
-            self._label_erro.setText(f"{funcionario.nome} não tem consumo em aberto.")
-            return
-
-        modal = _QuitarConsumoDialog(funcionario.nome, saldo, self)
-        if executar_modal(modal) != QDialog.DialogCode.Accepted:
-            return
-        valor, senha_gerente = modal.resultado()
-        if valor is None:
-            self._label_erro.setText("Valor inválido. Informe um valor em reais, como 20,00.")
-            return
-
         self._label_erro.setText("")
-        try:
-            self._pagamentos.quitar(funcionario.id, valor, senha_gerente)
-        except _ERROS_SERVICE as erro:
-            self._label_erro.setText(str(erro))
-            return
+        executar_modal(GestaoConsumoView(funcionario.id, funcionario.nome, self._pagamentos, self._auth, self))
         self.atualizar()
 
 
@@ -617,7 +594,7 @@ class _PainelDetalheFuncionario(QFrame):
         self._botao_editar.setProperty("variante", "neutro")
         self._botao_editar.clicked.connect(self._emitir_editar)
         linha1.addWidget(self._botao_editar)
-        self._botao_baixa = QPushButton("Dar baixa")
+        self._botao_baixa = QPushButton("Ver consumo")
         self._botao_baixa.setProperty("variante", "pilula-ciano")
         self._botao_baixa.clicked.connect(self._emitir_baixa)
         linha1.addWidget(self._botao_baixa)
@@ -662,7 +639,6 @@ class _PainelDetalheFuncionario(QFrame):
         self._label_senha.setText("••••••" if eh_caixa else "—")
 
         self._botao_status.setText("Desativar" if funcionario.ativo else "Ativar")
-        self._botao_baixa.setEnabled(saldo > 0)
 
     def limpar(self) -> None:
         self._funcionario_id = None
@@ -707,45 +683,3 @@ def _linha_meta(layout_pai: QVBoxLayout, rotulo: str) -> QLabel:
     linha.addWidget(label_valor)
     layout_pai.addLayout(linha)
     return label_valor
-
-
-class _QuitarConsumoDialog(QDialog):
-    """Modal de baixa: valor a abater e Senha Operacional (Gerente) para autorizar.
-
-    A tela em si já é o controle de acesso pedido — sem a senha certa,
-    `PagamentoService.quitar()` recusa a baixa (§3.8). Cada confirmação aqui
-    grava um `QuitacaoConsumo` no banco (valor, data/hora, quem autorizou),
-    dado bruto para o `sales_analytics` mais pra frente.
-    """
-
-    def __init__(self, nome_funcionario: str, saldo: Decimal, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(f"Dar baixa no consumo — {nome_funcionario}")
-
-        layout = QVBoxLayout(self)
-
-        layout.addWidget(QLabel(f"Consumo atual: {formatar_reais(saldo)}"))
-
-        formulario = QFormLayout()
-
-        self._campo_valor = QLineEdit(formatar_para_campo(saldo))
-        formulario.addRow("Valor descontado do salário", self._campo_valor)
-
-        self._campo_senha_gerente = QLineEdit()
-        self._campo_senha_gerente.setEchoMode(QLineEdit.EchoMode.Password)
-        formulario.addRow("Senha do gerente", self._campo_senha_gerente)
-
-        layout.addLayout(formulario)
-
-        botoes = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        botoes.button(QDialogButtonBox.StandardButton.Ok).setText("Dar baixa")
-        botoes.accepted.connect(self.accept)
-        botoes.rejected.connect(self.reject)
-        layout.addWidget(botoes)
-
-    def resultado(self) -> tuple[Decimal | None, str]:
-        valor = safe_decimal(self._campo_valor.text(), padrao=None)
-        senha_gerente = self._campo_senha_gerente.text().strip()
-        return valor, senha_gerente

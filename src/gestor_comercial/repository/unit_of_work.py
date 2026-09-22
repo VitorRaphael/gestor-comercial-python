@@ -9,6 +9,9 @@ from gestor_comercial.repository.caixa_repository import CaixaRepository
 from gestor_comercial.repository.categoria_repository import CategoriaRepository
 from gestor_comercial.repository.combo_item_repository import ComboItemRepository
 from gestor_comercial.repository.comanda_repository import ComandaRepository
+from gestor_comercial.repository.consumo_sessao_assinatura_repository import (
+    ConsumoSessaoAssinaturaRepository,
+)
 from gestor_comercial.repository.fila_impressao_repository import FilaImpressaoRepository
 from gestor_comercial.repository.funcionario_repository import FuncionarioRepository
 from gestor_comercial.repository.impressora_repository import ImpressoraRepository
@@ -54,6 +57,7 @@ class UnitOfWork:
         self.caixas = CaixaRepository(self.session)
         self.movimentos = MovimentoCaixaRepository(self.session)
         self.quitacoes = QuitacaoConsumoRepository(self.session)
+        self.assinaturas_consumo = ConsumoSessaoAssinaturaRepository(self.session)
         self.impressoras = ImpressoraRepository(self.session)
         self.fila_impressao = FilaImpressaoRepository(self.session)
         self.loja_config = LojaConfigRepository(self.session)

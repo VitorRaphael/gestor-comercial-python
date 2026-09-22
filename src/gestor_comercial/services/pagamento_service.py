@@ -11,14 +11,17 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+import uuid
 from datetime import datetime
 from decimal import ROUND_UP, Decimal
 
+from gestor_comercial.domain.consumo_sessao_assinatura import ConsumoSessaoAssinatura
 from gestor_comercial.domain.enums import FormaPagamento, StatusComanda
 from gestor_comercial.domain.funcionario import Funcionario
 from gestor_comercial.domain.pagamento import Pagamento
 from gestor_comercial.domain.quitacao_consumo import QuitacaoConsumo
 from gestor_comercial.repository.unit_of_work import UnitOfWork
+from gestor_comercial.services.assinatura import ler_assinatura
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.comanda_service import ComandaService
 from gestor_comercial.services.dinheiro import CENTAVOS, ZERO, dinheiro
@@ -104,6 +107,45 @@ class ExtratoConsumo:
     quitacoes: list[QuitacaoConsumo]
 
 
+@dataclass(frozen=True)
+class ItemDaRetirada:
+    """Uma linha da discriminação no modal de detalhes da retirada."""
+
+    quantidade: int
+    descricao: str
+    preco_unitario: Decimal
+    preco_total: Decimal
+
+
+@dataclass(frozen=True)
+class SessaoDeRetirada:
+    """Uma retirada de consumo interno: o pagamento, os itens e a assinatura.
+
+    `traco_json` é `None` nos consumos lançados antes da assinatura existir
+    (autorizados por PIN). `ativa` é a retirada ainda não baixada.
+    """
+
+    pagamento_id: int
+    id_sessao: str | None
+    data_hora: datetime
+    funcionario_nome: str
+    valor: Decimal
+    itens: list[ItemDaRetirada]
+    traco_json: str | None
+    ativa: bool
+
+    @property
+    def identificador(self) -> str:
+        """O "#XXXX" do cartão: o começo do UUID, ou o nº do pagamento nos antigos."""
+        if self.id_sessao:
+            return self.id_sessao[:4].upper()
+        return f"{self.pagamento_id:04d}"
+
+    @property
+    def quantidade_itens(self) -> int:
+        return sum(item.quantidade for item in self.itens)
+
+
 @transacional
 class PagamentoService:
     """Pagamento parcial/múltiplo, troco e quitação de consumo interno (§3.7, §3.8)."""
@@ -133,10 +175,16 @@ class PagamentoService:
         comanda_id: int,
         forma: FormaPagamento,
         valor_recebido: Decimal,
-        pin_gerente: str | None = None,
         funcionario_consumo_id: int | None = None,
+        traco_assinatura: str | None = None,
     ) -> ResumoPagamento:
-        """Lança um pagamento na comanda e fecha a conta se ela ficar quitada."""
+        """Lança um pagamento na comanda e fecha a conta se ela ficar quitada.
+
+        Consumo interno exige `traco_assinatura` — o JSON do traço do
+        colaborador (`services/assinatura.py`). É ela, e não mais o PIN do
+        gerente, que prova quem pegou; o pagamento e a assinatura entram no
+        mesmo commit.
+        """
         # DIVERGÊNCIA do Java: lá o endpoint aceitava pagamento sem sessão. Num
         # caixa físico, todo dinheiro recebido tem que ter um responsável.
         self.auth.usuario_atual()
@@ -165,8 +213,10 @@ class PagamentoService:
             raise RegraDeNegocioError("O valor do pagamento deve ser maior que zero.")
 
         consumidor = None
+        assinatura = None
         if forma is FormaPagamento.CONSUMO_INTERNO:
-            consumidor = self._autorizar_consumo_interno(pin_gerente, funcionario_consumo_id)
+            consumidor = self._consumidor(funcionario_consumo_id)
+            assinatura = ler_assinatura(traco_assinatura)
 
         total_conta = self.comandas.calcular_total_a_pagar(comanda_id)
         if total_conta <= ZERO:
@@ -212,6 +262,16 @@ class PagamentoService:
                 dinheiro(consumidor.saldo_devedor) + valor_lancado
             )
             self.uow.funcionarios.salvar(consumidor)
+            self.uow.assinaturas_consumo.salvar(
+                ConsumoSessaoAssinatura(
+                    id_funcionario=consumidor.id,
+                    id_sessao=str(uuid.uuid4()),
+                    data_hora=pagamento.registrado_em,
+                    valor_total_sessao=valor_lancado,
+                    traco_json=assinatura.para_json(),
+                    id_pagamento=pagamento.id,
+                )
+            )
 
         total_pago = self.calcular_total_pago(comanda_id)
         restante_final = dinheiro(total_conta - total_pago)
@@ -323,6 +383,55 @@ class PagamentoService:
             quitacoes=self.uow.quitacoes.listar_por_funcionario(funcionario_id),
         )
 
+    def sessoes_de_retirada(self, funcionario_id: int) -> list[SessaoDeRetirada]:
+        """As retiradas do funcionário, da mais nova para a mais antiga.
+
+        Ativas e já baixadas juntas: a tela separa pelo `ativa`. Montadas de
+        uma vez (lição do §9.4), para a tela não voltar ao banco ao repintar.
+        """
+        self.auth.exigir_gerente()  # §3.1/§3.8
+        funcionario = self.funcionarios.buscar(funcionario_id)
+        sessoes = []
+        for consumo in self.uow.pagamentos.listar_consumos_do_funcionario(funcionario_id):
+            assinatura = consumo.assinatura
+            itens = [
+                ItemDaRetirada(
+                    quantidade=item.quantidade,
+                    descricao=item.produto.nome,
+                    preco_unitario=dinheiro(item.preco_unit_congelado),
+                    preco_total=dinheiro(dinheiro(item.preco_unit_congelado) * item.quantidade),
+                )
+                for item in self.uow.itens.listar_por_comanda(consumo.comanda_id)
+                if not item.cancelado
+            ]
+            sessoes.append(
+                SessaoDeRetirada(
+                    pagamento_id=consumo.id,
+                    id_sessao=None if assinatura is None else assinatura.id_sessao,
+                    data_hora=consumo.registrado_em,
+                    funcionario_nome=funcionario.nome,
+                    valor=dinheiro(consumo.valor),
+                    itens=itens,
+                    traco_json=None if assinatura is None else assinatura.traco_json,
+                    ativa=self._pendente(consumo) > ZERO,
+                )
+            )
+        sessoes.reverse()
+        return sessoes
+
+    def dar_baixa_no_consumo(self, funcionario_id: int, pin_gerente: str) -> None:
+        """Baixa TUDO que o funcionário tem em aberto, numa transação só.
+
+        As retiradas não são apagadas: viram histórico pelo `valor_quitado`,
+        com itens e assinatura intactos, e a baixa fica num `QuitacaoConsumo`
+        com o gerente que autorizou.
+        """
+        self.auth.exigir_gerente()
+        saldo = self._somar_pendente(
+            self.uow.pagamentos.listar_consumos_do_funcionario(funcionario_id)
+        )
+        self.quitar(funcionario_id, saldo, pin_gerente)
+
     def quitar(self, funcionario_id: int, valor: Decimal, pin_gerente: str) -> Decimal:
         """Abate a dívida do mais antigo para o mais novo e devolve o saldo que sobrou."""
         funcionario = self.funcionarios.buscar(funcionario_id)
@@ -376,18 +485,11 @@ class PagamentoService:
     # Apoio
     # ------------------------------------------------------------------
 
-    def _autorizar_consumo_interno(
-        self, pin_gerente: str | None, funcionario_consumo_id: int | None
-    ) -> Funcionario:
-        """Consumo interno vira dívida de alguém, então precisa de gerente e de dono (§3.7)."""
-        if not isinstance(pin_gerente, str) or not pin_gerente.strip():
-            raise RegraDeNegocioError(
-                "Consumo interno precisa do PIN do gerente para ser autorizado."
-            )
+    def _consumidor(self, funcionario_consumo_id: int | None) -> Funcionario:
+        """Consumo interno vira dívida de alguém, então precisa de dono (§3.7)."""
         if funcionario_consumo_id is None:
             raise RegraDeNegocioError("Informe qual funcionário está consumindo.")
 
-        self.auth.validar_pin_gerente(pin_gerente)
         funcionario = self.funcionarios.buscar(funcionario_consumo_id)
         if not funcionario.ativo:
             raise RegraDeNegocioError(

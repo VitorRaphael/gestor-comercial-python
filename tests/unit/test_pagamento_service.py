@@ -5,6 +5,7 @@ import pytest
 
 from gestor_comercial.domain.enums import FormaPagamento, StatusComanda, StatusMesa
 from gestor_comercial.domain.produto import Produto
+from gestor_comercial.services.assinatura import ler_assinatura
 from gestor_comercial.services.comanda_service import ComandaService
 from gestor_comercial.services.exceptions import (
     AcessoNegadoError,
@@ -16,6 +17,7 @@ from gestor_comercial.services.pagamento_service import PagamentoService
 from tests.conftest import PIN_ATENDENTE, PIN_GERENTE
 
 PIN_INEXISTENTE = "999999"
+ASSINATURA = '{"v":1,"w":400,"h":150,"tracos":[[[10,90],[50,60],[90,110],[130,70]]]}'
 
 
 @pytest.fixture
@@ -61,7 +63,7 @@ def lancar_consumo(comandas, pagamentos, produto, quantidade, funcionario_id):
         comanda.id,
         FormaPagamento.CONSUMO_INTERNO,
         Decimal(produto.preco) * quantidade,
-        pin_gerente=PIN_GERENTE,
+        traco_assinatura=ASSINATURA,
         funcionario_consumo_id=funcionario_id,
     )
     return comanda
@@ -283,7 +285,7 @@ def test_registrar_consumo_interno_gera_divida_do_funcionario(pagamentos, conta_
         conta_36.id,
         FormaPagamento.CONSUMO_INTERNO,
         Decimal("36.00"),
-        pin_gerente=PIN_GERENTE,
+        traco_assinatura=ASSINATURA,
         funcionario_consumo_id=funcionario.id,
     )
 
@@ -301,7 +303,7 @@ def test_registrar_consumo_interno_parcial_soma_so_o_lancado(pagamentos, conta_3
         conta_36.id,
         FormaPagamento.CONSUMO_INTERNO,
         Decimal("10.00"),
-        pin_gerente=PIN_GERENTE,
+        traco_assinatura=ASSINATURA,
         funcionario_consumo_id=funcionario.id,
     )
     resumo = pagamentos.registrar(conta_36.id, FormaPagamento.DINHEIRO, Decimal("26.00"))
@@ -311,36 +313,12 @@ def test_registrar_consumo_interno_parcial_soma_so_o_lancado(pagamentos, conta_3
     assert funcionario.saldo_devedor == Decimal("10.00")
 
 
-def test_registrar_consumo_interno_sem_pin_de_gerente(pagamentos, conta_36, funcionario):
+def test_registrar_consumo_interno_sem_assinatura_e_recusado(pagamentos, conta_36, funcionario):
     with pytest.raises(RegraDeNegocioError):
         pagamentos.registrar(
             conta_36.id,
             FormaPagamento.CONSUMO_INTERNO,
             Decimal("36.00"),
-            funcionario_consumo_id=funcionario.id,
-        )
-
-
-def test_registrar_consumo_interno_com_pin_invalido_e_bloqueado(pagamentos, conta_36, funcionario, atendente):
-    # Sem PIN pessoal por Usuario (§3.13): não há mais "PIN do atendente sem
-    # privilégio de gerente" — só PIN válido (Operacional/Master) ou inválido.
-    with pytest.raises(NaoAutorizadoError):
-        pagamentos.registrar(
-            conta_36.id,
-            FormaPagamento.CONSUMO_INTERNO,
-            Decimal("36.00"),
-            pin_gerente="000000",
-            funcionario_consumo_id=funcionario.id,
-        )
-
-
-def test_registrar_consumo_interno_com_pin_inexistente(pagamentos, conta_36, funcionario):
-    with pytest.raises(NaoAutorizadoError):
-        pagamentos.registrar(
-            conta_36.id,
-            FormaPagamento.CONSUMO_INTERNO,
-            Decimal("36.00"),
-            pin_gerente=PIN_INEXISTENTE,
             funcionario_consumo_id=funcionario.id,
         )
 
@@ -351,7 +329,7 @@ def test_registrar_consumo_interno_sem_funcionario(pagamentos, conta_36, funcion
             conta_36.id,
             FormaPagamento.CONSUMO_INTERNO,
             Decimal("36.00"),
-            pin_gerente=PIN_GERENTE,
+            traco_assinatura=ASSINATURA,
         )
 
 
@@ -361,7 +339,7 @@ def test_registrar_consumo_interno_com_funcionario_inexistente(pagamentos, conta
             conta_36.id,
             FormaPagamento.CONSUMO_INTERNO,
             Decimal("36.00"),
-            pin_gerente=PIN_GERENTE,
+            traco_assinatura=ASSINATURA,
             funcionario_consumo_id=4242,
         )
 
@@ -376,7 +354,7 @@ def test_registrar_consumo_interno_com_funcionario_desativado(
             conta_36.id,
             FormaPagamento.CONSUMO_INTERNO,
             Decimal("36.00"),
-            pin_gerente=PIN_GERENTE,
+            traco_assinatura=ASSINATURA,
             funcionario_consumo_id=funcionario.id,
         )
 
@@ -635,3 +613,90 @@ def test_quitar_com_pin_inexistente(
 def test_quitar_de_funcionario_inexistente(pagamentos, gerente):
     with pytest.raises(RecursoNaoEncontradoError):
         pagamentos.quitar(4242, Decimal("5.00"), PIN_GERENTE)
+
+
+# ----------------------------------------------------------------------
+# Assinatura manuscrita do consumo interno (substitui o PIN do gerente)
+# ----------------------------------------------------------------------
+
+
+def test_consumo_interno_nao_pede_mais_pin_e_grava_a_assinatura(pagamentos, conta_36, funcionario, uow):
+    pagamentos.registrar(
+        conta_36.id,
+        FormaPagamento.CONSUMO_INTERNO,
+        Decimal("36.00"),
+        funcionario_consumo_id=funcionario.id,
+        traco_assinatura=ASSINATURA,
+    )
+
+    (pagamento,) = pagamentos.listar_por_comanda(conta_36.id)
+    assinatura = pagamento.assinatura
+    assert assinatura.id_funcionario == funcionario.id
+    assert len(assinatura.id_sessao) == 36
+    assert assinatura.valor_total_sessao == Decimal("36.00")
+    assert ler_assinatura(assinatura.traco_json) == ler_assinatura(ASSINATURA)
+
+
+def test_assinatura_corrompida_nao_grava_nada(pagamentos, conta_36, funcionario, uow):
+    with pytest.raises(RegraDeNegocioError, match="corrompida"):
+        pagamentos.registrar(
+            conta_36.id,
+            FormaPagamento.CONSUMO_INTERNO,
+            Decimal("36.00"),
+            funcionario_consumo_id=funcionario.id,
+            traco_assinatura="{nao e json",
+        )
+    assert pagamentos.listar_por_comanda(conta_36.id) == []
+
+
+def test_assinatura_sem_traco_e_recusada():
+    with pytest.raises(RegraDeNegocioError, match="precisa da assinatura"):
+        ler_assinatura('{"v":1,"w":400,"h":150,"tracos":[[]]}')
+
+
+def test_assinatura_ida_e_volta_pelo_json_nao_perde_ponto():
+    original = ler_assinatura(ASSINATURA)
+    assert ler_assinatura(original.para_json()) == original
+
+
+def test_sessoes_de_retirada_trazem_itens_e_traco(pagamentos, comandas, funcionario, burger, caixa_aberto):
+    lancar_consumo(comandas, pagamentos, burger, 2, funcionario.id)
+
+    (sessao,) = pagamentos.sessoes_de_retirada(funcionario.id)
+    assert sessao.ativa is True
+    assert sessao.valor == Decimal("24.00")
+    assert sessao.quantidade_itens == 2
+    (item,) = sessao.itens
+    assert (item.descricao, item.preco_unitario, item.preco_total) == (
+        "X-Salada",
+        Decimal("12.00"),
+        Decimal("24.00"),
+    )
+    assert sessao.traco_json == ler_assinatura(ASSINATURA).para_json()
+
+
+def test_dar_baixa_no_consumo_arquiva_tudo_e_preserva_a_assinatura(
+    pagamentos, comandas, funcionario, burger, caixa_aberto, uow
+):
+    lancar_consumo(comandas, pagamentos, burger, 1, funcionario.id)
+    lancar_consumo(comandas, pagamentos, burger, 2, funcionario.id)
+
+    pagamentos.dar_baixa_no_consumo(funcionario.id, PIN_GERENTE)
+
+    assert pagamentos.calcular_saldo_devedor(funcionario.id) == Decimal("0.00")
+    assert funcionario.saldo_devedor == Decimal("0.00")
+    sessoes = pagamentos.sessoes_de_retirada(funcionario.id)
+    assert [s.ativa for s in sessoes] == [False, False]
+    assert all(s.traco_json for s in sessoes), "o histórico guarda a assinatura"
+    (quitacao,) = uow.quitacoes.listar_por_funcionario(funcionario.id)
+    assert quitacao.valor_quitado == Decimal("36.00")
+
+
+def test_dar_baixa_com_pin_errado_nao_mexe_em_nada(pagamentos, comandas, funcionario, burger, caixa_aberto):
+    lancar_consumo(comandas, pagamentos, burger, 1, funcionario.id)
+
+    with pytest.raises(NaoAutorizadoError):
+        pagamentos.dar_baixa_no_consumo(funcionario.id, PIN_INEXISTENTE)
+
+    assert pagamentos.calcular_saldo_devedor(funcionario.id) == Decimal("12.00")
+    assert pagamentos.sessoes_de_retirada(funcionario.id)[0].ativa is True

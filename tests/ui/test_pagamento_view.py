@@ -36,8 +36,10 @@ import gestor_comercial
 from gestor_comercial.domain.enums import FormaPagamento, StatusComanda
 from gestor_comercial.domain.mesa import Mesa
 from gestor_comercial.domain.produto import Produto
+from gestor_comercial.services.assinatura import ler_assinatura
 from gestor_comercial.ui.theme.controller import ThemeController
 from gestor_comercial.ui.views.pagamento_view import PagamentoView
+from gestor_comercial.ui.widgets.modal_assinatura_manuscrita import ModalAssinaturaManuscrita
 from gestor_comercial.ui.widgets.pin_pad_dialog import PinPadDialog
 from tests.conftest import PIN_GERENTE
 
@@ -239,30 +241,36 @@ def test_o_erro_do_service_aparece_na_tela(tela, comandas, conta):
     assert "ainda está aberta" in tela._label_erro.text()
 
 
-def test_o_consumo_pede_o_pin_e_entra_no_saldo_do_funcionario(qapp, uow, tela, garcom, pagamentos, gerente):
-    """O fluxo restrito: PIN do gerente, funcionário escolhido, valor no saldo
-    devedor dele — e nada disso entra no dinheiro do caixa."""
+def test_o_consumo_pede_a_assinatura_sem_pin_e_entra_no_saldo(qapp, uow, tela, garcom, pagamentos, gerente):
+    """O fluxo do consumo: funcionário escolhido, assinatura manuscrita no
+    lugar do PIN, valor no saldo devedor dele e o traço gravado."""
     tela._escolher_forma(FormaPagamento.CONSUMO_INTERNO)
     indice = tela._combo_funcionario.findData(garcom.id)
     tela._combo_funcionario.setCurrentIndex(indice)
 
-    with _respondendo_ao_pin(PIN_GERENTE):
+    vistos = []
+    with _respondendo_a_assinatura(assinar=True, vistos=vistos):
         tela._botao_registrar.click()
 
+    assert vistos == [ModalAssinaturaManuscrita], "nenhum cartão de PIN pode abrir"
     assert tela._label_erro.text() == ""
     assert pagamentos.calcular_saldo_devedor(garcom.id) == Decimal("131.50")
+    (sessao,) = pagamentos.sessoes_de_retirada(garcom.id)
+    assert sessao.traco_json is not None
+    assert ler_assinatura(sessao.traco_json).tracos == TRACO_DE_TESTE
+
+
+TRACO_DE_TESTE = (((20, 100), (60, 80), (100, 120), (140, 90)), ((160, 110), (200, 105)))
 
 
 @contextmanager
-def _respondendo_ao_pin(pin: str | None):
-    """Responde ao cartão de PIN que abrir dentro do bloco.
+def _respondendo_a_assinatura(*, assinar: bool, vistos: list | None = None):
+    """Responde ao modal que abrir dentro do bloco: assina e confirma, ou desiste.
 
-    `pin` de verdade digita e confirma; `None` desiste pelo ✕. O relógio tem
-    teto (um teste que espera um diálogo que nunca vem TRAVA a suíte dentro do
-    `exec()`, a lição do §9.14) e é **sempre parado no fim do bloco**: um
-    `QTimer` de 0ms esquecido continua disparando pelo resto da sessão, rouba o
-    foco de outros diálogos e queima CPU — foi exatamente o que fez a suíte de
-    UI ficar lenta e o teste de foco do cartão de impressora piscar.
+    O relógio tem teto (um teste que espera um diálogo que nunca vem TRAVA a
+    suíte dentro do `exec()`, a lição do §9.14) e é **sempre parado no fim do
+    bloco** — um `QTimer` de 0ms esquecido rouba o foco de outros diálogos.
+    Um cartão de PIN que apareça é anotado e recusado: não pode existir mais.
     """
     relogio = QTimer()
     voltas = {"n": 0}
@@ -270,13 +278,19 @@ def _respondendo_ao_pin(pin: str | None):
     def procurar() -> None:
         voltas["n"] += 1
         modal = QApplication.activeModalWidget()
-        if isinstance(modal, PinPadDialog):
+        if modal is not None and vistos is not None:
+            vistos.append(type(modal))
+        if isinstance(modal, ModalAssinaturaManuscrita):
             relogio.stop()
-            if pin is None:
+            if not assinar:
                 modal.reject()
-            else:
-                modal._pin = pin
-                modal._confirmar()
+                return
+            modal.pad._tracos = [list(traco) for traco in TRACO_DE_TESTE]
+            modal.pad.assinatura_alterada.emit(True)
+            modal.botao_confirmar.click()
+        elif isinstance(modal, PinPadDialog):
+            relogio.stop()
+            modal.reject()
         elif voltas["n"] > 200:
             relogio.stop()
 
@@ -289,11 +303,11 @@ def _respondendo_ao_pin(pin: str | None):
         relogio.deleteLater()
 
 
-def test_o_consumo_sem_pin_nao_registra(qapp, uow, tela, garcom, conta):
-    """Desistir do PIN volta para a tela com a conta intacta."""
+def test_o_consumo_sem_assinatura_nao_registra(qapp, uow, tela, garcom, conta):
+    """Desistir da assinatura volta para a tela com a conta intacta."""
     tela._escolher_forma(FormaPagamento.CONSUMO_INTERNO)
 
-    with _respondendo_ao_pin(None):
+    with _respondendo_a_assinatura(assinar=False):
         tela._botao_registrar.click()
 
     uow.session.rollback()

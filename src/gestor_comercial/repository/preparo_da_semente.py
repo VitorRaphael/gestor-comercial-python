@@ -51,6 +51,7 @@ TABELAS_DE_MOVIMENTO = (
     "comandas",
     "itens_comanda",
     "pagamentos",
+    "consumo_sessao_assinaturas",
     "movimentos_caixa",
     "quitacoes_consumo",
     "fila_impressao_pendente",

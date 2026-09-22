@@ -2,6 +2,7 @@ from gestor_comercial.domain.caixa import Caixa
 from gestor_comercial.domain.categoria import Categoria
 from gestor_comercial.domain.combo_item import ComboItem
 from gestor_comercial.domain.comanda import Comanda
+from gestor_comercial.domain.consumo_sessao_assinatura import ConsumoSessaoAssinatura
 from gestor_comercial.domain.fila_impressao import ItemFilaImpressao
 from gestor_comercial.domain.funcionario import Funcionario
 from gestor_comercial.domain.impressora import Impressora
@@ -21,6 +22,7 @@ __all__ = [
     "Categoria",
     "ComboItem",
     "Comanda",
+    "ConsumoSessaoAssinatura",
     "Funcionario",
     "ItemFilaImpressao",
     "Impressora",

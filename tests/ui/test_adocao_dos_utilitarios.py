@@ -48,8 +48,11 @@ ARQUIVO_DO_HELPER = "modais.py"
 # produto, cujo "Sim/Não" era `QMessageBox.question` e não passava por aqui, e
 # UM PIN só (`_pedir_senha_master`), que os três cartões chamam; −1 com o cartão
 # de impressora do §9.19: cadastrar e editar abriam cada um o seu diálogo, e
-# passaram a abrir o MESMO cartão por um site só (`_abrir_cadastro`).
-SITES_ESPERADOS = 37
+# passaram a abrir o MESMO cartão por um site só (`_abrir_cadastro`); +2 com a
+# assinatura do consumo interno: a Gestão de Consumo abre o detalhe da retirada
+# e o PIN da baixa (a assinatura trocou o PIN do caixa e a própria Gestão trocou
+# o antigo modal de baixa, site por site).
+SITES_ESPERADOS = 39
 
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
 

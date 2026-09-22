@@ -22,3 +22,4 @@ class Pagamento(Base):
 
     comanda: Mapped["Comanda"] = relationship(back_populates="pagamentos")
     funcionario_consumo: Mapped["Funcionario | None"] = relationship(back_populates="pagamentos_consumo")
+    assinatura: Mapped["ConsumoSessaoAssinatura | None"] = relationship(back_populates="pagamento")

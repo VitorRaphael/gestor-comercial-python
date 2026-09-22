@@ -57,6 +57,7 @@ def banco(tmp_path, banco_migrado) -> Path:
             INSERT INTO comandas (id, status, aberta_em, mesa_id, caixa_id, usuario_id) VALUES (90, 'ABERTA', '2026-09-20 18:00', 1, 40, 7);
             INSERT INTO itens_comanda (id, quantidade, preco_unit_congelado, cancelado, comanda_id, produto_id) VALUES (300, 2, 30, 0, 90, 1);
             INSERT INTO pagamentos (id, forma, valor, registrado_em, comanda_id, valor_quitado, funcionario_consumo_id) VALUES (55, 'CONSUMO_INTERNO', 18.50, '2026-09-20 19:00', 90, 18.50, 3);
+            INSERT INTO consumo_sessao_assinaturas (id, id_funcionario, id_sessao, data_hora, valor_total_sessao, traco_json, id_pagamento) VALUES (2, 3, 'a1b2', '2026-09-20 19:00', 18.50, '{}', 55);
             INSERT INTO movimentos_caixa (id, tipo, valor, registrado_em, caixa_id, usuario_id) VALUES (12, 'SANGRIA', 50, '2026-09-20 20:00', 40, 7);
             INSERT INTO quitacoes_consumo (id, valor_quitado, quitado_em, funcionario_id, autorizado_por_id) VALUES (5, 10, '2026-09-20 21:00', 3, 7);
             INSERT INTO fila_impressao_pendente (id, impressora_id, documento, descricao, criado_em, tentativas) VALUES (8, 1, 'x', 'Comanda', '2026-09-20 18:01', 1);
@@ -78,6 +79,7 @@ def test_apaga_toda_tabela_de_venda(banco):
         "fila_impressao_pendente": 1,
         "quitacoes_consumo": 1,
         "movimentos_caixa": 1,
+        "consumo_sessao_assinaturas": 1,
         "pagamentos": 1,
         "itens_comanda": 1,
         "comandas": 1,
