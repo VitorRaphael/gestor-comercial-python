@@ -19,8 +19,8 @@ O que cobrem, em ordem:
 7. **a lista do Windows** — em thread, sem bloquear, sem trocar o texto;
 8. **o teclado**; 9. **nada espremido**; 10. **o ciclo de vida**.
 
-E o formato do cupom do §9.22 (colunas por linha, bobina gravada e espessura
-da letra), na seção 4b: a bobina reabre como foi GRAVADA, as colunas são
+E o formato do cupom do §9.22/§9.30 (colunas por linha, bobina gravada e
+tamanho da fonte — 2x · 3x · 4x, no lugar da espessura), na seção 4b: a bobina reabre como foi GRAVADA, as colunas são
 livres em qualquer bobina, trocar de bobina só sugere, e o resumo diz as cinco
 coisas a cada clique.
 """
@@ -68,7 +68,6 @@ from gestor_comercial.ui.widgets.impressora_dialog import (
     Bobina,
     Conexao,
     DadosImpressora,
-    Espessura,
     ImpressoraDialog,
     ModoDoCadastro,
     bobina_da_impressora,
@@ -322,10 +321,10 @@ def test_o_cadastro_abre_em_arquivo_80mm_e_ativo(abrir):
     assert modal._bobina is Bobina.MM80
     assert modal._situacao.interruptor.ligado is True
     assert modal._campo_nome.text() == ""
-    # O resto do default de `criar_impressora`: 48 colunas e letra fina.
+    # O resto do default de `criar_impressora`: 48 colunas e destaque em 2x.
     assert [c for c, b in modal._botoes_colunas.items() if b.property("selecionada")] == [48]
-    assert modal._botoes_espessura[Espessura.FINA].property("selecionada") is True
-    assert (modal.resultado().colunas, modal.resultado().bobina_mm, modal.resultado().letra_grossa) == (48, 80, False)
+    assert [e for e, b in modal._botoes_escala.items() if b.property("selecionada")] == [2]
+    assert (modal.resultado().colunas, modal.resultado().bobina_mm, modal.resultado().escala_fonte) == (48, 80, 2)
 
 
 @pytest.mark.parametrize(("ha_padrao", "uso"), [(False, USO_RECIBO), (True, USO_PRODUCAO)])
@@ -373,21 +372,21 @@ def test_a_edicao_abre_no_card_e_com_o_campo_certos(abrir, chave, card, texto):
 
 @pytest.mark.parametrize("chave", list(CADASTROS))
 @pytest.mark.parametrize(
-    ("colunas", "bobina_mm", "letra_grossa"),
+    ("colunas", "bobina_mm", "escala_fonte"),
     # As quatro do seletor, a 42 que ficou sem botão, e as combinações
     # "cruzadas" que só a bobina GRAVADA devolve (58mm com 48 e com 80).
-    [(32, 58, False), (42, 80, True), (48, 58, True), (48, 80, False), (64, 80, True), (80, 58, False), (80, 80, True)],
+    [(32, 58, 2), (42, 80, 3), (48, 58, 4), (48, 80, 2), (64, 80, 3), (80, 58, 4), (80, 80, 2)],
 )
-def test_abrir_e_salvar_sem_mexer_devolve_o_mesmo_cadastro(abrir, qapp, chave, colunas, bobina_mm, letra_grossa):
+def test_abrir_e_salvar_sem_mexer_devolve_o_mesmo_cadastro(abrir, qapp, chave, colunas, bobina_mm, escala_fonte):
     """A não-regressão que mais importa. Nenhum dado some por ter aberto a tela:
     nem o baudrate que o mockup não mostra, nem as 42 colunas que o seletor
     não tem, nem a bobina que a dedução de antes chamaria de outra coisa, nem a
-    letra grossa. Roda também com a lista do Windows já carregada, que é o que
+    escala da fonte. Roda também com a lista do Windows já carregada, que é o que
     acontece de verdade."""
     campos = dict(CADASTROS[chave])
     tipo = campos.pop("tipo")
     modal = abrir(
-        _impressora(tipo, colunas=colunas, bobina_mm=bobina_mm, letra_grossa=letra_grossa, **campos),
+        _impressora(tipo, colunas=colunas, bobina_mm=bobina_mm, escala_fonte=escala_fonte, **campos),
         listar=_listar,
     )
     modal.show()
@@ -396,7 +395,7 @@ def test_abrir_e_salvar_sem_mexer_devolve_o_mesmo_cadastro(abrir, qapp, chave, c
     dados = modal.resultado()
 
     assert dados.tipo_conexao is tipo
-    assert (dados.colunas, dados.bobina_mm, dados.letra_grossa) == (colunas, bobina_mm, letra_grossa)
+    assert (dados.colunas, dados.bobina_mm, dados.escala_fonte) == (colunas, bobina_mm, escala_fonte)
     assert (dados.nome, dados.ativa, dados.padrao) == ("Caixa 01", True, True)
     for campo, valor in campos.items():
         assert getattr(dados, campo) == valor, campo
@@ -528,7 +527,7 @@ def test_o_resumo_acompanha_nome_conexao_e_bobina(abrir):
     _clicar(modal._cards[Conexao.LOCAL])
     _clicar(modal._botoes_bobina[Bobina.MM58])
 
-    assert modal._resumo.texto_completo() == "Caixa 01 · USB · 58mm · 32 col. · letra fina"
+    assert modal._resumo.texto_completo() == "Caixa 01 · USB · 58mm · 32 col. · fonte 2x"
     assert _rotulos(modal, "impDialogResumoRotulo") == ["RESUMO DA CONFIGURAÇÃO"]
 
 
@@ -550,7 +549,7 @@ def test_editar_um_nome_mais_longo_que_o_teto_nao_o_corta(abrir):
 
 
 # ---------------------------------------------------------------------------
-# 4b. O formato do cupom (§9.22): colunas, bobina gravada e espessura
+# 4b. O formato do cupom (§9.22, §9.30): colunas, bobina gravada e escala
 # ---------------------------------------------------------------------------
 
 
@@ -558,9 +557,9 @@ def _colunas_acesas(modal: ImpressoraDialog) -> list[int]:
     return [colunas for colunas, botao in modal._botoes_colunas.items() if botao.property("selecionada")]
 
 
-def _formato(modal: ImpressoraDialog) -> tuple[int, int, bool]:
+def _formato(modal: ImpressoraDialog) -> tuple[int, int, int]:
     dados = modal.resultado()
-    return dados.colunas, dados.bobina_mm, dados.letra_grossa
+    return dados.colunas, dados.bobina_mm, dados.escala_fonte
 
 
 def test_o_seletor_tem_as_quatro_larguras_decididas():
@@ -584,7 +583,7 @@ def test_as_colunas_sao_livres_na_bobina_de_58mm(abrir, colunas):
 
     _clicar(modal._botoes_colunas[colunas])
 
-    assert _formato(modal) == (colunas, 58, False)
+    assert _formato(modal) == (colunas, 58, 2)
     assert _colunas_acesas(modal) == [colunas]
     assert modal._bobina is Bobina.MM58, "escolher colunas não pode mexer na bobina"
 
@@ -594,7 +593,7 @@ def test_80mm_sugere_48_a_quem_vem_da_58(abrir):
 
     _clicar(modal._botoes_bobina[Bobina.MM80])
 
-    assert _formato(modal) == (48, 80, False)
+    assert _formato(modal) == (48, 80, 2)
     assert _colunas_acesas(modal) == [48]
 
 
@@ -604,7 +603,7 @@ def test_58mm_sugere_32_mesmo_para_quem_escolheu_80(abrir):
 
     _clicar(modal._botoes_bobina[Bobina.MM58])
 
-    assert _formato(modal) == (32, 58, False)
+    assert _formato(modal) == (32, 58, 2)
 
 
 def test_cada_bobina_lembra_as_colunas_que_tinha(abrir):
@@ -628,7 +627,7 @@ def test_clicar_a_bobina_ja_escolhida_nao_mexe_nas_colunas(abrir):
 
     _clicar(modal._botoes_bobina[Bobina.MM80])
 
-    assert _formato(modal) == (80, 80, False)
+    assert _formato(modal) == (80, 80, 2)
 
 
 def test_uma_largura_sem_botao_abre_sem_botao_aceso_e_volta_intacta(abrir):
@@ -642,7 +641,7 @@ def test_uma_largura_sem_botao_abre_sem_botao_aceso_e_volta_intacta(abrir):
     _clicar(modal._botoes_bobina[Bobina.MM58])
     _clicar(modal._botoes_bobina[Bobina.MM80])
 
-    assert _formato(modal) == (42, 80, False)
+    assert _formato(modal) == (42, 80, 2)
 
 
 def test_a_edicao_abre_na_bobina_gravada_e_nao_na_deduzida(abrir):
@@ -653,7 +652,7 @@ def test_a_edicao_abre_na_bobina_gravada_e_nao_na_deduzida(abrir):
     assert modal._bobina is Bobina.MM58
     assert modal._botoes_bobina[Bobina.MM58].property("selecionada") is True
     assert _colunas_acesas(modal) == [48]
-    assert _formato(modal) == (48, 58, False)
+    assert _formato(modal) == (48, 58, 2)
 
 
 @pytest.mark.parametrize(("bobina_mm", "colunas", "bobina"), [(None, 32, Bobina.MM58), (None, 48, Bobina.MM80), (76, 32, Bobina.MM58)])
@@ -663,31 +662,63 @@ def test_sem_bobina_valida_a_bobina_sai_das_colunas(bobina_mm, colunas, bobina):
     assert bobina_da_impressora(_impressora(colunas=colunas, bobina_mm=bobina_mm)) is bobina
 
 
-def test_a_edicao_abre_na_letra_gravada(abrir):
-    modal = abrir(_impressora(letra_grossa=True))
-
-    assert modal._botoes_espessura[Espessura.GROSSA].property("selecionada") is True
-    assert modal._botoes_espessura[Espessura.FINA].property("selecionada") is False
-    assert modal.resultado().letra_grossa is True
+def _escalas_acesas(modal: ImpressoraDialog) -> list[int]:
+    return [escala for escala, botao in modal._botoes_escala.items() if botao.property("selecionada")]
 
 
-def test_clicar_na_espessura_troca_a_letra(abrir):
+def test_o_seletor_tem_as_tres_escalas_inteiras():
+    """2x · 3x · 4x: o 2,5x pedido não existe no `GS !` do ESC/POS (§9.30)."""
+    assert modulo.ESCALAS_FONTE == (2, 3, 4)
+
+
+def test_cada_botao_de_escala_mostra_o_multiplicador_e_explica(abrir):
     modal = abrir()
 
-    _clicar(modal._botoes_espessura[Espessura.GROSSA])
-    assert modal.resultado().letra_grossa is True
-    assert modal._botoes_espessura[Espessura.GROSSA]._texto.property("selecionada") is True
-
-    _clicar(modal._botoes_espessura[Espessura.FINA])
-    assert modal.resultado().letra_grossa is False
-    assert modal._botoes_espessura[Espessura.GROSSA]._texto.property("selecionada") is False
+    assert [botao.text() for botao in modal._botoes_escala.values()] == ["2x", "3x", "4x"]
+    assert all(botao.toolTip() for botao in modal._botoes_escala.values())
+    assert all(botao.objectName() == "impDialogEscala" for botao in modal._botoes_escala.values())
 
 
-def test_cada_espessura_escreve_com_o_peso_que_promete(abrir):
-    """"Letras grossas" em negrito e "Letras finas" no normal, pelo QSS."""
+def test_a_espessura_saiu_do_cartao(abrir):
+    """"Letras finas"/"Letras grossas" não existem mais em lugar nenhum da tela."""
+    modal = abrir()
+    textos = [w.text() for w in modal.findChildren(QLabel)] + [w.text() for w in modal.findChildren(QPushButton)]
+
+    assert not any("Letras" in texto or "ESPESSURA" in texto for texto in textos)
+    assert "TAMANHO DA FONTE" in textos
+    assert not hasattr(modulo, "Espessura")
+
+
+@pytest.mark.parametrize("escala", [2, 3, 4])
+def test_a_edicao_abre_na_escala_gravada(abrir, escala):
+    modal = abrir(_impressora(escala_fonte=escala))
+
+    assert _escalas_acesas(modal) == [escala]
+    assert modal.resultado().escala_fonte == escala
+
+
+@pytest.mark.parametrize("bruta", [None, 1, 5, 8])
+def test_escala_fora_do_seletor_abre_em_2x(abrir, bruta):
+    """Impressora ainda não gravada chega com `None` (o default do ORM só vale
+    no INSERT); um valor mexido à mão, com um número sem botão. Nos dois casos
+    o cartão abre em 2x com o botão aceso, e nunca devolve ao service uma escala
+    que ele recusaria."""
+    modal = abrir(_impressora(escala_fonte=bruta))
+
+    assert _escalas_acesas(modal) == [2]
+    assert modal.resultado().escala_fonte == 2
+
+
+def test_clicar_na_escala_troca_e_acende_so_ela(abrir):
     modal = abrir()
 
-    assert [opcao._texto.property("espessura") for opcao in modal._botoes_espessura.values()] == ["fina", "grossa"]
+    _clicar(modal._botoes_escala[4])
+    assert modal.resultado().escala_fonte == 4
+    assert _escalas_acesas(modal) == [4]
+
+    _clicar(modal._botoes_escala[3])
+    assert modal.resultado().escala_fonte == 3
+    assert _escalas_acesas(modal) == [3]
 
 
 def test_o_resumo_do_mockup_sai_letra_por_letra(abrir):
@@ -696,9 +727,9 @@ def test_o_resumo_do_mockup_sai_letra_por_letra(abrir):
     modal._campo_nome.setText("Caixa 01")
     _clicar(modal._cards[Conexao.LOCAL])
     _clicar(modal._botoes_colunas[80])
-    _clicar(modal._botoes_espessura[Espessura.GROSSA])
+    _clicar(modal._botoes_escala[3])
 
-    assert modal._resumo.texto_completo() == "Caixa 01 · USB · 80mm · 80 col. · letra grossa"
+    assert modal._resumo.texto_completo() == "Caixa 01 · USB · 80mm · 80 col. · fonte 3x"
 
 
 def test_o_resumo_muda_a_cada_seletor(abrir):
@@ -710,30 +741,30 @@ def test_o_resumo_muda_a_cada_seletor(abrir):
     for gesto in (
         lambda: _clicar(modal._botoes_bobina[Bobina.MM58]),
         lambda: _clicar(modal._botoes_colunas[64]),
-        lambda: _clicar(modal._botoes_espessura[Espessura.GROSSA]),
+        lambda: _clicar(modal._botoes_escala[4]),
         lambda: _clicar(modal._cards[Conexao.REDE]),
     ):
         gesto()
         vistos.append(modal._resumo.texto_completo())
 
     assert vistos == [
-        "Caixa 01 · Arquivo · 80mm · 48 col. · letra fina",
-        "Caixa 01 · Arquivo · 58mm · 32 col. · letra fina",
-        "Caixa 01 · Arquivo · 58mm · 64 col. · letra fina",
-        "Caixa 01 · Arquivo · 58mm · 64 col. · letra grossa",
-        "Caixa 01 · Rede · 58mm · 64 col. · letra grossa",
+        "Caixa 01 · Arquivo · 80mm · 48 col. · fonte 2x",
+        "Caixa 01 · Arquivo · 58mm · 32 col. · fonte 2x",
+        "Caixa 01 · Arquivo · 58mm · 64 col. · fonte 2x",
+        "Caixa 01 · Arquivo · 58mm · 64 col. · fonte 4x",
+        "Caixa 01 · Rede · 58mm · 64 col. · fonte 4x",
     ]
 
 
 def test_o_formato_nao_mexe_no_veredito_nem_no_uso(abrir):
-    """Aparência do papel, e só: colunas e letra não ligam nem desligam o
+    """Aparência do papel, e só: colunas e escala não ligam nem desligam o
     botão, nem mudam o uso ou a situação."""
     modal = abrir(outra_padrao_ativa=True)
     modal._campo_nome.setText("Cozinha")
     antes = (_veredito(modal), modal.resultado().padrao, modal.resultado().ativa)
 
     _clicar(modal._botoes_colunas[80])
-    _clicar(modal._botoes_espessura[Espessura.GROSSA])
+    _clicar(modal._botoes_escala[4])
     _clicar(modal._botoes_bobina[Bobina.MM58])
 
     assert (_veredito(modal), modal.resultado().padrao, modal.resultado().ativa) == antes
@@ -871,7 +902,7 @@ def test_os_parametros_sao_os_kwargs_do_service():
         False,
         False,
         bobina_mm=58,
-        letra_grossa=True,
+        escala_fonte=3,
         porta_serial="COM3",
         baudrate=9600,
     )
@@ -887,7 +918,7 @@ def test_os_parametros_sao_os_kwargs_do_service():
         "caminho_arquivo": None,
         "colunas": 32,
         "bobina_mm": 58,
-        "letra_grossa": True,
+        "escala_fonte": 3,
         "ativa": False,
         "padrao": False,
     }
@@ -1193,7 +1224,7 @@ def test_nada_fica_espremido(qapp, com_fonte, claro, modo, conexao, ativa):
 
     Roda com a impressora DESLIGADA também (§9.22): o §9.19 só media "Impressora
     ativa", e "Impressora desativada" saía cortada no cartão de 600px sem
-    nenhum teste ver. "Letras grossas" é a outra frase que manda na largura.
+    nenhum teste ver.
     """
     com_fonte.alternar_para(claro)
     janela = QWidget()
@@ -1209,7 +1240,7 @@ def test_nada_fica_espremido(qapp, com_fonte, claro, modo, conexao, ativa):
     modal._campo_nome.setText("C")  # o veredito mais largo que o nome produz
     for _ in range(3):
         qapp.processEvents()
-    larguras_espessura = [opcao.width() for opcao in modal._botoes_espessura.values()]
+    larguras_escala = [botao.width() for botao in modal._botoes_escala.values()]
 
     medidas = [
         w
@@ -1232,16 +1263,15 @@ def test_nada_fica_espremido(qapp, com_fonte, claro, modo, conexao, ativa):
     janela.deleteLater()
     assert not apertadas, f"espremido (tem, pede): {apertadas}"
     assert altura <= 728, f"o cartão mede {altura}px de altura"
-    # Os dois segmentos da espessura do mesmo tamanho, como no mockup: a 680px
-    # nada espremia, mas "Letras grossas" levava 29px a mais que a vizinha.
-    assert max(larguras_espessura) - min(larguras_espessura) <= 1, larguras_espessura
+    # Os três segmentos da escala do mesmo tamanho, como os das colunas.
+    assert max(larguras_escala) - min(larguras_escala) <= 1, larguras_escala
 
 
 @pytest.mark.parametrize("largura", [ImpressoraDialog.LARGURA_CARTAO_PX, 680])
-def test_desligar_a_impressora_nao_mexe_na_linha_da_espessura(qapp, com_fonte, monkeypatch, largura):
+def test_desligar_a_impressora_nao_mexe_na_linha_da_escala(qapp, com_fonte, monkeypatch, largura):
     """O card de Situação pede, como MÍNIMO, a largura da frase mais longa nos
     dois estados. Sem isso, desligar redistribuía a linha e os botões de
-    espessura andavam debaixo do dedo (160 → 142px, medido a 680px).
+    escala andavam debaixo do dedo (160 → 142px, medido a 680px).
 
     Roda também a 680px porque a 720 a divisão 5:4 da linha já dá à Situação
     292px, 1px acima da frase longa: ali o mínimo não é o que segura, e a
@@ -1258,7 +1288,7 @@ def test_desligar_a_impressora_nao_mexe_na_linha_da_espessura(qapp, com_fonte, m
         qapp.processEvents()
 
     def geometria() -> list[tuple[int, int]]:
-        pecas = [*modal._botoes_espessura.values(), modal._situacao]
+        pecas = [*modal._botoes_escala.values(), modal._situacao]
         return [(peca.x(), peca.width()) for peca in pecas]
 
     ligada = geometria()
@@ -1388,22 +1418,22 @@ def test_fechar_desliga_os_sinais(abrir):
     modal._campo_nome.setText("Caixa")
     cartao_rede = modal._cards[Conexao.REDE]
     botao_80 = modal._botoes_colunas[80]
-    grossa = modal._botoes_espessura[Espessura.GROSSA]
+    escala_4 = modal._botoes_escala[4]
 
     modal.reject()
     modal._campo_nome.setText("Outro nome")
     cartao_rede.clicado.emit()
     modal._situacao.clicado.emit()
     botao_80.clicked.emit()
-    grossa.clicado.emit()
+    escala_4.clicked.emit()
 
     assert _rotulos(modal, "impDialogContador") == [f"5/{LIMITE_NOME}"]
     assert modal._conexao is Conexao.ARQUIVO
     assert modal._situacao.interruptor.ligado is True
-    assert (modal._colunas, modal._letra_grossa) == (48, False)
+    assert (modal._colunas, modal._escala) == (48, 2)
     assert modal._backdrop is None
     assert modal._cards == {} and modal._botoes_bobina == {}
-    assert modal._botoes_colunas == {} and modal._botoes_espessura == {}
+    assert modal._botoes_colunas == {} and modal._botoes_escala == {}
 
 
 def test_fechar_para_o_relogio_da_busca(abrir, qapp):

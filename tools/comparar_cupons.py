@@ -52,9 +52,12 @@ def imprimir(destino: Path) -> list[Path]:
     dados = _povoar(servicos, pasta_cupons=destino)
     impressao = servicos["impressao"]
 
-    # Os seis documentos que o sistema sabe imprimir, na ordem em que aparecem
+    # Os sete documentos que o sistema sabe imprimir, na ordem em que aparecem
     # num turno: pedido para a produção, 2ª via do pedido, pré-conta,
-    # recibo do cliente, fechamento da gaveta e o teste de impressora.
+    # recibo do cliente, fechamento da gaveta, o teste de impressora e o teste
+    # de fonte (§9.31) — este último entra na bancada porque é o único cupom
+    # em que a escala vem do DOCUMENTO e não do cadastro, e é justamente o tipo
+    # de exceção que uma mudança futura na escala quebraria sem ninguém ver.
     comanda = dados["comanda"]
     impressao.imprimir_comanda(comanda.id)
     impressao.reimprimir_comanda(comanda.id)
@@ -63,6 +66,7 @@ def imprimir(destino: Path) -> list[Path]:
     impressao.imprimir_fechamento_caixa(dados["caixa_fechado"])
     for impressora_id in dados["impressoras"]:
         impressao.imprimir_teste(impressora_id)
+        impressao.imprimir_teste_de_fonte(impressora_id)
 
     return sorted(destino.glob("*.txt"))
 

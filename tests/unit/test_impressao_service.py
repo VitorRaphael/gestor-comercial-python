@@ -107,6 +107,23 @@ def novo_item(uow, comanda, produto, quantidade=1, observacao=None, cancelado=Fa
     )
 
 
+def item_de_producao(texto, nome, quantidade):
+    """A linha de um item no cupom de produção (§9.32): nome à esquerda, QTD à direita.
+
+    O cupom não tem mais "2x X-Burger" numa string só — as colunas
+    `DESCRIÇÃO | QTD` são preenchidas com espaços, e a quantidade fica
+    encostada na borda. Procurar a linha inteira por igualdade exigiria contar
+    os espaços em cada teste; esta função confere o que importa: existe UMA
+    linha que começa com o nome e termina com a quantidade.
+    """
+    alvo = str(quantidade)
+    return [
+        linha
+        for linha in texto.splitlines()
+        if linha.startswith(nome) and linha.rstrip().endswith(alvo)
+    ]
+
+
 # ----------------------------------------------------------------------
 # Roteamento
 # ----------------------------------------------------------------------
@@ -125,8 +142,8 @@ def test_agrupa_por_impressora_da_categoria(uow, impressao, driver, gerente, cai
 
     assert [r.impressora_nome for r in resultados] == ["Cozinha", "Bar"]
     assert all(r.sucesso for r in resultados)
-    assert "2x X-Burger" in driver.texto_de("Cozinha")
-    assert "1x Coca-Cola" in driver.texto_de("Bar")
+    assert item_de_producao(driver.texto_de("Cozinha"), "X-Burger", 2)
+    assert item_de_producao(driver.texto_de("Bar"), "Coca-Cola", 1)
     # Item de uma impressora não pode vazar para o cupom da outra.
     assert "Coca-Cola" not in driver.texto_de("Cozinha")
 
@@ -178,9 +195,9 @@ def test_a_subcategoria_nao_muda_a_impressora_de_destino(
     )
     assert driver.cupons_de("Cozinha") == 1
     texto = driver.texto_de("Cozinha")
-    assert "1x X Artesanal" in texto
-    assert "1x X Podrão" in texto
-    assert "1x X Burger" in texto
+    assert item_de_producao(texto, "X Artesanal", 1)
+    assert item_de_producao(texto, "X Podrão", 1)
+    assert item_de_producao(texto, "X Burger", 1)
     assert driver.texto_de("Bar") == ""
 
 
@@ -236,7 +253,7 @@ def test_categoria_sem_impressora_cai_na_padrao(uow, impressao, driver, gerente,
 
     assert [r.impressora_nome for r in resultados] == [balcao.nome]
     assert resultados[0].sucesso
-    assert "1x Pudim" in driver.texto_de("Balcão")
+    assert item_de_producao(driver.texto_de("Balcão"), "Pudim", 1)
 
 
 def test_impressora_desativada_da_categoria_cai_na_padrao(
@@ -327,7 +344,7 @@ def test_ordem_dos_itens_dentro_do_cupom_e_a_de_lancamento(
     impressao.imprimir_comanda(comanda.id)
     texto = driver.texto_de("Cozinha")
 
-    assert texto.index("1x Fritas") < texto.index("1x X-Burger") < texto.index("1x Pudim")
+    assert texto.index("Fritas") < texto.index("X-Burger") < texto.index("Pudim")
 
 
 def test_itens_da_mesma_impressora_saem_num_cupom_so(
@@ -400,7 +417,7 @@ def test_item_de_outra_comanda_nao_entra_no_cupom(uow, impressao, driver, gerent
     assert item_alheio.impresso_em is None
 
 
-def test_mesa_sai_em_dobro_para_a_cozinha_ler_de_longe(
+def test_mesa_sai_ampliada_para_a_cozinha_ler_de_longe(
     uow, impressao, driver, gerente, caixa_aberto, mesa
 ):
     cozinha = nova_impressora(uow, "Cozinha", padrao=True)
@@ -410,8 +427,14 @@ def test_mesa_sai_em_dobro_para_a_cozinha_ler_de_longe(
 
     impressao.imprimir_comanda(comanda.id)
 
-    em_dobro = [bloco.texto for bloco in driver.blocos_de("Cozinha") if bloco.dobro]
-    assert em_dobro == [f"MESA {mesa.numero}"]
+    # O layout de produção (§9.32) põe a mesa e o atendente na MESMA linha, e
+    # duas colunas não cabem numa linha ampliada: a mesa deixou de sair em
+    # destaque. Nenhum bloco do cupom de produção é ampliado — a asserção é
+    # pela ausência, para o dia em que alguém reintroduzir o destaque sem
+    # revisar a largura das colunas.
+    ampliados = [bloco.texto for bloco in driver.blocos_de("Cozinha") if bloco.ampliado]
+    assert ampliados == []
+    assert f"MESA: {mesa.numero}" in driver.texto_de("Cozinha")
 
 
 # ----------------------------------------------------------------------
@@ -433,7 +456,7 @@ def test_so_imprime_o_que_ainda_nao_foi_impresso(uow, impressao, driver, gerente
     resultados = impressao.imprimir_comanda(comanda.id)
 
     assert [r.quantidade_itens for r in resultados] == [1]
-    assert driver.texto_de("Cozinha").count("3x X-Burger") == 1
+    assert len(item_de_producao(driver.texto_de("Cozinha"), "X-Burger", 3)) == 1
 
 
 def test_item_cancelado_nao_vai_para_a_producao(uow, impressao, driver, gerente, caixa_aberto):
@@ -568,7 +591,8 @@ def test_reimprimir_leva_o_que_ja_saiu_e_o_que_ainda_nao(
     segunda_via = driver.texto_de("Cozinha").split("2ª VIA")[-1]
 
     assert resultados[0].quantidade_itens == 2
-    assert "1x X-Burger" in segunda_via and "2x Coca-Cola" in segunda_via
+    assert item_de_producao(segunda_via, "X-Burger", 1)
+    assert item_de_producao(segunda_via, "Coca-Cola", 2)
     # A 2ª via não conta como envio: o item novo continua esperando a via de acréscimo.
     assert ja_impresso.impresso_em is not None
     assert ainda_nao.impresso_em is None
@@ -633,9 +657,10 @@ def test_cupom_de_producao_mostra_mesa_comanda_atendente_e_observacao(
     impressao.imprimir_comanda(comanda.id)
     texto = driver.texto_de("Cozinha")
 
-    assert "COZINHA" in texto
-    assert f"MESA {mesa.numero}" in texto
-    assert f"Comanda {comanda.id}" in texto
+    assert "Relatório para Cozinha" in texto
+    assert f"MESA: {mesa.numero}" in texto
+    assert "Marco de impressão" in texto
+    assert f"PEDIDO: {comanda.id}" in texto
     assert f"Atendente: {gerente.nome}" in texto
     assert "[!] OBS: sem cebola" in texto
     assert "Pão, hambúrguer 180g e queijo" in texto
@@ -782,11 +807,14 @@ def test_recibo_mostra_itens_total_forma_e_troco(uow, impressao, driver, gerente
     # `quantidade_itens` conta linhas da comanda, não unidades vendidas: é o
     # número que a tela mostra como "1 item enviado".
     assert resultado.quantidade_itens == 1
-    assert "2x X-Burger" in texto
-    assert "40,00" in texto
+    # A tabela em colunas (§9.30): código, descrição, preço, quantidade, total.
+    # A tabela em colunas (§9.30). As larguras saem dos DADOS: com valores
+    # curtos, as cinco colunas cabem lado a lado até na bobina de 32.
+    assert "CÓD DESCRIÇÃO    PREÇO QTD TOTAL" in texto
+    assert f"{lanche.id:<3} X-Burger     20,00   2 40,00" in texto.splitlines()
     assert "Dinheiro" in texto
     assert "Troco" in texto
-    assert "Não é documento fiscal" in texto
+    assert "NÃO É DOCUMENTO FISCAL" in texto
 
 
 def test_recibo_soma_pagamentos_da_mesma_forma(uow, impressao, driver, gerente, caixa_aberto):
@@ -1162,32 +1190,35 @@ def test_imprimir_teste_mostra_conexao_e_regua(uow, impressao, driver, gerente):
 
 
 @pytest.mark.parametrize(
-    ("colunas", "bobina_mm", "letra_grossa", "fonte", "letra"),
+    ("colunas", "bobina_mm", "escala", "fonte"),
     [
-        (32, 58, False, "normal", "fina"),
-        (48, 80, True, "normal", "grossa"),
-        (64, 80, False, "condensada", "fina"),
-        (80, 80, True, "condensada", "grossa"),
-        (48, 58, False, "condensada", "fina"),
+        (32, 58, 2, "normal"),
+        (48, 80, 3, "normal"),
+        (64, 80, 4, "condensada"),
+        (80, 80, 2, "condensada"),
+        (48, 58, 3, "condensada"),
     ],
 )
-def test_o_cupom_de_teste_diz_bobina_fonte_e_letra(
-    uow, impressao, driver, gerente, colunas, bobina_mm, letra_grossa, fonte, letra
+def test_o_cupom_de_teste_diz_bobina_fonte_e_escala(
+    uow, impressao, driver, gerente, colunas, bobina_mm, escala, fonte
 ):
-    """§9.22: é no papel que o gerente confere se o que escolheu no cartão chegou
-    à impressora. A fonte é a que o driver vai usar — a mesma regra
-    (`usa_fonte_condensada`), e não uma cópia dela."""
+    """§9.22/§9.30: é no papel que o gerente confere se o que escolheu no cartão
+    chegou à impressora. A fonte é a que o driver vai usar — a mesma regra
+    (`usa_fonte_condensada`), e não uma cópia dela —, e a "MESA 12" de amostra
+    sai ampliada, na escala escolhida."""
     impressora = nova_impressora(uow, "Caixa 01", padrao=True, colunas=colunas)
     impressora.bobina_mm = bobina_mm
-    impressora.letra_grossa = letra_grossa
+    impressora.escala_fonte = escala
     uow.commit()
 
     impressao.imprimir_teste(impressora.id)
-    linhas = [bloco.texto for bloco in driver.blocos_de("Caixa 01")]
+    blocos = driver.blocos_de("Caixa 01")
+    linhas = [bloco.texto for bloco in blocos]
 
     assert cupom.duas_colunas("Bobina", f"{bobina_mm}mm", colunas) in linhas
     assert cupom.duas_colunas("Fonte", fonte, colunas) in linhas
-    assert cupom.duas_colunas("Letra", letra, colunas) in linhas
+    assert cupom.duas_colunas("Escala", f"{escala}x", colunas) in linhas
+    assert [bloco.texto for bloco in blocos if bloco.ampliado] == ["MESA 12"]
 
 
 @pytest.mark.parametrize("colunas", [32, 48, 64, 80])
@@ -1208,18 +1239,20 @@ def test_divisores_regua_e_valores_seguem_as_colunas(uow, impressao, driver, ger
 
 @pytest.mark.parametrize("colunas", [32, 48, 64, 80])
 def test_o_recibo_encosta_o_preco_na_coluna_cadastrada(uow, impressao, driver, gerente, caixa_aberto, colunas):
-    """O espaço entre o nome do produto e o valor vem das colunas: o preço
-    termina exatamente na última coluna da bobina, e o tracejado tem o mesmo tamanho."""
+    """A tabela em colunas (§9.30) vem das colunas cadastradas: o TOTAL do item
+    termina exatamente na última coluna da bobina — na linha do item a partir
+    de 40 colunas, e na linha de números embaixo dele na de 32 —, e o
+    tracejado tem o mesmo tamanho."""
     nova_impressora(uow, "Balcão", padrao=True, colunas=colunas)
     lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger", "20.00", None)
     comanda = nova_comanda(uow, caixa_aberto, gerente)
     novo_item(uow, comanda, lanche, quantidade=2)
 
     impressao.imprimir_recibo(comanda.id)
-    linhas = [bloco.texto for bloco in driver.blocos_de("Balcão") if not bloco.dobro]
+    linhas = [bloco.texto for bloco in driver.blocos_de("Balcão") if not bloco.ampliado]
 
-    item = next(linha for linha in linhas if linha.startswith("2x X-Burger"))
-    assert len(item) == colunas and item.endswith("40,00")
+    item = next(linha for linha in linhas if linha.endswith(" 40,00") and "2" in linha.split())
+    assert len(item) == colunas
     assert all(len(linha) == colunas for linha in linhas if linha and set(linha) == {"-"})
     assert all(len(linha) <= colunas for linha in linhas)
 
@@ -1263,12 +1296,13 @@ def test_sem_ninguem_logado(uow, auth, driver, gerente, caixa_aberto):
 
 
 def blocos_que_estouraram(driver, colunas):
-    """Blocos maiores que a bobina — em dobro cada caractere ocupa 2 colunas."""
+    """Blocos maiores que a bobina — ampliado em 2x (a escala de fábrica) ocupa
+    2 colunas por caractere."""
     return [
         bloco.texto
         for _, documento in driver.enviados
         for bloco in documento
-        if len(bloco.texto) > (colunas // 2 if bloco.dobro else colunas)
+        if len(bloco.texto) > (colunas // 2 if bloco.dobro or bloco.ampliado else colunas)
     ]
 
 
@@ -1284,8 +1318,8 @@ def test_a_largura_da_bobina_e_respeitada(uow, impressao, driver, gerente, caixa
 
     for _, documento in driver.enviados:
         for bloco in documento:
-            # Bloco em dobro ocupa 2 colunas por caractere.
-            limite = 16 if bloco.dobro else 32
+            # Bloco ampliado (2x de fábrica) ocupa 2 colunas por caractere.
+            limite = 16 if bloco.dobro or bloco.ampliado else 32
             assert len(bloco.texto) <= limite, bloco.texto
 
 
@@ -1386,7 +1420,7 @@ def test_da_comanda_ao_recibo_pelo_caminho_de_verdade(
     recibo = impressao.imprimir_recibo(comanda.id)
 
     assert [(r.impressora_nome, r.sucesso) for r in envios] == [("Cozinha", True)]
-    assert "2x X-Burger" in driver.texto_de("Cozinha")
+    assert item_de_producao(driver.texto_de("Cozinha"), "X-Burger", 2)
     assert "[!] OBS: sem cebola" in driver.texto_de("Cozinha")
 
     assert resumo.troco == dinheiro("10.00")
@@ -1417,12 +1451,14 @@ def test_pre_conta_impressa_pelo_caminho_de_verdade(
     assert resultado.sucesso
     cupom = driver.texto_de("Balcão")
     assert "CONFERÊNCIA" in cupom
-    assert "2x X-Burger" in cupom
+    assert "X-Burger" in cupom and "DESCRIÇÃO" in cupom
     # 2 x 20,00, sem acréscimo nenhum: o papel diz o que o cliente consumiu
     # (§9.26, a linha "Taxa de serviço" saiu daqui com a cobrança).
     assert "TOTAL A PAGAR" in cupom and "40,00" in cupom
     assert "Taxa de serviço" not in cupom
-    assert "documento fiscal" in cupom.replace("\n", " ")
+    assert "NÃO É DOCUMENTO FISCAL" in cupom
+    assert f"LOCAL: MESA {mesa.numero}" in cupom
+    assert "Permanência:" in cupom
     assert "Dinheiro" not in cupom
 
 
@@ -1508,3 +1544,136 @@ def test_decimal_do_recibo_nunca_vira_float(uow, impressao, driver, gerente, cai
     # 3 x 19,99 = 59,97 — sem centavo perdido em ponto flutuante.
     assert "59,97" in driver.texto_de("Balcão")
     assert dinheiro(Decimal("19.99")) * 3 == Decimal("59.97")
+
+
+# ----------------------------------------------------------------------
+# Cupom de diagnóstico de fonte (§9.31)
+# ----------------------------------------------------------------------
+
+
+def test_o_teste_de_fonte_sai_com_as_quatro_escalas_no_mesmo_cupom(
+    uow, impressao, driver, gerente
+):
+    """As quatro escalas juntas são o que separa as duas causas possíveis de
+    "o destaque não aumentou": cadastro que não chegou ao driver, ou impressora
+    que ignora o `GS !`. Com um cupom por escala não dava para comparar."""
+    # 48 colunas: em 4x cabem 12 caracteres, e "4x MESA 12" sai numa linha só.
+    # Numa bobina de 32 a linha de 4x quebra em duas (as duas em 4x), e o
+    # teste passaria a falar da quebra em vez da escala.
+    cozinha = nova_impressora(uow, "Cozinha", padrao=True, colunas=48)
+
+    resultado = impressao.imprimir_teste_de_fonte(cozinha.id)
+
+    assert resultado.sucesso
+    escalas = [bloco.escala for bloco in driver.blocos_de("Cozinha") if bloco.escala]
+    assert escalas == [1, 2, 3, 4]
+
+
+def test_o_teste_de_fonte_ignora_a_escala_do_cadastro(uow, impressao, driver, gerente):
+    """A escala do cadastro vira INFORMAÇÃO impressa, não o tamanho das linhas:
+    o cupom tem que sair igual em qualquer impressora para poder ser comparado."""
+    cozinha = nova_impressora(uow, "Cozinha", padrao=True, colunas=48)
+    cozinha.escala_fonte = 4
+    uow.impressoras.salvar(cozinha)
+    uow.commit()
+
+    impressao.imprimir_teste_de_fonte(cozinha.id)
+
+    blocos = driver.blocos_de("Cozinha")
+    assert [b.escala for b in blocos if b.escala] == [1, 2, 3, 4]
+    assert any("4x" in b.texto and b.escala is None for b in blocos), (
+        "a escala do cadastro tem que aparecer escrita no cupom"
+    )
+
+
+def test_teste_de_fonte_de_impressora_inexistente_avisa(impressao, gerente):
+    with pytest.raises(RecursoNaoEncontradoError):
+        impressao.imprimir_teste_de_fonte(9999)
+
+
+# ----------------------------------------------------------------------
+# Layout do cupom de produção (§9.32)
+# ----------------------------------------------------------------------
+
+
+def test_o_cupom_de_producao_poe_a_quantidade_encostada_na_direita(
+    uow, impressao, driver, gerente, caixa_aberto, mesa
+):
+    """A QTD é a coluna que a cozinha lê em diagonal; ela tem que ficar na
+    mesma posição em todas as linhas, inclusive no cabeçalho da tabela."""
+    cozinha = nova_impressora(uow, "Cozinha", padrao=True, colunas=48)
+    lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger", "20.00", cozinha)
+    comanda = nova_comanda(uow, caixa_aberto, gerente, mesa)
+    novo_item(uow, comanda, lanche, quantidade=12)
+
+    impressao.imprimir_comanda(comanda.id)
+    linhas = driver.texto_de("Cozinha").splitlines()
+
+    cabecalho = next(linha for linha in linhas if linha.startswith("DESCRIÇÃO"))
+    item = next(linha for linha in linhas if linha.startswith("X-Burger"))
+    assert len(cabecalho) == 48 and len(item) == 48
+    assert cabecalho.endswith("QTD") and item.endswith("12")
+
+
+def test_nome_comprido_de_produto_e_truncado_e_nao_quebrado_na_producao(
+    uow, impressao, driver, gerente, caixa_aberto, mesa
+):
+    """Cada item tem que caber numa linha só: o cupom é conferido contando
+    linhas contra pratos, e um item em duas linhas parece dois itens."""
+    cozinha = nova_impressora(uow, "Cozinha", padrao=True, colunas=32)
+    nome = "Porção de Batata Frita Grande com Cheddar e Bacon"
+    lanche = nova_categoria_com_produto(uow, "Porções", nome, "38.00", cozinha)
+    comanda = nova_comanda(uow, caixa_aberto, gerente, mesa)
+    novo_item(uow, comanda, lanche, quantidade=2)
+
+    impressao.imprimir_comanda(comanda.id)
+    linhas = driver.texto_de("Cozinha").splitlines()
+
+    do_item = [linha for linha in linhas if linha.startswith("Porção de Batata")]
+    assert len(do_item) == 1
+    assert do_item[0].rstrip().endswith("2")
+    assert all(len(linha) <= 32 for linha in linhas)
+
+
+def test_comanda_sem_funcionario_imprime_caixa_como_atendente(
+    uow, impressao, driver, gerente, caixa_aberto, mesa
+):
+    """Linha "Atendente:" vazia faria o cozinheiro procurar o nome que faltou
+    em vez de fazer o prato."""
+    cozinha = nova_impressora(uow, "Cozinha", padrao=True)
+    lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger", "20.00", cozinha)
+    comanda = nova_comanda(uow, caixa_aberto, gerente, mesa)
+    novo_item(uow, comanda, lanche)
+    comanda.funcionario = None
+    uow.comandas.salvar(comanda)
+    uow.commit()
+
+    impressao.imprimir_comanda(comanda.id)
+
+    assert "Atendente:" in driver.texto_de("Cozinha")
+
+
+# ----------------------------------------------------------------------
+# Layout do cupom do cliente (§9.32)
+# ----------------------------------------------------------------------
+
+
+def test_o_recibo_traz_o_titulo_do_relatorio_e_o_total_pontilhado(
+    uow, impressao, driver, gerente, caixa_aberto, mesa
+):
+    cozinha = nova_impressora(uow, "Cozinha", padrao=True, colunas=48)
+    lanche = nova_categoria_com_produto(uow, "Lanches", "X-Burger", "20.00", cozinha)
+    comanda = nova_comanda(uow, caixa_aberto, gerente, mesa)
+    novo_item(uow, comanda, lanche, quantidade=2)
+
+    impressao.imprimir_pre_conta(comanda.id)
+    cupom_texto = driver.texto_de("Cozinha")
+
+    assert "RELATÓRIO DE CONSUMO" in cupom_texto
+    total = next(
+        linha for linha in cupom_texto.splitlines() if linha.startswith("TOTAL A PAGAR")
+    )
+    # Um ponto basta como asserção: a linha é AMPLIADA, então tem 24 colunas
+    # (48 // escala 2), e "TOTAL A PAGAR" mais "R$ 40,00" já ocupam quase tudo.
+    # Exigir uma fileira de pontos aqui testaria a largura, não o preenchimento.
+    assert "." in total, "o total do cliente sai com preenchimento pontilhado"

@@ -38,7 +38,8 @@ os construtores nomeados `para_nova`/`para_editar` (a convenção do
 ## O formato do cupom (§9.22)
 
 A linha da bobina ganhou "Colunas por linha" (32 · 48 · 64 · 80) e a de baixo
-virou "Espessura da letra" ao lado da "Situação". As três decisões do Vitor:
+virou "Tamanho da fonte" ao lado da "Situação" (§9.30; antes era a "Espessura da
+letra", fina ou grossa). As três decisões do Vitor:
 
 1. **Quatro larguras, e não as três do mockup.** 64 é a bobina de 80mm na fonte
    condensada, que o driver liga sozinho (`usa_fonte_condensada`). O 80 ficou
@@ -50,9 +51,12 @@ virou "Espessura da letra" ao lado da "Situação". As três decisões do Vitor:
    enquanto o cartão está aberto, e a primeira visita sugere 32 na de 58mm e 48
    na de 80mm (`COLUNAS_SUGERIDAS`). Voltar à bobina de partida devolve as
    colunas cadastradas — inclusive uma largura antiga sem botão, como 42;
-3. **Letra grossa é a ênfase do ESC/POS no cupom inteiro** (`letra_grossa`).
+3. **O tamanho da fonte é a escala das linhas de destaque** (`escala_fonte`,
+   §9.30): 2x, 3x ou 4x, pelo `GS !` do ESC/POS, no título, na mesa e no TOTAL.
+   Só inteiros: o 2,5x pedido não existe no comando, e o Vitor trocou a lista
+   por 2x · 3x · 4x. A tabela de itens fica na fonte normal.
 
-O resumo diz as cinco coisas: `Caixa 01 · USB · 80mm · 80 col. · letra grossa`.
+O resumo diz as cinco coisas: `Caixa 01 · USB · 80mm · 48 col. · fonte 3x`.
 
 ## O que este diálogo NÃO faz
 
@@ -119,6 +123,8 @@ from gestor_comercial.domain.impressora import (
     BOBINAS_MM,
     COLUNAS_58MM,
     COLUNAS_PADRAO,
+    ESCALA_FONTE_PADRAO,
+    ESCALAS_FONTE,
     PORTA_REDE_PADRAO,
     Impressora,
     bobina_mm_das_colunas,
@@ -130,9 +136,7 @@ from gestor_comercial.ui.widgets.cardapio_cartoes import (
     GLIFO_ARQUIVO_TEXTO,
     GLIFO_COLUNAS,
     GLIFO_IMPRESSORA,
-    GLIFO_LETRAS,
     GLIFO_MAIS,
-    GLIFO_NEGRITO,
     GLIFO_REDE,
     GLIFO_SETA_BAIXO,
     GLIFO_SINAL,
@@ -240,35 +244,10 @@ class Bobina(Enum):
 COLUNAS_SUGERIDAS: dict[Bobina, int] = {Bobina.MM58: COLUNAS_58MM, Bobina.MM80: COLUNAS_PADRAO}
 
 
-class Espessura(Enum):
-    FINA = "fina"
-    GROSSA = "grossa"
-
-
-@dataclass(frozen=True, slots=True)
-class _OpcaoDeEspessura:
-    """O que separa "Letras finas" de "Letras grossas": o glifo, as palavras e a dica."""
-
-    glifo: str
-    rotulo: str
-    no_resumo: str
-    dica: str
-
-
-ESPESSURAS: dict[Espessura, _OpcaoDeEspessura] = {
-    Espessura.FINA: _OpcaoDeEspessura(
-        GLIFO_LETRAS,
-        "Letras finas",
-        "letra fina",
-        "O peso normal da impressora. Os títulos do cupom saem em negrito.",
-    ),
-    Espessura.GROSSA: _OpcaoDeEspessura(
-        GLIFO_NEGRITO,
-        "Letras grossas",
-        "letra grossa",
-        "O cupom inteiro em negrito, mais fácil de ler de longe. Os títulos "
-        "deixam de se destacar do resto.",
-    ),
+_DICA_DAS_ESCALAS = {
+    2: "O dobro do tamanho normal: o tamanho que a mesa já tinha.",
+    3: "O triplo. Na bobina de 58mm, o TOTAL pode descer para a linha de baixo.",
+    4: "Quatro vezes. Só o essencial cabe numa linha; confira no cupom de teste.",
 }
 
 
@@ -337,7 +316,7 @@ class DadosImpressora:
     ativa: bool
     padrao: bool
     bobina_mm: int = BOBINA_80MM
-    letra_grossa: bool = False
+    escala_fonte: int = ESCALA_FONTE_PADRAO
     vendor_id: str | None = None
     product_id: str | None = None
     porta_serial: str | None = None
@@ -360,7 +339,7 @@ class DadosImpressora:
             "caminho_arquivo": self.caminho_arquivo,
             "colunas": self.colunas,
             "bobina_mm": self.bobina_mm,
-            "letra_grossa": self.letra_grossa,
+            "escala_fonte": self.escala_fonte,
             "ativa": self.ativa,
             "padrao": self.padrao,
         }
@@ -409,6 +388,18 @@ def bobina_da_impressora(impressora: Impressora) -> Bobina:
     if impressora.bobina_mm in BOBINAS_MM:
         return Bobina.de_mm(impressora.bobina_mm)
     return bobina_das_colunas(impressora.colunas)
+
+
+def escala_da_impressora(impressora: Impressora) -> int:
+    """A escala GRAVADA; fora de 2/3/4, o 2x de fábrica (§9.30).
+
+    Do banco ela sempre vem (`NOT NULL`). Cai aqui a `Impressora` solta que
+    ainda não foi gravada (o default do ORM só vale no INSERT, e ela chega com
+    `None`) e um valor mexido à mão — que abriria o cartão sem botão aceso e
+    devolveria ao service uma escala que ele recusa.
+    """
+    escala = impressora.escala_fonte
+    return escala if escala in ESCALAS_FONTE else ESCALA_FONTE_PADRAO
 
 
 def ler_caminho_de_arquivo(texto: str) -> LeituraDaConexao:
@@ -507,7 +498,7 @@ class _Retrato:
     baudrate: int | None = None
     colunas: int = COLUNAS_PADRAO
     bobina: Bobina = Bobina.MM80
-    letra_grossa: bool = False
+    escala_fonte: int = ESCALA_FONTE_PADRAO
     ativa: bool = True
     padrao: bool = False
 
@@ -538,7 +529,7 @@ class _Retrato:
             baudrate=impressora.baudrate if tipo is TipoConexaoImpressora.SERIAL else None,
             colunas=impressora.colunas,
             bobina=bobina_da_impressora(impressora),
-            letra_grossa=bool(impressora.letra_grossa),
+            escala_fonte=escala_da_impressora(impressora),
             ativa=bool(impressora.ativa),
             padrao=bool(impressora.padrao),
         )
@@ -688,7 +679,7 @@ class _CartaoSituacao(QFrame):
 
         Sem isto o card pedia 242px ligado e 291px desligado: desligar a
         impressora fazia a linha inteira se redistribuir e os botões de
-        espessura andavam debaixo do dedo (160 → 142px, medido) — e, no cartão
+        escala andavam debaixo do dedo (160 → 142px, medido) — e, no cartão
         de 600px do §9.19, "Impressora desativada" saía cortada (o teste só
         media o estado ligado). Basta o MÍNIMO, e não o `sizeHint` junto: o
         layout usa como tamanho preferido o maior dos dois, então um mínimo fixo
@@ -712,63 +703,6 @@ class _CartaoSituacao(QFrame):
         if self.property("ativa") != ativa:
             aplicar_propriedade(self, "ativa", ativa)
             aplicar_propriedade(self._texto, "ativa", ativa)
-
-    @nao_deixa_escapar()
-    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (override Qt)
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.clicado.emit()
-        super().mousePressEvent(event)
-
-
-class _BotaoDeEspessura(QFrame):
-    """"Letras finas" ou "Letras grossas": o glifo e a palavra, juntos no meio.
-
-    `QFrame` e não `QPushButton`, pelo motivo do `_CartaoConexao`: o glifo tem
-    que andar colado ao texto, e o texto de cada opção tem o PESO que ela
-    promete (a grossa em negrito, a fina no normal), o que o texto único de um
-    botão com glifo pintado numa margem fixa não faz. Sem foco: quem lê o
-    teclado é o diálogo.
-    """
-
-    clicado = Signal()
-
-    LADO_GLIFO_PX = 15
-
-    def __init__(self, espessura: Espessura, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        opcao = ESPESSURAS[espessura]
-        self.espessura = espessura
-        self.setObjectName("impDialogEspessura")
-        self.setProperty("selecionada", False)
-        self.setToolTip(opcao.dica)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-
-        linha = QHBoxLayout(self)
-        linha.setContentsMargins(12, 0, 12, 0)
-        # Espaço zero e o respiro posto à mão: com `setSpacing` o layout põe o
-        # vão também entre as molas e as peças, e são 16px a mais pedidos por
-        # botão — foi o que espremia "Letras grossas" na medição.
-        linha.setSpacing(0)
-        linha.addStretch(1)
-        self._glifo = GlifoSolto(opcao.glifo, self.LADO_GLIFO_PX, "impressora_opcao_glifo")
-        linha.addWidget(self._glifo, 0, Qt.AlignmentFlag.AlignVCenter)
-        linha.addSpacing(8)
-        self._texto = QLabel(opcao.rotulo)
-        self._texto.setObjectName("impDialogEspessuraTexto")
-        self._texto.setProperty("espessura", espessura.value)
-        self._texto.setProperty("selecionada", False)
-        linha.addWidget(self._texto, 0, Qt.AlignmentFlag.AlignVCenter)
-        linha.addStretch(1)
-
-    def selecionar(self, selecionada: bool) -> None:
-        if self.property("selecionada") == selecionada:
-            return
-        aplicar_propriedade(self, "selecionada", selecionada)
-        aplicar_propriedade(self._texto, "selecionada", selecionada)
-        self._glifo.trocar_token(
-            "impressora_opcao_ativa_glifo" if selecionada else "impressora_opcao_glifo"
-        )
 
     @nao_deixa_escapar()
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (override Qt)
@@ -810,12 +744,11 @@ class ImpressoraDialog(QDialog):
     """Cartão de cadastro/edição de impressora. Ver o cabeçalho do módulo."""
 
     # 720, medido (§9.22). O §9.19 pedia "entre 560 e 620" e ficou em 600; a
-    # linha "Espessura da letra | Situação" não cabe ali com a fonte da marca,
-    # ~20% mais larga que a do mockup (o achado do §9.12): os dois botões de
-    # espessura iguais pedem 171px cada ("Letras grossas" em negrito), e a
-    # Situação 291px ("Impressora desativada"). A 680 nada espreme, mas os dois
-    # botões saem desiguais; a partir de ~707 ficam iguais, e 720 deixa folga.
-    # O próprio mockup mede 768. `test_nada_fica_espremido` mede tudo isso.
+    # linha de baixo não cabia ali com a fonte da marca, ~20% mais larga que a
+    # do mockup (o achado do §9.12): a Situação pede 291px ("Impressora
+    # desativada"). Com a escala (§9.30) no lugar da espessura, os três botões
+    # 2x · 3x · 4x são curtos, e a largura ficou a mesma para o cartão não
+    # mudar de tamanho. `test_nada_fica_espremido` mede tudo isso.
     LARGURA_CARTAO_PX = 720
     LADO_BOTAO_FECHAR_PX = 32
     LADO_BADGE_PX = 44
@@ -824,11 +757,11 @@ class ImpressoraDialog(QDialog):
     ALTURA_CONEXAO_PX = 64
     LADO_GLIFO_ROTULO_PX = 14
     # Quanto cada coluna das duas linhas do formato leva da largura. As colunas
-    # têm quatro botões e a bobina dois; a espessura tem duas palavras e a
-    # situação uma frase ("Impressora desativada") com o interruptor ao lado.
+    # têm quatro botões e a bobina dois; a escala tem três e a situação uma
+    # frase ("Impressora desativada") com o interruptor ao lado.
     PESO_BOBINA = 2
     PESO_COLUNAS = 3
-    PESO_ESPESSURA = 5
+    PESO_ESCALA = 5
     PESO_SITUACAO = 4
 
     def __init__(
@@ -867,7 +800,7 @@ class ImpressoraDialog(QDialog):
         # Duas entradas, e morre com o cartão.
         self._colunas_da_bobina: dict[Bobina, int] = dict(COLUNAS_SUGERIDAS)
         self._colunas_da_bobina[self._bobina] = self._colunas
-        self._letra_grossa = self._retrato.letra_grossa
+        self._escala = self._retrato.escala_fonte
         self._ativa = self._retrato.ativa
         # A última escolha EXPLÍCITA de uso. Separada do que o seletor mostra
         # porque desligar a impressora tira o recibo dela à força — e religar
@@ -883,7 +816,7 @@ class ImpressoraDialog(QDialog):
         self._cards: dict[Conexao, _CartaoConexao] = {}
         self._botoes_bobina: dict[Bobina, QPushButton] = {}
         self._botoes_colunas: dict[int, QPushButton] = {}
-        self._botoes_espessura: dict[Espessura, _BotaoDeEspessura] = {}
+        self._botoes_escala: dict[int, QPushButton] = {}
 
         self.setObjectName("impDialog")
         self.setWindowTitle(frases.titulo)
@@ -916,7 +849,7 @@ class ImpressoraDialog(QDialog):
         self._pintar_conexao()
         self._pintar_bobina()
         self._pintar_colunas()
-        self._pintar_espessura()
+        self._pintar_escala()
         self._pintar_situacao()
         self._pintar_placeholder_local()
         self._atualizar()
@@ -1041,7 +974,7 @@ class ImpressoraDialog(QDialog):
         coluna.addLayout(self._montar_conexoes())
         coluna.addLayout(self._montar_destino_e_uso())
         coluna.addLayout(self._montar_bobina_e_colunas())
-        coluna.addLayout(self._montar_espessura_e_situacao())
+        coluna.addLayout(self._montar_escala_e_situacao())
         coluna.addWidget(self._montar_resumo())
         return faixa
 
@@ -1213,14 +1146,14 @@ class ImpressoraDialog(QDialog):
         linha.addLayout(direita, self.PESO_COLUNAS)
         return linha
 
-    def _montar_espessura_e_situacao(self) -> QHBoxLayout:
+    def _montar_escala_e_situacao(self) -> QHBoxLayout:
         linha = QHBoxLayout()
         linha.setSpacing(16)
 
         esquerda = QVBoxLayout()
         esquerda.setSpacing(8)
         topo = QHBoxLayout()
-        topo.addWidget(self._rotulo("ESPESSURA DA LETRA"))
+        topo.addWidget(self._rotulo("TAMANHO DA FONTE"))
         topo.addStretch()
         # A etiqueta diz o que a escolha é: aparência do papel, e nada da
         # conexão, do uso ou do roteamento muda com ela.
@@ -1229,15 +1162,18 @@ class ImpressoraDialog(QDialog):
         topo.addWidget(tag)
         esquerda.addLayout(topo)
         botoes = QHBoxLayout()
-        botoes.setSpacing(10)
-        for espessura in Espessura:
-            opcao = _BotaoDeEspessura(espessura)
-            opcao.setFixedHeight(self.ALTURA_CAMPO_PX)
-            opcao.clicado.connect(self._espessura_clicada)
-            botoes.addWidget(opcao, 1)
-            self._botoes_espessura[espessura] = opcao
+        botoes.setSpacing(8)
+        # O mesmo segmento da bobina e das colunas (DRY): um QPushButton âmbar
+        # quando escolhido, sem widget próprio para a escala.
+        for escala in ESCALAS_FONTE:
+            botao = self._botao_de_segmento(f"{escala}x", "impDialogEscala")
+            botao.setProperty("escala", escala)
+            botao.setToolTip(_DICA_DAS_ESCALAS[escala])
+            botao.clicked.connect(self._escala_clicada)
+            botoes.addWidget(botao, 1)
+            self._botoes_escala[escala] = botao
         esquerda.addLayout(botoes)
-        linha.addLayout(esquerda, self.PESO_ESPESSURA)
+        linha.addLayout(esquerda, self.PESO_ESCALA)
 
         direita = QVBoxLayout()
         direita.setSpacing(8)
@@ -1383,21 +1319,19 @@ class ImpressoraDialog(QDialog):
             if botao.property("selecionada") != selecionada:
                 aplicar_propriedade(botao, "selecionada", selecionada)
 
-    def _espessura_clicada(self) -> None:
-        opcao = self.sender()
-        if not isinstance(opcao, _BotaoDeEspessura):
+    def _escala_clicada(self) -> None:
+        botao = self.sender()
+        if not isinstance(botao, QPushButton):
             return
-        self._letra_grossa = opcao.espessura is Espessura.GROSSA
-        self._pintar_espessura()
+        self._escala = int(botao.property("escala"))
+        self._pintar_escala()
         self._atualizar()
 
-    def _espessura(self) -> Espessura:
-        return Espessura.GROSSA if self._letra_grossa else Espessura.FINA
-
-    def _pintar_espessura(self) -> None:
-        escolhida = self._espessura()
-        for espessura, opcao in self._botoes_espessura.items():
-            opcao.selecionar(espessura is escolhida)
+    def _pintar_escala(self) -> None:
+        for escala, botao in self._botoes_escala.items():
+            selecionada = escala == self._escala
+            if botao.property("selecionada") != selecionada:
+                aplicar_propriedade(botao, "selecionada", selecionada)
 
     def _situacao_clicada(self) -> None:
         self._ativa = not self._ativa
@@ -1445,7 +1379,7 @@ class ImpressoraDialog(QDialog):
         """Resumo, contador, veredito e botão — tudo a partir do estado atual.
 
         Uma rotina só para toda mudança: tecla, card, bobina, colunas,
-        espessura, interruptor, uso e a lista do Windows chegando. Oito caminhos
+        escala, interruptor, uso e a lista do Windows chegando. Oito caminhos
         de atualização separados seriam oito chances de o resumo contradizer o
         botão.
         """
@@ -1459,14 +1393,14 @@ class ImpressoraDialog(QDialog):
         self._botao_confirmar.setEnabled(estado in ("ok", "aviso"))
 
     def _texto_do_resumo(self, nome: str) -> str:
-        """`Caixa 01 · USB · 80mm · 80 col. · letra grossa` — o exemplo do pedido."""
+        """`Caixa 01 · USB · 80mm · 48 col. · fonte 3x`."""
         return " · ".join(
             (
                 nome or _SEM_NOME,
                 CONEXOES[self._conexao].titulo,
                 self._bobina.value,
                 f"{self._colunas} col.",
-                ESPESSURAS[self._espessura()].no_resumo,
+                f"fonte {self._escala}x",
             )
         )
 
@@ -1594,7 +1528,7 @@ class ImpressoraDialog(QDialog):
             # trocar o nome, porque nada a tocou.
             colunas=self._colunas,
             bobina_mm=self._bobina.mm,
-            letra_grossa=self._letra_grossa,
+            escala_fonte=self._escala,
             ativa=self._ativa,
             padrao=self._padrao_final(),
             **leitura.parametros,  # type: ignore[arg-type]
@@ -1742,7 +1676,7 @@ class ImpressoraDialog(QDialog):
           com os filhos, e explicitá-las é o que impede uma ligação a um objeto
           de FORA do cartão de entrar um dia sem ninguém notar;
         * o **escurecedor**, que é filho da JANELA e o Qt não recolheria junto;
-        * as quatro tabelas de widgets (cards, bobina, colunas e espessura).
+        * as quatro tabelas de widgets (cards, bobina, colunas e escala).
 
         A trava `_limpo` é a do §9.12: o segundo `disconnect` desta versão do
         PySide6 não levanta, imprime `RuntimeWarning` — um por ligação e por
@@ -1765,8 +1699,8 @@ class ImpressoraDialog(QDialog):
             botao.clicked.disconnect(self._bobina_clicada)
         for botao in self._botoes_colunas.values():
             botao.clicked.disconnect(self._colunas_clicadas)
-        for opcao in self._botoes_espessura.values():
-            opcao.clicado.disconnect(self._espessura_clicada)
+        for botao in self._botoes_escala.values():
+            botao.clicked.disconnect(self._escala_clicada)
         self._situacao.clicado.disconnect(self._situacao_clicada)
         self._botao_fechar.clicked.disconnect(self.reject)
         self._botao_cancelar.clicked.disconnect(self.reject)
@@ -1774,6 +1708,6 @@ class ImpressoraDialog(QDialog):
         self._cards.clear()
         self._botoes_bobina.clear()
         self._botoes_colunas.clear()
-        self._botoes_espessura.clear()
+        self._botoes_escala.clear()
         backdrop, self._backdrop = self._backdrop, None
         cartao_modal.descartar(backdrop)

@@ -118,6 +118,35 @@ def duas_colunas(
     return f"{rotulo.ljust(espaco_rotulo, enchimento)[:espaco_rotulo]} {valor}"
 
 
+def duas_colunas_ou_empilhado(
+    esquerda: str, direita: str, largura: int
+) -> list[str]:
+    """Os dois textos na mesma linha quando cabem; em linhas próprias quando não.
+
+    `duas_colunas` tem um contrato forte: o valor da direita NUNCA é cortado —
+    se faltar espaço, quem encolhe é o rótulo, e se nem assim couber, a linha
+    estoura a largura da bobina. Isso é o certo para "TOTAL | R$ 46,00", onde o
+    rótulo é curto e conhecido.
+
+    Não serve para pares em que os DOIS lados são texto livre, como
+    "MESA: 12 | Atendente: Ana Carolina Rodrigues do Nascimento" (§9.32): um
+    nome de 120 caracteres numa bobina de 32 colunas estouraria a linha, e a
+    impressora cortaria justamente o nome. Aqui, quando o par não cabe, cada
+    lado desce para a linha dele e quebra normalmente — o cupom fica uma linha
+    mais alto e nada é perdido.
+    """
+    total = max(int(largura), 1)
+    um = " ".join(str(esquerda).split())
+    outro = " ".join(str(direita).split())
+    if not um:
+        return quebrar(outro, total)
+    if not outro:
+        return quebrar(um, total)
+    if len(um) + 1 + len(outro) <= total:
+        return [duas_colunas(um, outro, total)]
+    return quebrar(um, total) + quebrar(outro, total)
+
+
 def moeda(valor: Decimal | int | str) -> str:
     """Formata no padrão brasileiro: 1234.5 vira '1.234,50'.
 
@@ -239,6 +268,18 @@ def regua(largura: int) -> str:
 def data_hora(momento: datetime) -> str:
     """'21/08/2026 19:42'."""
     return f"{momento:%d/%m/%Y %H:%M}"
+
+
+def data_hora_curta(momento: datetime) -> str:
+    """'21/08/26 19:42' — o ano em dois dígitos.
+
+    É a marca de impressão do cupom de produção (§9.32). O ano curto existe
+    porque essa linha divide a largura com um rótulo comprido ("Marco de
+    impressão:"), e numa bobina de 32 colunas os dois dígitos a mais do ano
+    comeriam o rótulo. No cupom do cliente, que é o que ele guarda, o ano
+    continua inteiro (`data_hora`).
+    """
+    return f"{momento:%d/%m/%y %H:%M}"
 
 
 def data(momento: datetime) -> str:

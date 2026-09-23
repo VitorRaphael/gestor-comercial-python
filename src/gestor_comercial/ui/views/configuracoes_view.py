@@ -19,6 +19,9 @@ as últimas vendas para trás — ver `repository/backup.py`.
 Entre o §9.23 e o §9.26 houve uma quarta, "Taxa de serviço": o interruptor que
 dizia se a loja cobrava os 10% nas mesas. A taxa foi removida do sistema, e a
 tela voltou às três seções acima.
+
+Desde o §9.30 há uma quarta de novo, "Dados da Loja": nome, telefone e
+cidade/UF que o recibo imprime no cabeçalho (`LojaConfigService.salvar_dados_da_loja`).
 """
 
 from __future__ import annotations
@@ -58,6 +61,9 @@ from gestor_comercial.services.loja_config_service import (
     CAMPO_SENHA_LOGIN,
     CAMPO_SENHA_MASTER,
     CAMPO_SENHA_OPERACIONAL,
+    LIMITE_CIDADE,
+    LIMITE_NOME_LOJA,
+    LIMITE_TELEFONE,
     MASCARA,
     ROTULO_POR_CAMPO,
     LojaConfigService,
@@ -139,6 +145,8 @@ class ConfiguracoesView(QWidget):
         layout.addWidget(self._label_erro)
 
         layout.addWidget(self._montar_card_tema())
+        layout.addSpacing(20)
+        layout.addWidget(self._montar_card_loja())
         layout.addSpacing(20)
         layout.addWidget(self._montar_card_senhas())
         layout.addSpacing(20)
@@ -225,6 +233,97 @@ class ConfiguracoesView(QWidget):
         desfeita e seguraria esta tela junto.
         """
         self._botao_tema_claro.setChecked(ThemeController.instancia().claro)
+
+    # ------------------------------------------------------------------
+    # Seção "Dados da Loja" (§9.30) — o cabeçalho do recibo
+    # ------------------------------------------------------------------
+
+    def _montar_card_loja(self) -> QWidget:
+        bloco = QWidget()
+        bloco_layout = QVBoxLayout(bloco)
+        bloco_layout.setContentsMargins(0, 0, 0, 0)
+        bloco_layout.setSpacing(10)
+
+        secao_titulo = QLabel("DADOS DA LOJA")
+        secao_titulo.setObjectName("configSecaoTitulo")
+        bloco_layout.addWidget(secao_titulo)
+
+        cartao = QFrame()
+        cartao.setObjectName("configCard")
+        cartao_layout = QVBoxLayout(cartao)
+        cartao_layout.setContentsMargins(20, 20, 20, 20)
+        cartao_layout.setSpacing(10)
+
+        descricao = QLabel(
+            "Aparecem no topo do recibo e da conferência. Campo vazio não imprime linha."
+        )
+        descricao.setProperty("variante", "fraco")
+        descricao.setWordWrap(True)
+        cartao_layout.addWidget(descricao)
+
+        dados = self._loja_config.dados_da_loja()
+        self._campo_nome_loja = self._campo_da_loja(dados.nome, LIMITE_NOME_LOJA, "Ex.: Solvix Lanches")
+        self._campo_telefone = self._campo_da_loja(dados.telefone, LIMITE_TELEFONE, "(11) 98765-4321")
+        self._campo_cidade = self._campo_da_loja(dados.cidade, LIMITE_CIDADE, "Cidade")
+        self._campo_uf = self._campo_da_loja(dados.uf, 2, "UF")
+        self._campo_uf.setFixedWidth(64)
+
+        grade = QGridLayout()
+        grade.setHorizontalSpacing(12)
+        grade.setVerticalSpacing(6)
+        grade.addWidget(QLabel("Nome da loja"), 0, 0, 1, 3)
+        grade.addWidget(self._campo_nome_loja, 1, 0, 1, 3)
+        grade.addWidget(QLabel("Telefone"), 2, 0)
+        grade.addWidget(QLabel("Cidade"), 2, 1)
+        grade.addWidget(QLabel("UF"), 2, 2)
+        grade.addWidget(self._campo_telefone, 3, 0)
+        grade.addWidget(self._campo_cidade, 3, 1)
+        grade.addWidget(self._campo_uf, 3, 2)
+        grade.setColumnStretch(0, 2)
+        grade.setColumnStretch(1, 3)
+        cartao_layout.addLayout(grade)
+
+        linha = QHBoxLayout()
+        self._aviso_loja = QLabel("")
+        self._aviso_loja.setProperty("variante", "fraco")
+        linha.addWidget(self._aviso_loja)
+        linha.addStretch()
+        self._botao_salvar_loja = QPushButton("Salvar dados")
+        self._botao_salvar_loja.setProperty("variante", "secundario")
+        self._botao_salvar_loja.clicked.connect(self._salvar_dados_da_loja)
+        linha.addWidget(self._botao_salvar_loja)
+        cartao_layout.addLayout(linha)
+
+        bloco_layout.addWidget(cartao)
+        return bloco
+
+    @staticmethod
+    def _campo_da_loja(valor: str | None, limite: int, placeholder: str) -> QLineEdit:
+        campo = QLineEdit(valor or "")
+        campo.setMaxLength(limite)
+        campo.setPlaceholderText(placeholder)
+        return campo
+
+    def _salvar_dados_da_loja(self) -> None:
+        self._label_erro.setText("")
+        try:
+            dados = self._loja_config.salvar_dados_da_loja(
+                self._campo_nome_loja.text(),
+                self._campo_telefone.text(),
+                self._campo_cidade.text(),
+                self._campo_uf.text(),
+            )
+        except _ERROS_SERVICE as erro:
+            self._aviso_loja.setText("")
+            self._label_erro.setText(str(erro))
+            return
+        # Os campos voltam como foram GRAVADOS (espaços aparados, UF maiúscula):
+        # a tela não pode mostrar uma coisa e o recibo imprimir outra.
+        self._campo_nome_loja.setText(dados.nome or "")
+        self._campo_telefone.setText(dados.telefone or "")
+        self._campo_cidade.setText(dados.cidade or "")
+        self._campo_uf.setText(dados.uf or "")
+        self._aviso_loja.setText("Dados salvos.")
 
     # ------------------------------------------------------------------
     # Seção "Cópia de Segurança"

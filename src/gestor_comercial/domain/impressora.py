@@ -10,12 +10,15 @@ e os itens cujas categorias não têm impressora associada (o fallback do
 roteamento). No máximo uma impressora fica com essa marca — invariante
 mantida pelo service.
 
-`colunas`, `bobina_mm` e `letra_grossa` são o formato do cupom (§9.22). As
-colunas decidem a conta do `formatador_cupom` (divisores, preço encostado na
+`colunas`, `bobina_mm` e `escala_fonte` são o formato do cupom (§9.22, §9.30).
+As colunas decidem a conta do `formatador_cupom` (divisores, preço encostado na
 direita, régua); a bobina decide se essas colunas cabem na fonte normal ou se o
-driver liga a condensada; a letra grossa liga a ênfase do ESC/POS no cupom
-inteiro. A bobina é GRAVADA, e não deduzida das colunas: o gerente pode
-escolher uma combinação que a dedução não devolveria.
+driver liga a condensada; a escala é o multiplicador (2x, 3x ou 4x) das linhas
+de DESTAQUE do cupom — título, mesa e TOTAL —, as que se leem de longe. A
+tabela de itens fica na fonte normal: em 3x uma bobina de 48 colunas só teria
+16, e as cinco colunas da tabela não caberiam. A bobina é GRAVADA, e não
+deduzida das colunas: o gerente pode escolher uma combinação que a dedução não
+devolveria.
 """
 
 from sqlalchemy import Boolean, Enum, Integer, String
@@ -46,6 +49,14 @@ TETO_COLUNAS_58MM = 40
 o §9.19 o pôs na de 80mm.
 """
 
+ESCALAS_FONTE = (2, 3, 4)
+"""As escalas do seletor (§9.30). Inteiras de propósito: o `GS !` do ESC/POS só
+multiplica o caractere por 1 a 8, e um 2,5x só sairia desenhando o cupom como
+imagem — lento e pesado demais para o Celeron do food truck."""
+
+ESCALA_FONTE_PADRAO = 2
+"""O dobro: é o tamanho que o número da mesa já tinha antes da escala existir."""
+
 BAUDRATE_PADRAO = 9600
 PORTA_REDE_PADRAO = 9100
 
@@ -73,7 +84,9 @@ class Impressora(Base):
     caminho_arquivo: Mapped[str | None] = mapped_column(String(255))
     colunas: Mapped[int] = mapped_column(Integer, default=COLUNAS_PADRAO, nullable=False)
     bobina_mm: Mapped[int] = mapped_column(Integer, default=BOBINA_PADRAO_MM, nullable=False)
-    letra_grossa: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    escala_fonte: Mapped[int] = mapped_column(
+        Integer, default=ESCALA_FONTE_PADRAO, nullable=False
+    )
     ativa: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     padrao: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 

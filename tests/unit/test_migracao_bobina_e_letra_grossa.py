@@ -272,7 +272,10 @@ def test_banco_novo_chega_a_head_com_as_colunas(tmp_path, monkeypatch):
     cabeca = roteiro.get_current_head()
     engine = sa.create_engine(f"sqlite:///{arquivo}")
     try:
-        assert {"colunas", "bobina_mm", "letra_grossa"} <= _colunas(engine)
+        # A `letra_grossa` desta revisão saiu na `d2a8f5c3e917` (§9.30), que a
+        # trocou pela `escala_fonte`: na head ficam as colunas e a bobina.
+        assert {"colunas", "bobina_mm", "escala_fonte"} <= _colunas(engine)
+        assert "letra_grossa" not in _colunas(engine)
         assert _versao(engine) == cabeca
         assert REVISAO in {revisao.revision for revisao in roteiro.walk_revisions("base", cabeca)}
     finally:

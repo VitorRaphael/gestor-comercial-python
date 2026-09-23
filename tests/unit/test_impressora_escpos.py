@@ -268,26 +268,37 @@ def test_importar_o_sistema_nao_carrega_o_escpos():
 # Bytes ESC/POS de verdade: o que o modo ARQUIVO e o driver falso não cobrem
 # ----------------------------------------------------------------------
 
-# ESC ! n — comando de tamanho de texto. 0x00 é o normal, 0x30 é altura+largura
-# dupla. São os dois bytes que este bloco de testes persegue.
-TAMANHO_NORMAL = b"\x1b!\x00"
-TAMANHO_DOBRO = b"\x1b!0"
+# GS ! n — o tamanho do caractere (§9.30): nibble alto é a largura, baixo a
+# altura, cada um "multiplicador - 1". 0x00 é o normal, 0x11 o dobro, 0x22 o
+# triplo e 0x33 o quádruplo. É o único comando de tamanho que o driver manda.
+TAMANHO_NORMAL = b"\x1d!\x00"
+TAMANHO_DOBRO = b"\x1d!\x11"
+TAMANHO_POR_ESCALA = {2: b"\x1d!\x11", 3: b"\x1d!\x22", 4: b"\x1d!\x33"}
 
 
-def _bytes_do_cupom(documento):
+def _bytes_do_cupom(documento, **opcoes):
     """Renderiza o documento no `Dummy` do python-escpos e devolve os bytes crus."""
     from escpos.printer import Dummy
 
     dummy = Dummy()
-    impressora_escpos._DriverEscpos(dummy, "Cozinha").imprimir(documento)
+    impressora_escpos._DriverEscpos(dummy, "Cozinha", **opcoes).imprimir(documento)
     return dummy.output
 
 
+def _pedacos_por_texto(saida: bytes, textos: list[str]) -> list[bytes]:
+    """Os comandos que antecedem cada linha de texto, linha por linha."""
+    pedacos, inicio = [], 0
+    for texto in textos:
+        fim = saida.index(texto.encode("cp437", errors="replace"), inicio)
+        pedacos.append(saida[inicio:fim])
+        inicio = fim
+    return pedacos
+
+
 def test_bloco_em_dobro_volta_ao_tamanho_normal_no_bloco_seguinte():
-    """O `set()` do python-escpos só manda comando de tamanho quando algum dos
-    três parâmetros de tamanho é verdadeiro. Sem passar `normal_textsize`, o
-    dobro do número da mesa ligava e nunca desligava: o cupom inteiro (e o
-    próximo) sairiam dobrados e cortados pela largura da bobina."""
+    """Cada linha diz o próprio tamanho: sem isso o dobro do número da mesa
+    ligava e nunca desligava, e o cupom inteiro (e o próximo) sairiam dobrados
+    e cortados pela largura da bobina."""
     saida = _bytes_do_cupom(
         [
             BlocoTexto("MESA 7", dobro=True, centralizado=True),
@@ -303,11 +314,46 @@ def test_bloco_em_dobro_volta_ao_tamanho_normal_no_bloco_seguinte():
 
 
 def test_cupom_termina_no_tamanho_normal_para_nao_contaminar_o_proximo():
-    """A impressora guarda o estilo entre trabalhos: se o cupom terminar em
-    dobro, o recibo do cliente seguinte sai dobrado até alguém tirar da tomada."""
-    saida = _bytes_do_cupom([BlocoTexto("MESA 7", dobro=True)])
+    """A impressora guarda o estilo entre trabalhos: se o cupom terminar
+    ampliado, o recibo seguinte sai ampliado até alguém tirar da tomada."""
+    saida = _bytes_do_cupom([BlocoTexto("TOTAL", ampliado=True)], escala=4)
 
-    assert saida.rfind(TAMANHO_NORMAL) > saida.rfind(TAMANHO_DOBRO)
+    assert saida.rfind(TAMANHO_NORMAL) > saida.rfind(TAMANHO_POR_ESCALA[4])
+
+
+@pytest.mark.parametrize("escala", [2, 3, 4])
+def test_a_linha_ampliada_sai_na_escala_da_impressora(escala):
+    """O `GS !` com o multiplicador da impressora antes da linha de destaque,
+    e o normal antes da linha comum seguinte."""
+    textos = ["TOTAL R$ 46,00", "Obrigado"]
+    saida = _bytes_do_cupom(
+        [BlocoTexto(textos[0], negrito=True, ampliado=True), BlocoTexto(textos[1])],
+        escala=escala,
+    )
+
+    destaque, comum = _pedacos_por_texto(saida, textos)
+    assert TAMANHO_POR_ESCALA[escala] in destaque
+    assert comum.rfind(TAMANHO_NORMAL) > comum.rfind(TAMANHO_POR_ESCALA[escala])
+
+
+def test_o_tamanho_nao_passa_pelo_esc_exclamacao():
+    """`ESC ! n` e `GS ! n` mexem no mesmo tamanho em muitas térmicas, e o
+    `ESC ! 0` não zera com segurança o que o `GS !` ligou. O driver usa um
+    comando só — e é por isso que o normal volta de verdade depois do 3x."""
+    saida = _bytes_do_cupom(
+        [BlocoTexto("MESA 7", ampliado=True), BlocoTexto("MESA 8", dobro=True), BlocoTexto("x")],
+        escala=3,
+    )
+
+    assert b"\x1b!" not in saida
+
+
+def test_escala_fora_da_faixa_cai_no_dobro():
+    """Objeto de teste ou valor mexido à mão não pode estourar o `GS !` (1 a 8)."""
+    for bruto in (None, 0, 9, "3", True):
+        campos = {} if bruto is None else {"escala_fonte": bruto}
+        assert impressora_escpos.escala_de(impressora_falsa(**campos)) == 2
+    assert impressora_escpos.escala_de(impressora_falsa(escala_fonte=4)) == 4
 
 
 def test_cupom_comeca_reinicializando_a_impressora():
@@ -413,91 +459,48 @@ def test_falha_ao_finalizar_o_job_do_windows_vira_erro_de_impressao(monkeypatch)
 
 
 # ----------------------------------------------------------------------
-# Letra grossa e fonte condensada (§9.22)
+# Negrito, fonte condensada e escala (§9.22, §9.30)
 # ----------------------------------------------------------------------
 
-# ESC E n — ênfase. ESC M 1 — fonte B (condensada). São os bytes que o pedido
-# escreveu (`\x1b\x45\x01` e `\x1b\x45\x00`) e o da fonte que o 64 exige.
+# ESC E n — ênfase. ESC M 1 — fonte B (condensada).
 ENFASE_LIGA = b"\x1bE\x01"
 ENFASE_DESLIGA = b"\x1bE\x00"
 FONTE_CONDENSADA = b"\x1bM\x01"
 
 
-def _bytes_com(documento, **opcoes):
-    from escpos.printer import Dummy
-
-    dummy = Dummy()
-    impressora_escpos._DriverEscpos(dummy, "Caixa 01", **opcoes).imprimir(documento)
-    return dummy.output
-
-
-def _pedacos_por_texto(saida: bytes, textos: list[str]) -> list[bytes]:
-    """Os comandos que antecedem cada linha de texto, linha por linha."""
-    pedacos, inicio = [], 0
-    for texto in textos:
-        fim = saida.index(texto.encode("cp437", errors="replace"), inicio)
-        pedacos.append(saida[inicio:fim])
-        inicio = fim
-    return pedacos
-
-
-def test_letra_grossa_liga_a_enfase_em_todo_bloco_e_desliga_no_fim():
-    """Um `ESC E 1` só no cabeçalho morreria na primeira linha comum: o
-    `bold=False` dela manda `ESC E 0`, e o `ESC ! 0` do tamanho também zera a
-    ênfase. Por isso ela vai antes de CADA linha — e o `ESC E 0` sai no fim,
-    para o cupom seguinte (de outra impressora, ou fino) não herdar."""
-    textos = ["Comanda 12", "2x X-Burger", "TOTAL 46,00"]
-    saida = _bytes_com(
-        [BlocoTexto(textos[0], negrito=True), BlocoTexto(textos[1]), BlocoTexto(textos[2])],
-        letra_grossa=True,
-    )
-
-    for pedaco in _pedacos_por_texto(saida, textos):
-        assert pedaco.rfind(ENFASE_LIGA) > pedaco.rfind(ENFASE_DESLIGA), pedaco
-    assert saida.rfind(ENFASE_DESLIGA) > saida.rfind(ENFASE_LIGA)
-
-
-def test_letra_fina_so_enfatiza_o_que_e_negrito():
+def test_so_o_negrito_do_bloco_liga_a_enfase_e_o_fim_desliga():
+    """Sem a letra grossa (que saiu no §9.30), a ênfase é só do bloco negrito,
+    e o `ESC E 0` sai no fim para o cupom seguinte não herdar."""
     textos = ["Comanda 12", "2x X-Burger"]
-    saida = _bytes_com([BlocoTexto(textos[0], negrito=True), BlocoTexto(textos[1])])
+    saida = _bytes_do_cupom([BlocoTexto(textos[0], negrito=True), BlocoTexto(textos[1])])
 
     titulo, item = _pedacos_por_texto(saida, textos)
     assert ENFASE_LIGA in titulo
     assert ENFASE_LIGA not in item
+    assert saida.rfind(ENFASE_DESLIGA) > saida.rfind(ENFASE_LIGA)
 
 
-def test_sem_letra_grossa_nem_condensada_os_bytes_sao_os_de_sempre():
-    """A não-regressão do papel: quem não mexeu no formato imprime exatamente
-    os mesmos bytes de antes do §9.22 — nenhum comando de fonte a mais."""
+def test_sem_condensada_nenhum_comando_de_fonte():
     documento = [
         BlocoTexto("Comanda 12", negrito=True, centralizado=True),
-        BlocoTexto("MESA 7", dobro=True, centralizado=True),
+        BlocoTexto("MESA 7", ampliado=True, centralizado=True),
         BlocoTexto("2x X-Burger"),
     ]
 
-    assert _bytes_com(documento) == _bytes_com(documento, letra_grossa=False, condensada=False)
-    assert b"\x1bM" not in _bytes_com(documento)
+    assert b"\x1bM" not in _bytes_do_cupom(documento)
 
 
-def test_condensada_escolhe_a_fonte_b_depois_de_cada_tamanho():
-    """O `ESC ! 0` que cada bloco manda volta à fonte A. A fonte B tem que vir
-    DEPOIS dele, em toda linha, inclusive a do número da mesa em dobro."""
+def test_condensada_escolhe_a_fonte_b_em_toda_linha():
+    """Inclusive a linha ampliada: o tamanho e a fonte são comandos separados."""
     textos = ["Comanda 12", "MESA 7", "2x X-Burger"]
-    saida = _bytes_com(
-        [BlocoTexto(textos[0], negrito=True), BlocoTexto(textos[1], dobro=True), BlocoTexto(textos[2])],
+    saida = _bytes_do_cupom(
+        [BlocoTexto(textos[0], negrito=True), BlocoTexto(textos[1], ampliado=True), BlocoTexto(textos[2])],
         condensada=True,
+        escala=3,
     )
 
     for pedaco in _pedacos_por_texto(saida, textos):
-        assert pedaco.rfind(FONTE_CONDENSADA) > pedaco.rfind(TAMANHO_NORMAL), pedaco
-
-
-def test_o_cupom_condensado_termina_na_fonte_normal():
-    """O reset do fim (`ESC ! 0`) devolve a fonte A: a impressora guarda o
-    estado entre trabalhos, e o próximo cupom de outra largura herdaria a B."""
-    saida = _bytes_com([BlocoTexto("2x X-Burger")], condensada=True)
-
-    assert saida.rfind(TAMANHO_NORMAL) > saida.rfind(FONTE_CONDENSADA)
+        assert FONTE_CONDENSADA in pedaco, pedaco
 
 
 @pytest.mark.parametrize(
@@ -508,14 +511,14 @@ def test_a_fonte_condensada_entra_quando_passa_da_fonte_normal_da_bobina(colunas
     assert impressora_escpos.usa_fonte_condensada(colunas, bobina_mm) is condensada
 
 
-def test_os_parametros_da_thread_levam_bobina_e_letra():
+def test_os_parametros_da_thread_levam_bobina_e_escala():
     """O retrato que atravessa para a thread de impressão tem que levar os dois:
-    sem eles, a impressão fora da thread da UI sairia fina e na fonte A."""
+    sem eles, a impressão fora da thread da UI sairia na fonte A e em 2x."""
     parametros = impressora_escpos.ParametrosImpressora.de(
-        impressora_falsa(colunas=64, bobina_mm=80, letra_grossa=True)
+        impressora_falsa(colunas=64, bobina_mm=80, escala_fonte=4)
     )
 
-    assert (parametros.colunas, parametros.bobina_mm, parametros.letra_grossa) == (64, 80, True)
+    assert (parametros.colunas, parametros.bobina_mm, parametros.escala_fonte) == (64, 80, 4)
 
 
 @pytest.mark.parametrize("bobina_mm", [None, 76, "58"])
@@ -525,37 +528,136 @@ def test_sem_bobina_valida_os_parametros_ficam_na_de_80mm(bobina_mm):
     campos = {} if bobina_mm is None else {"bobina_mm": bobina_mm}
     parametros = impressora_escpos.ParametrosImpressora.de(impressora_falsa(**campos))
 
-    assert (parametros.bobina_mm, parametros.letra_grossa) == (80, False)
+    assert (parametros.bobina_mm, parametros.escala_fonte) == (80, 2)
 
 
 def test_a_sessao_de_impressao_entrega_o_formato_ao_driver(monkeypatch):
-    """Do cadastro ao papel: `abrir_driver` lê bobina, colunas e letra da
-    impressora e o driver manda a ênfase e a fonte B."""
+    """Do cadastro ao papel: `abrir_driver` lê bobina, colunas e escala da
+    impressora, e o driver manda a fonte B e o `GS !` da escala."""
     from escpos.printer import Dummy
 
     dummy = Dummy()
     dummy.close = lambda: None
     monkeypatch.setattr(impressora_escpos, "_abrir_conexao_escpos", lambda *args: dummy)
-    impressora = impressora_falsa(tipo_conexao="REDE", host="10.0.0.9", colunas=64, bobina_mm=80, letra_grossa=True)
+    impressora = impressora_falsa(tipo_conexao="REDE", host="10.0.0.9", colunas=64, bobina_mm=80, escala_fonte=3)
 
     with abrir_driver(impressora) as driver:
-        driver.imprimir([BlocoTexto("2x X-Burger")])
+        driver.imprimir([BlocoTexto("TOTAL", ampliado=True)])
 
-    assert ENFASE_LIGA in dummy.output
+    assert TAMANHO_POR_ESCALA[3] in dummy.output
     assert FONTE_CONDENSADA in dummy.output
 
 
-def test_arquivo_em_letra_grossa_sai_todo_em_maiuscula(tmp_path):
-    """A simulação de sempre: negrito vira MAIÚSCULA no .txt. Com a letra
-    grossa, o cupom inteiro é negrito — e os títulos deixam de se destacar,
-    como no papel."""
+@pytest.mark.parametrize(("escala", "esperado"), [(2, "T O T A L"), (3, "T  O  T  A  L"), (4, "T   O   T   A   L")])
+def test_arquivo_simula_a_escala_com_letra_espacada(tmp_path, escala, esperado):
     destino = tmp_path / "caixa.txt"
-    impressora = impressora_falsa(caminho_arquivo=str(destino), letra_grossa=True)
+    impressora = impressora_falsa(caminho_arquivo=str(destino), escala_fonte=escala)
 
     with abrir_driver(impressora) as driver:
-        driver.imprimir([BlocoTexto("Comanda 12", negrito=True), BlocoTexto("2x X-Burger")])
+        driver.imprimir([BlocoTexto("TOTAL", ampliado=True), BlocoTexto("2x X-Burger")])
 
     conteudo = destino.read_text(encoding="utf-8")
-    assert "COMANDA 12" in conteudo
-    assert "2X X-BURGER" in conteudo
-    assert "2x X-Burger" not in conteudo
+    assert esperado in conteudo
+    assert "2x X-Burger" in conteudo
+
+
+def test_arquivo_quebra_a_linha_ampliada_na_largura_dividida_pela_escala(tmp_path):
+    """Em 4x numa bobina de 32 colunas cabem 8 caracteres: o .txt mostra o
+    mesmo estrago que o papel mostraria, e nenhuma linha passa das 32."""
+    destino = tmp_path / "caixa.txt"
+    impressora = impressora_falsa(caminho_arquivo=str(destino), colunas=32, escala_fonte=4)
+
+    with abrir_driver(impressora) as driver:
+        driver.imprimir([BlocoTexto("SOLVIX LANCHES", ampliado=True)])
+
+    linhas = destino.read_text(encoding="utf-8").splitlines()[1:]
+    assert "S   O   L   V   I   X" in linhas
+    assert all(len(linha) <= 32 for linha in linhas)
+
+
+def test_o_destaque_atravessa_a_fila_de_contingencia():
+    """`ampliado` vai para o JSON e volta: um recibo guardado na fila reimprime
+    com o TOTAL em destaque, na escala que a impressora tiver no dia."""
+    documento = [BlocoTexto("TOTAL", negrito=True, ampliado=True), BlocoTexto("MESA 3", dobro=True)]
+
+    volta = impressora_escpos.documento_de_json(impressora_escpos.documento_para_json(documento))
+
+    assert volta == documento
+
+
+# ----------------------------------------------------------------------
+# Escala fixa por bloco (§9.31)
+# ----------------------------------------------------------------------
+
+
+class _ConexaoFalsa:
+    """Dublê que anota o tamanho pedido em cada `set()`.
+
+    O tamanho é o que interessa aqui: é ele que vira o byte do `GS !`, e o
+    driver manda um `set()` por bloco mais um reset antes do corte.
+    """
+
+    def __init__(self):
+        self.tamanhos: list[int] = []
+
+    def hw(self, _comando):
+        pass
+
+    def set(self, **kwargs):
+        self.tamanhos.append(kwargs.get("width"))
+
+    def textln(self, _texto):
+        pass
+
+    def cut(self):
+        pass
+
+
+
+def test_a_escala_do_bloco_ganha_da_escala_da_impressora():
+    """O cupom de diagnóstico precisa mostrar 1x, 2x, 3x e 4x no MESMO papel.
+
+    É a única exceção à regra de §9.30 (quem manda na escala é o cadastro), e
+    existe justamente para provar o cadastro: se as quatro linhas saem iguais,
+    a impressora ignora o `GS !`.
+    """
+    conexao = _ConexaoFalsa()
+    driver = impressora_escpos._DriverEscpos(conexao, "Cozinha", escala=2)
+
+    driver.imprimir(
+        [
+            BlocoTexto("1x", escala=1),
+            BlocoTexto("4x", escala=4),
+            BlocoTexto("da impressora", ampliado=True),
+            BlocoTexto("normal"),
+        ]
+    )
+
+    assert conexao.tamanhos == [1, 4, 2, 1, 1]  # o último é o reset antes do corte
+
+
+def test_a_escala_do_bloco_fica_na_faixa_do_comando_escpos():
+    """O `GS !` aceita de 1 a 8. Fora disso a impressora receberia lixo."""
+    conexao = _ConexaoFalsa()
+    driver = impressora_escpos._DriverEscpos(conexao, "Cozinha", escala=2)
+
+    driver.imprimir([BlocoTexto("gigante", escala=99), BlocoTexto("zero", escala=0)])
+
+    assert conexao.tamanhos[:2] == [impressora_escpos.ESCALA_MAXIMA, 1]
+
+
+def test_a_escala_do_bloco_atravessa_a_fila_de_contingencia():
+    documento = [BlocoTexto("3x MESA 12", negrito=True, escala=3), BlocoTexto("normal")]
+
+    volta = impressora_escpos.documento_de_json(impressora_escpos.documento_para_json(documento))
+
+    assert volta == documento
+
+
+def test_cupom_guardado_antes_da_escala_por_bloco_volta_sem_ela():
+    """Fila antiga (JSON sem a chave) reimprime na escala da impressora."""
+    volta = impressora_escpos.documento_de_json(
+        '[{"texto": "TOTAL", "negrito": true, "ampliado": true}]'
+    )
+
+    assert volta == [BlocoTexto("TOTAL", negrito=True, ampliado=True, escala=None)]

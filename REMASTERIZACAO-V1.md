@@ -5620,6 +5620,85 @@ tabelas, hash idêntico), e `gerar_exe.py --origem build/banco_limpo/...`.
 - **Rodar direto do pendrive** funciona, mas grava as vendas nele; o `LEIA-ME`
   e o `DEPLOYMENT.md` recomendam copiar a pasta para o disco.
 
+### 9.30 O recibo em colunas, e a escala da fonte no lugar da espessura ✅ CONCLUÍDO — 2026-09-22
+
+Pedido do Vitor: recibo com layout profissional (cabeçalho da loja, tabela
+`CÓDIGO | DESCRIÇÃO | PREÇO | QTD | TOTAL`, TOTAL em destaque, operador, local,
+permanência e `NÃO É DOCUMENTO FISCAL`), e trocar "Letras finas/grossas" do
+cartão da impressora por uma escala de fonte para testar em campo.
+
+#### Três premissas do pedido corrigidas antes de começar (decisões do Vitor)
+
+1. **2,5x não existe em ESC/POS.** O `GS !` multiplica o caractere por inteiros
+   de 1 a 8; 2,5x só sairia desenhando o cupom como imagem (lento no Celeron).
+   A lista virou **2x · 3x · 4x**.
+2. **A escala come as colunas**: em 3x a bobina de 48 fica com 16, e cinco
+   colunas não cabem em 16. A escala vale só nas **linhas de destaque** (nome
+   da loja, mesa da cozinha, TOTAL); a tabela fica na fonte normal.
+3. **O banco não tinha nome, telefone nem cidade da loja**, e produto não tem
+   código. Entraram quatro colunas em `loja_config` com a seção "Dados da loja"
+   em Configurações; o CÓDIGO é o id do produto.
+
+#### O desenho
+
+- **`services/recibo_formatter.py`** (puro, como o `formatador_cupom`):
+  `cabecalho`, `tabela_de_itens`, `total_em_destaque`, `rodape`, `permanencia`.
+  Recibo e pré-conta usam as mesmas peças; o `impressao_service` só monta o
+  miolo de cada um (pagamentos/troco; subtotal/desconto). As larguras das
+  colunas saem dos **dados** (um R$ 1.234,50 alarga a coluna, nunca é
+  cortado); com a descrição abaixo de 12 letras a tabela **empilha** (código e
+  descrição em cima, números embaixo, nas colunas do cabeçalho). O TOTAL que não
+  cabe na largura ampliada desce em duas linhas; se nem o valor sozinho cabe
+  (58mm em 4x = 8 letras), sai em negrito no tamanho normal.
+- **`BlocoTexto.ampliado`**: a linha de destaque sai na escala da IMPRESSORA,
+  não do documento — a fila de contingência reimprime com a escala de hoje. O
+  `dobro` antigo ficou para os cupons já guardados na fila.
+- **Driver**: todo bloco manda o próprio tamanho pelo `GS !` (`custom_size`),
+  inclusive o 1x. O `normal_textsize` do python-escpos só manda `ESC ! 0`, que
+  não zera com segurança o que o `GS !` ligou — a linha depois de um TOTAL em
+  3x sairia ampliada. Nenhum `ESC !` sai mais (trancado em teste).
+- **Schema**: migração `d2a8f5c3e917` — `impressoras.escala_fonte NOT NULL
+  DEFAULT 2` (toda impressora reabre em 2x, o tamanho que a mesa já tinha),
+  `DROP COLUMN letra_grossa`, `loja_config.nome_loja/telefone/cidade/uf`
+  anuláveis; `BEGIN` explícito, tudo num commit (teste derruba o `DROP` no meio
+  e confere que as cinco colunas novas somem junto).
+- **Cartão da impressora**: "TAMANHO DA FONTE" com três botões `2x · 3x · 4x`
+  que reusam o segmento da bobina/colunas (`impDialogEscala`); a classe
+  `_BotaoDeEspessura`, o enum `Espessura` e o QSS dela saíram. Resumo:
+  `Caixa 01 · USB · 80mm · 48 col. · fonte 3x`. Escala inválida no service é
+  recusada ("2x, 3x ou 4x"), nunca arredondada. Cupom de teste diz "Escala 3x"
+  e imprime a "MESA 12" ampliada.
+- **Dados da loja**: `LojaConfigService.salvar_dados_da_loja` valida os quatro
+  campos antes de tocar na linha (telefone só números/()+-; UF duas letras);
+  vazio vira `NULL` e não imprime linha.
+
+#### Achado no caminho
+
+`Impressora` ainda não gravada chega ao cartão com `escala_fonte=None` (o
+default do ORM só vale no INSERT): o cartão devolveria `None` ao service.
+`escala_da_impressora` cai no 2x, a regra do `bobina_da_impressora`.
+
+#### Métricas
+
+- Suíte **2622 passed + 1 corrigido** (o teste da head da `b9d2f5a31c47`
+  exigia a `letra_grossa`, que agora sai na head). Arquivos novos:
+  `test_recibo_formatter.py` (75), `test_dados_da_loja.py` (11),
+  `test_migracao_escala_e_dados_da_loja.py` (7), `test_dados_da_loja_na_tela.py` (4);
+  `test_impressora_bobina_e_letra.py` virou `..._e_escala.py`.
+- Formatação de um recibo: uma passada pelos itens e strings; nenhum objeto
+  vivo depois da impressão, nenhuma consulta nova além da leitura por chave
+  primária da linha única de `loja_config`.
+
+#### Ficou de fora
+
+- **Bancadas `tools/comparar_cupons.py`/`comparar_telas.py`**: os cupons de
+  recibo e pré-conta MUDAM por desenho, e a tela de Configurações ganhou uma
+  seção; não foram rodadas.
+- **Cupom de produção** manteve o layout (só a mesa passou à escala); o
+  fechamento de caixa também.
+- **Teste em campo** das três escalas na térmica real, e o `.exe` gerado de
+  novo para levar isto.
+
 ---
 
 ## 10. As melhores mudanças que o programa teve — em português de balcão
@@ -5734,3 +5813,93 @@ lado da certa, para ninguém repetir. (§2.3, §3.2, §3.3 e §7.2)
 gravar dado quebrado, ganhou backup automático, perdeu uma dúzia de defeitos
 visíveis — e, o mais valioso, ganhou uma rede de testes que torna seguro
 continuar mexendo nele.
+
+### 9.31 O cupom que prova se a impressora obedece ao comando de escala ✅ CONCLUÍDO — 2026-09-23
+
+**O pedido.** "Os botões de 2x, 3x e 4x não funcionam na impressora física."
+
+**O que a investigação achou.** Nada quebrado. O driver já mandava o `GS !`
+real, e os bytes conferidos com a impressora `Dummy` do python-escpos são
+exatamente os do protocolo:
+
+    1x -> 1d 21 00    2x -> 1d 21 11    3x -> 1d 21 22    4x -> 1d 21 33
+
+A cadeia do cadastro ao papel também estava íntegra: o cartão grava
+`escala_fonte`, `cardapio_service` valida, `ParametrosImpressora.de` copia e
+`_DriverEscpos._tamanho` usa. Não havia o que consertar no caminho.
+
+**Por que o cupom novo existe, então.** Porque "o destaque não aumentou" tem
+duas causas que, no papel, são idênticas: ou a escala escolhida não é a que o
+gerente pensa que é, ou a impressora ignora o `GS !`. Sem separá-las, a
+próxima investigação recomeça do zero.
+
+`imprimir_teste_de_fonte` imprime 1x, 2x, 3x e 4x **no mesmo cupom**, com o
+mesmo cadastro. Quatro tamanhos diferentes no papel = o comando funciona, e o
+que resta ajustar é a escala do cartão. Quatro tamanhos iguais = a impressora
+ignora o comando, e nenhuma mudança no sistema vai aumentar aquela letra.
+
+O 1x entra junto de propósito: sem uma linha de referência, "2x, 3x e 4x
+saíram iguais" não distingue uma impressora que ignora o comando de uma que
+aplica a mesma escala a tudo.
+
+**O que mudou no código.** `BlocoTexto` ganhou `escala: int | None` — uma
+escala fixa do bloco, que vence a da impressora. É a **única** exceção à regra
+de §9.30 (quem manda na escala é o cadastro, não o documento), e existe porque
+este cupom precisa ser comparável entre impressoras. Os dois drivers honram o
+campo, e ele atravessa o JSON da fila de contingência; cupom guardado antes do
+campo existir volta com `None` e reimprime na escala da impressora, como
+sempre. Na tela de Impressoras, "Testar fonte" é um botão separado do teste
+comum: são quatro linhas grandes de papel para responder uma pergunta que só
+se faz quando algo está errado.
+
+### 9.32 Os dois relatórios: produção em colunas e o consumo do cliente ✅ CONCLUÍDO — 2026-09-23
+
+**O cupom de produção** virou o "Relatório para \<setor\>": o setor (o nome da
+impressora) no cabeçalho, `MESA: 12` e `Atendente: Ana` dividindo a primeira
+linha, `Marco de impressão:` e a data curta na segunda, e a tabela
+`DESCRIÇÃO | QTD` com a quantidade encostada na direita — a coluna que a
+cozinha lê em diagonal. No rodapé, o total de itens e `PEDIDO: 427`.
+
+Três decisões que o layout obrigou:
+
+1. **A descrição é truncada, não quebrada** — ao contrário de todo o resto do
+   sistema. O cupom é conferido contando linhas contra pratos, e um item em
+   duas linhas parece dois itens. Nome comprido perde o fim.
+
+2. **A mesa não sai mais ampliada.** Ela agora divide a linha com o atendente,
+   e duas colunas não cabem numa linha ampliada. É uma perda real em relação a
+   §9.30 — era a informação que a cozinha lia de longe, de dentro do vapor da
+   chapa — e está registrada aqui como escolha, não como esquecimento. O teste
+   `test_mesa_sai_ampliada_para_a_cozinha_ler_de_longe` passou a afirmar a
+   ausência, para quem reintroduzir o destaque no futuro ter que revisar a
+   largura das colunas junto.
+
+3. **`duas_colunas_ou_empilhado` nasceu aqui.** `duas_colunas` tem um contrato
+   forte: o valor da direita nunca é cortado — se faltar espaço, encolhe o
+   rótulo, e se nem assim couber, a linha estoura a bobina. Isso é certo para
+   "TOTAL | R$ 46,00", e errado para "MESA: 12 | Atendente: \<120 caracteres\>".
+   Os testes de bobina estreita pegaram exatamente isso na primeira execução.
+   Quando o par não cabe, cada lado desce para a linha dele.
+
+**O cupom do cliente** ganhou três ajustes: o título `RELATÓRIO DE CONSUMO`
+centralizado abaixo do tipo (vale para o recibo e para a pré-conta — os dois
+relatam o mesmo consumo), o total com preenchimento pontilhado
+(`TOTAL ..... R$ 52,50`, só na forma que cabe numa linha), e `LOCAL` e
+`Permanência` dividindo a mesma linha, com o mesmo recuo para empilhar em
+bobina estreita.
+
+**O que foi recusado.** O pedido original trazia mais três itens que não foram
+implementados, por serem regressões:
+
+* **fixar 48 colunas** — o sistema suporta 58mm (32 colunas) e fonte
+  condensada (64). Hardcodar 48 imprime lixo na bobina de 58mm. A largura
+  continua vindo de `Impressora.colunas`, e as colunas da tabela continuam
+  calculadas a partir dos dados;
+* **gravar o modo ARQUIVO em `wb`** — o `_DriverArquivo` grava texto legível de
+  propósito, para conferir o cupom sem impressora física. Bytes crus fariam o
+  arquivo abrir como `@a` no Bloco de Notas, tirando do Vitor a
+  única bancada que ele tem antes do hardware. Se um spooler genérico vier a
+  precisar de bytes crus, o caminho é um sexto tipo de conexão, não converter
+  o existente;
+* **reescrever a escala em hexadecimal na mão** — já era o que o driver fazia
+  (§9.31).

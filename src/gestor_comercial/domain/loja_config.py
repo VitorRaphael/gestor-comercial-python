@@ -101,3 +101,14 @@ class LojaConfig(Base):
     senha_operacional_cifrada: Mapped[str | None] = mapped_column(String(255))
     senha_login_cifrada: Mapped[str | None] = mapped_column(String(255))
     cpf_dono_cifrado: Mapped[str | None] = mapped_column(String(255))
+
+    # ------------------------------------------------------------------
+    # Dados da loja, para o cabeçalho do recibo (§9.30)
+    # ------------------------------------------------------------------
+    # Todos opcionais: loja sem nome cadastrado imprime o recibo sem cabeçalho
+    # de loja, e não um "SEM NOME" que o cliente leria. Quem edita é a seção
+    # "Dados da loja" de Configurações (`LojaConfigService.salvar_dados_da_loja`).
+    nome_loja: Mapped[str | None] = mapped_column(String(60))
+    telefone: Mapped[str | None] = mapped_column(String(20))
+    cidade: Mapped[str | None] = mapped_column(String(60))
+    uf: Mapped[str | None] = mapped_column(String(2))

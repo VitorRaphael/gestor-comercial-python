@@ -33,6 +33,8 @@ from gestor_comercial.domain.impressora import (
     BAUDRATE_PADRAO,
     BOBINAS_MM,
     COLUNAS_PADRAO,
+    ESCALA_FONTE_PADRAO,
+    ESCALAS_FONTE,
     PORTA_REDE_PADRAO,
     Impressora,
     bobina_mm_das_colunas,
@@ -1004,7 +1006,7 @@ class CardapioService:
         caminho_arquivo: str | None = None,
         colunas: int | str | None = None,
         bobina_mm: int | str | None = None,
-        letra_grossa: bool = False,
+        escala_fonte: int | str | None = None,
         ativa: bool = True,
         padrao: bool | None = None,
     ) -> Impressora:
@@ -1022,10 +1024,10 @@ class CardapioService:
         regra automática daria. Impressora que nasce desligada NUNCA é a padrão,
         pedida ou não — ver `_aplicar_uso`.
 
-        `bobina_mm` e `letra_grossa` são o formato do cupom (§9.22). Sem bobina,
-        ela sai das colunas pela regra de antes de ser gravada
+        `bobina_mm` e `escala_fonte` são o formato do cupom (§9.22, §9.30). Sem
+        bobina, ela sai das colunas pela regra de antes de ser gravada
         (`bobina_mm_das_colunas`), e `criar_impressora("Cozinha")` continua
-        nascendo 48 colunas, 80mm e letra fina.
+        nascendo 48 colunas, 80mm e destaque em 2x.
         """
         self.auth.exigir_gerente()
         nome_limpo = self._texto_obrigatorio(nome, "Informe o nome da impressora.")
@@ -1036,7 +1038,7 @@ class CardapioService:
         impressora.bobina_mm = self._bobina_valida(
             bobina_mm, bobina_mm_das_colunas(impressora.colunas)
         )
-        impressora.letra_grossa = bool(letra_grossa)
+        impressora.escala_fonte = self._escala_valida(escala_fonte, ESCALA_FONTE_PADRAO)
         self._aplicar_conexao(
             impressora,
             tipo_conexao,
@@ -1077,14 +1079,14 @@ class CardapioService:
         caminho_arquivo: str | None = None,
         colunas: int | str | None = None,
         bobina_mm: int | str | None = None,
-        letra_grossa: bool | None = None,
+        escala_fonte: int | str | None = None,
         ativa: bool | None = None,
         padrao: bool | None = None,
     ) -> Impressora:
         """Grava o formulário inteiro de uma impressora já cadastrada.
 
         É substituição, não remendo: o que não vier no parâmetro do tipo de
-        conexão escolhido fica NULL. `colunas`, `bobina_mm`, `letra_grossa`,
+        conexão escolhido fica NULL. `colunas`, `bobina_mm`, `escala_fonte`,
         `ativa` e `padrao` em `None` são a exceção — significam "não mexe",
         porque são campos que a tela pode simplesmente não estar editando. A
         bobina NÃO é deduzida de novo quando só as colunas mudam: ela é gravada
@@ -1103,8 +1105,7 @@ class CardapioService:
         impressora.nome = nome_limpo
         impressora.colunas = self._colunas_validas(colunas, impressora.colunas)
         impressora.bobina_mm = self._bobina_valida(bobina_mm, impressora.bobina_mm)
-        if letra_grossa is not None:
-            impressora.letra_grossa = bool(letra_grossa)
+        impressora.escala_fonte = self._escala_valida(escala_fonte, impressora.escala_fonte)
         self._aplicar_conexao(
             impressora,
             tipo_conexao,
@@ -1361,6 +1362,15 @@ class CardapioService:
         mensagem = "A bobina da impressora deve ser de 58mm ou de 80mm."
         valor = self._inteiro_positivo(bobina_mm, padrao, mensagem)
         if valor not in BOBINAS_MM:
+            raise RegraDeNegocioError(mensagem)
+        return valor
+
+    def _escala_valida(self, escala: int | str | None, padrao: int) -> int:
+        """2, 3 ou 4 (§9.30). Recusa em vez de arredondar: 2,5x não existe no
+        `GS !` do ESC/POS, e gravar outra escala que não a pedida seria mentir."""
+        mensagem = "A escala da fonte deve ser 2x, 3x ou 4x."
+        valor = self._inteiro_positivo(escala, padrao, mensagem)
+        if valor not in ESCALAS_FONTE:
             raise RegraDeNegocioError(mensagem)
         return valor
 

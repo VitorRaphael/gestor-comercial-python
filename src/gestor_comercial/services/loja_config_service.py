@@ -33,9 +33,15 @@ Entre o §9.23 e o §9.26 o singleton guardou também uma regra de operação
 (`aceita_taxa_servico`, o interruptor da taxa de serviço na tela de
 Configurações). A taxa foi removida do sistema: este service voltou a cuidar só
 de segredos.
+
+Desde o §9.30 cuida também dos **dados da loja** que o recibo imprime no
+cabeçalho (nome, telefone, cidade/UF): `dados_da_loja` e
+`salvar_dados_da_loja`, gravados num commit só.
 """
 
 from __future__ import annotations
+
+import re
 
 from gestor_comercial.domain.loja_config import LojaConfig
 from gestor_comercial.repository.preferencia_repository import CHAVE_DE_EXIBICAO
@@ -46,7 +52,19 @@ from gestor_comercial.services.exceptions import (
     RegraDeNegocioError,
 )
 from gestor_comercial.services import segredo_reversivel
+from gestor_comercial.services.recibo_formatter import DadosDaLoja
 from gestor_comercial.services.transacao import transacional
+
+# Os tetos das colunas de `loja_config` (§9.30). O nome é o do destaque do
+# recibo: em 4x numa bobina de 58mm cabem 8 letras por linha, e 60 é o que ainda
+# quebra em poucas linhas sem virar um parágrafo no topo do cupom.
+LIMITE_NOME_LOJA = 60
+LIMITE_TELEFONE = 20
+LIMITE_CIDADE = 60
+
+# Dígitos, espaço, parênteses, hífen e o "+" do DDI: "(11) 98765-4321".
+_TELEFONE = re.compile(r"[0-9()+\- ]+")
+_UF = re.compile(r"[A-Z]{2}")
 
 SENHA_MASTER_PADRAO = "050727"
 SENHA_OPERACIONAL_PADRAO = "26407200"
@@ -161,6 +179,49 @@ class LojaConfigService:
     # ------------------------------------------------------------------
     # Validação (desbloqueio)
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Dados da loja (§9.30) — o cabeçalho do recibo
+    # ------------------------------------------------------------------
+
+    def dados_da_loja(self) -> DadosDaLoja:
+        return DadosDaLoja.de(self.obter_ou_criar())
+
+    def salvar_dados_da_loja(
+        self, nome: str | None, telefone: str | None, cidade: str | None, uf: str | None
+    ) -> DadosDaLoja:
+        """Grava os quatro campos num commit só; vazio vira `NULL`.
+
+        Tudo é validado ANTES de tocar na linha: um telefone recusado não pode
+        deixar o nome novo gravado e o resto antigo — o recibo imprimiria uma
+        loja pela metade.
+        """
+        nome_limpo = self._texto_opcional(nome, LIMITE_NOME_LOJA, "O nome da loja")
+        cidade_limpa = self._texto_opcional(cidade, LIMITE_CIDADE, "A cidade")
+        telefone_limpo = self._texto_opcional(telefone, LIMITE_TELEFONE, "O telefone")
+        if telefone_limpo is not None and not _TELEFONE.fullmatch(telefone_limpo):
+            raise RegraDeNegocioError(
+                "O telefone só aceita números, espaço, parênteses, hífen e +."
+            )
+        uf_limpa = (uf or "").strip().upper() or None
+        if uf_limpa is not None and not _UF.fullmatch(uf_limpa):
+            raise RegraDeNegocioError("A UF deve ter duas letras, como SP ou MG.")
+
+        config = self.obter_ou_criar()
+        config.nome_loja = nome_limpo
+        config.telefone = telefone_limpo
+        config.cidade = cidade_limpa
+        config.uf = uf_limpa
+        self.uow.loja_config.salvar(config)
+        self.uow.commit()
+        return DadosDaLoja.de(config)
+
+    @staticmethod
+    def _texto_opcional(valor: str | None, limite: int, rotulo: str) -> str | None:
+        limpo = " ".join((valor or "").split())
+        if len(limpo) > limite:
+            raise RegraDeNegocioError(f"{rotulo} aceita até {limite} caracteres.")
+        return limpo or None
 
     def validar_senha_login(self, senha: str) -> None:
         config = self.obter_ou_criar()

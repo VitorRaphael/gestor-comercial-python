@@ -55,11 +55,13 @@ from gestor_comercial.hardware.impressora_escpos import (
     ParametrosImpressora,
     documento_de_json,
     documento_para_json,
+    escala_de,
     usa_fonte_condensada,
 )
 from gestor_comercial.hardware.impressora_escpos import abrir_driver as abrir_driver_escpos
 from gestor_comercial.repository.unit_of_work import UnitOfWork
 from gestor_comercial.services import formatador_cupom as cupom
+from gestor_comercial.services import recibo_formatter as recibo
 from gestor_comercial.services.auth_service import AuthService
 from gestor_comercial.services.caixa_service import (
     FORMAS_MAQUININHA,
@@ -99,6 +101,28 @@ def _aguardar_simples(thread: threading.Thread, teto_s: float) -> None:
 
 # Rótulos escritos por extenso e acentuados: o cupom é lido pelo cliente, não
 # pelo programador. Um `.value.capitalize()` daria "Consumo_interno".
+# As escalas do cupom de diagnóstico de fonte (§9.31). O 1x entra junto de
+# propósito: é a régua de comparação — sem ele, "2x, 3x e 4x saíram iguais"
+# não distingue uma impressora que ignora o `GS !` de uma que aplica a escala
+# a tudo.
+ESCALAS_DO_TESTE_DE_FONTE = (1, 2, 3, 4)
+
+# Os cabeçalhos da tabela do cupom de produção (§9.32). Vêm do
+# `recibo_formatter` em vez de repetidos aqui: são as MESMAS colunas do cupom
+# do cliente, e escrever "QTD" em dois arquivos é como as duas telas começam a
+# divergir sem ninguém perceber.
+ROTULO_DESCRICAO = recibo.ROTULO_DESCRICAO
+ROTULO_QTD = recibo.ROTULO_QTD
+
+# O responsável impresso quando a comanda não tem funcionário vinculado e não
+# há operador na sessão (§9.32).
+ATENDENTE_PADRAO = "Caixa"
+
+# O título do cupom do cliente (§9.32), centralizado abaixo do tipo. Vale para
+# o recibo e para a pré-conta: os dois relatam o MESMO consumo, e o que os
+# separa (pagamentos x subtotal/desconto) já está no miolo e no rodapé.
+TITULO_RELATORIO_DE_CONSUMO = "RELATÓRIO DE CONSUMO"
+
 ROTULO_FORMA_PAGAMENTO = {
     FormaPagamento.DINHEIRO: "Dinheiro",
     FormaPagamento.CREDITO: "Cartão de crédito",
@@ -304,6 +328,31 @@ class ImpressaoService:
         # justamente para o gerente conferir o cabo antes de reativá-la.
         documento = self._documento_teste(impressora, datetime.now())
         return self._enviar(impressora, documento, 0, "Teste de impressora")
+
+    def imprimir_teste_de_fonte(self, impressora_id: int) -> ResultadoImpressao:
+        """Cupom de diagnóstico da escala (§9.31): 1x, 2x, 3x e 4x no mesmo papel.
+
+        Existe porque "o destaque não aumentou" tem duas causas muito
+        diferentes, e a olho nu elas são idênticas: ou o cadastro não chegou ao
+        driver, ou a impressora ignora o `GS !`. Este cupom separa as duas sem
+        depender de o gerente reeditar nada — cada linha carrega a escala fixa
+        dela (`BlocoTexto.escala`), então as quatro saem no MESMO cupom, com o
+        MESMO cadastro.
+
+        Como ler o papel:
+
+        * as quatro linhas saem em tamanhos crescentes → o `GS !` funciona, e
+          um destaque que não cresce é cadastro (a escala escolhida no cartão);
+        * as quatro saem do mesmo tamanho → a impressora ignora o `GS !`, e
+          nenhum ajuste no sistema vai aumentar a letra dela.
+        """
+        self.auth.usuario_atual()
+        impressora = self.uow.impressoras.buscar_por_id(impressora_id)
+        if impressora is None:
+            raise RecursoNaoEncontradoError(f"Impressora não encontrada (código {impressora_id}).")
+
+        documento = self._documento_teste_de_fonte(impressora, datetime.now())
+        return self._enviar(impressora, documento, 0, "Teste de fonte")
 
     @staticmethod
     def listar_destinos_locais() -> list[DestinoLocal]:
@@ -599,33 +648,53 @@ class ImpressaoService:
         agora: datetime,
         segunda_via: bool,
     ) -> Documento:
-        """Cupom da cozinha: o que produzir, para qual mesa, em que ordem."""
+        """Cupom da cozinha (§9.32): o que produzir, para qual mesa, em que ordem.
+
+        O layout é o do "relatório de produção": o setor no cabeçalho, mesa e
+        atendente dividindo a primeira linha, a marca de impressão na segunda,
+        e a tabela `DESCRIÇÃO | QTD` — quantidade encostada na direita, que é a
+        coluna que a cozinha lê em diagonal.
+
+        A descrição é TRUNCADA e não quebrada, ao contrário do resto do
+        sistema: aqui cada item precisa caber em uma linha só, porque o cupom é
+        conferido contando linhas contra pratos. Nome comprido perde o fim, e é
+        um preço menor do que um item parecer dois.
+        """
         impressora = grupo.impressora
         largura = cupom.largura_util(impressora.colunas)
 
-        # O nome da impressora é texto de tamanho livre como qualquer outro
-        # (`impressoras.nome` aceita 80 caracteres e a bobina pode ter 20), e é
-        # logo a primeira linha do cupom — a que diz para qual praça o pedido
-        # vai. Sem quebrar, a impressora corta o excedente e o cabeçalho mente.
+        # O setor é o nome da impressora — é ela que define a praça (chapa,
+        # bar, cozinha). Passa pelo `quebrar` porque `impressoras.nome` aceita
+        # 80 caracteres e a bobina pode ter 20.
         documento: Documento = [
             BlocoTexto(linha, negrito=True, centralizado=True)
-            for linha in cupom.quebrar(impressora.nome.upper(), largura)
+            for linha in cupom.quebrar(f"Relatório para {impressora.nome}", largura)
         ]
         if segunda_via:
             documento.append(BlocoTexto("2ª VIA", negrito=True, centralizado=True))
 
-        # Mesa em dobro: é a única informação que a cozinha precisa ler de longe,
-        # de dentro do vapor da chapa, sem chegar perto do cupom.
-        documento.append(
-            BlocoTexto(self._destino_da_comanda(comanda), dobro=True, centralizado=True)
+        # `duas_colunas_ou_empilhado` e não `duas_colunas`: os dois lados são
+        # texto livre e `funcionarios.nome` aceita 120 caracteres, então numa
+        # bobina de 32 colunas o par não cabe — e é o NOME que a impressora
+        # cortaria. Não cabendo, cada um desce para a linha dele.
+        documento.extend(
+            BlocoTexto(linha)
+            for linha in cupom.duas_colunas_ou_empilhado(
+                self._destino_rotulado(comanda),
+                f"Atendente: {self._nome_do_atendente(comanda)}",
+                largura,
+            )
         )
-        documento.append(
-            BlocoTexto(cupom.duas_colunas(f"Comanda {comanda.id}", cupom.hora(agora), largura))
+        # Empilha em vez de cortar: numa bobina de 32 colunas o rótulo inteiro
+        # mais a data não cabem, e `duas_colunas` cortaria a palavra no meio
+        # ("Marco de impress"). Uma linha a mais custa menos que um rótulo
+        # mutilado logo no cabeçalho.
+        documento.extend(
+            BlocoTexto(linha)
+            for linha in cupom.duas_colunas_ou_empilhado(
+                "Marco de impressão:", cupom.data_hora_curta(agora), largura
+            )
         )
-        # Passa pelo `quebrar` como qualquer outro texto de tamanho livre:
-        # `funcionarios.nome` aceita 120 caracteres e a bobina tem 32.
-        for linha in cupom.quebrar(f"Atendente: {self._nome_do_atendente(comanda)}", largura):
-            documento.append(BlocoTexto(linha))
         documento.append(BlocoTexto(cupom.separador(largura)))
 
         # Consolida itens idênticos (mesmo produto e mesma observação) antes de
@@ -639,10 +708,31 @@ class ImpressaoService:
         )
         descricoes = {item.produto.id: item.produto.descricao for item in grupo.itens}
 
+        # A coluna QTD sai dos DADOS: 3 itens ocupam 1 caractere, 12 ocupam 2, e
+        # a descrição fica com o que sobrar. Fixar a largura da quantidade
+        # roubaria letra do nome do produto em todo cupom por causa de um
+        # pedido grande que talvez nunca aconteça.
+        largura_qtd = max(
+            [len(ROTULO_QTD), *(len(str(q)) for _, _, q, _ in agrupados)] or [len(ROTULO_QTD)]
+        )
+        largura_descricao = max(largura - largura_qtd - 1, 1)
+
+        documento.append(
+            BlocoTexto(
+                cupom.duas_colunas(ROTULO_DESCRICAO, ROTULO_QTD, largura), negrito=True
+            )
+        )
+        documento.append(BlocoTexto(cupom.separador(largura)))
+
         for produto_id, nome, quantidade, observacao in agrupados:
-            for linha in cupom.linha_de_item(quantidade, nome, largura):
-                # Nome do item em negrito: é o que a cozinha procura primeiro.
-                documento.append(BlocoTexto(linha, negrito=True))
+            documento.append(
+                BlocoTexto(
+                    cupom.duas_colunas(
+                        cupom.truncar(nome, largura_descricao), str(quantidade), largura
+                    ),
+                    negrito=True,
+                )
+            )
             for linha in cupom.linha_secundaria(descricoes.get(produto_id), largura):
                 documento.append(BlocoTexto(linha))
             # "[!]" chama atenção do cozinheiro pra uma instrução que muda o
@@ -654,9 +744,15 @@ class ImpressaoService:
                 documento.append(BlocoTexto(linha, negrito=True))
 
         documento.append(BlocoTexto(cupom.separador(largura)))
+        # O total de itens continua no rodapé junto do número do pedido: é a
+        # conferência que a cozinha faz antes de entregar a bandeja, e some
+        # dela custaria um erro de pedido para economizar uma linha.
         total_itens = sum(quantidade for _, _, quantidade, _ in agrupados)
         documento.append(
             BlocoTexto(cupom.duas_colunas("TOTAL DE ITENS", str(total_itens), largura))
+        )
+        documento.append(
+            BlocoTexto(f"PEDIDO: {comanda.id}", negrito=True)
         )
         documento.append(BlocoTexto(cupom.separador(largura)))
         return documento
@@ -668,36 +764,29 @@ class ImpressaoService:
         impressora: Impressora,
         agora: datetime,
     ) -> Documento:
-        """Recibo do cliente: o que ele levou, quanto deu e como pagou."""
+        """Recibo do cliente: o que ele levou, quanto deu e como pagou.
+
+        O layout (cabeçalho, tabela em colunas, total e rodapé) é do
+        `recibo_formatter` (§9.30); aqui fica só o que é do recibo: os
+        pagamentos, o troco e o que ficou a receber.
+        """
         largura = cupom.largura_util(impressora.colunas)
+        escala = escala_de(impressora)
         total = self._comandas.calcular_total(comanda.id)
         pagos_por_forma, troco, total_pago = self._pagamentos_da_comanda(comanda.id)
 
-        documento: Documento = [
-            BlocoTexto("RECIBO", negrito=True, centralizado=True),
-            BlocoTexto(
-                f"Comanda {comanda.id} - {self._destino_da_comanda(comanda)}",
-                centralizado=True,
-            ),
-            BlocoTexto(cupom.data_hora(agora), centralizado=True),
-            BlocoTexto(cupom.separador(largura)),
-        ]
-
-        for item in itens:
-            valor = dinheiro(item.preco_unit_congelado) * item.quantidade
-            for linha in cupom.linha_de_item(
-                item.quantidade, item.produto.nome, largura, valor=valor
-            ):
-                documento.append(BlocoTexto(linha))
-            for linha in cupom.linha_secundaria(item.observacao, largura):
-                documento.append(BlocoTexto(linha))
-
-        documento.append(BlocoTexto(cupom.separador(largura)))
-        documento.append(
-            BlocoTexto(
-                cupom.duas_colunas("TOTAL", f"R$ {cupom.moeda(total)}", largura, preenchimento="."),
-                negrito=True,
-            )
+        documento = recibo.cabecalho(
+            self._dados_da_loja(),
+            "RECIBO",
+            comanda.id,
+            agora,
+            largura,
+            escala,
+            subtitulo=TITULO_RELATORIO_DE_CONSUMO,
+        )
+        documento.extend(recibo.tabela_de_itens(self._itens_do_recibo(itens), largura))
+        documento.extend(
+            recibo.total_em_destaque("TOTAL", total, largura, escala, preenchimento=".")
         )
 
         if pagos_por_forma:
@@ -717,15 +806,15 @@ class ImpressaoService:
                 BlocoTexto(cupom.linha_de_valor("A RECEBER", restante, largura), negrito=True)
             )
 
-        documento.append(BlocoTexto(cupom.separador(largura)))
-        for linha in cupom.quebrar(f"Atendente: {self._nome_do_atendente(comanda)}", largura):
-            documento.append(BlocoTexto(linha))
-        # O rodapé também é quebrado: na bobina de 20 colunas — largura válida no
-        # cadastro — nenhuma das duas frases cabe inteira, e texto estourado sai
-        # cortado pela impressora, não continuado na linha de baixo.
-        for texto in ("Não é documento fiscal", "Obrigado e volte sempre!"):
-            for linha in cupom.quebrar(texto, largura):
-                documento.append(BlocoTexto(linha, centralizado=True))
+        documento.extend(
+            recibo.rodape(
+                self._nome_do_atendente(comanda),
+                self._destino_da_comanda(comanda),
+                recibo.permanencia(comanda.aberta_em, comanda.fechada_em or agora),
+                largura,
+                despedida="Obrigado e volte sempre!",
+            )
+        )
         return documento
 
     def _documento_pre_conta(
@@ -742,57 +831,41 @@ class ImpressaoService:
         o cliente não confundir a pré-conta com prova de quitação.
         """
         largura = cupom.largura_util(impressora.colunas)
+        escala = escala_de(impressora)
         subtotal = self._comandas.calcular_total(comanda.id)
         total_a_pagar = self._comandas.calcular_total_a_pagar(comanda.id)
 
-        documento: Documento = [
-            BlocoTexto("CONFERÊNCIA", negrito=True, centralizado=True),
-            BlocoTexto(
-                f"Comanda {comanda.id} - {self._destino_da_comanda(comanda)}",
-                centralizado=True,
-            ),
-            BlocoTexto(
-                f"Aberta em: {cupom.data_hora(comanda.aberta_em)}"
-                if comanda.aberta_em
-                else "",
-            ),
-        ]
-        if comanda.em_conferencia_em is not None:
-            documento.append(
-                BlocoTexto(f"Fechada em: {cupom.data_hora(comanda.em_conferencia_em)}")
-            )
-        documento.append(BlocoTexto(cupom.separador(largura)))
-
-        for item in itens:
-            valor = dinheiro(item.preco_unit_congelado) * item.quantidade
-            for linha in cupom.linha_de_item(
-                item.quantidade, item.produto.nome, largura, valor=valor
-            ):
-                documento.append(BlocoTexto(linha))
-            for linha in cupom.linha_secundaria(item.observacao, largura):
-                documento.append(BlocoTexto(linha))
-
-        documento.append(BlocoTexto(cupom.separador(largura)))
+        documento = recibo.cabecalho(
+            self._dados_da_loja(),
+            "CONFERÊNCIA",
+            comanda.id,
+            agora,
+            largura,
+            escala,
+            subtitulo=TITULO_RELATORIO_DE_CONSUMO,
+        )
+        documento.extend(recibo.tabela_de_itens(self._itens_do_recibo(itens), largura))
         documento.append(BlocoTexto(cupom.linha_de_valor("Subtotal", subtotal, largura)))
-
         if comanda.valor_desconto:
-            documento.append(BlocoTexto(cupom.linha_de_valor("Desconto", -dinheiro(comanda.valor_desconto), largura)))
-
-        documento.append(
-            BlocoTexto(
-                cupom.duas_colunas(
-                    "TOTAL A PAGAR", f"R$ {cupom.moeda(total_a_pagar)}", largura, preenchimento="."
-                ),
-                negrito=True,
+            documento.append(
+                BlocoTexto(
+                    cupom.linha_de_valor("Desconto", -dinheiro(comanda.valor_desconto), largura)
+                )
+            )
+        documento.extend(
+            recibo.total_em_destaque(
+                "TOTAL A PAGAR", total_a_pagar, largura, escala, preenchimento="."
             )
         )
-
-        documento.append(BlocoTexto(cupom.separador(largura)))
-        for linha in cupom.quebrar(f"Atendente: {self._nome_do_atendente(comanda)}", largura):
-            documento.append(BlocoTexto(linha))
-        for texto in ("Conferência - Não é documento fiscal", "Pague na mesa ou no caixa"):
-            for linha in cupom.quebrar(texto, largura):
-                documento.append(BlocoTexto(linha, centralizado=True))
+        documento.extend(
+            recibo.rodape(
+                self._nome_do_atendente(comanda),
+                self._destino_da_comanda(comanda),
+                recibo.permanencia(comanda.aberta_em, comanda.em_conferencia_em or agora),
+                largura,
+                despedida="Pague na mesa ou no caixa",
+            )
+        )
         return documento
 
     def _documento_fechamento(
@@ -1034,7 +1107,7 @@ class ImpressaoService:
     def _documento_teste(self, impressora: Impressora, agora: datetime) -> Documento:
         """Cupom de teste: prova cabo, papel, acento e largura de uma vez só.
 
-        Diz também a bobina, a fonte e a letra (§9.22): é no papel que o gerente
+        Diz também a bobina, a fonte e a escala (§9.22, §9.30): é no papel que o gerente
         confere se o que escolheu no cartão chegou à impressora — e, com 64 ou
         80 colunas, se a fonte condensada fez a régua caber numa linha.
         """
@@ -1055,14 +1128,12 @@ class ImpressaoService:
             BlocoTexto(
                 cupom.duas_colunas("Fonte", "condensada" if condensada else "normal", largura)
             ),
-            BlocoTexto(
-                cupom.duas_colunas("Letra", "grossa" if impressora.letra_grossa else "fina", largura)
-            ),
+            BlocoTexto(cupom.duas_colunas("Escala", f"{escala_de(impressora)}x", largura)),
             BlocoTexto(cupom.duas_colunas("Data", cupom.data_hora(agora), largura)),
             BlocoTexto(cupom.separador(largura)),
             BlocoTexto("Texto normal: ação, pão, café."),
             BlocoTexto("Texto em negrito", negrito=True),
-            BlocoTexto("MESA 12", dobro=True, centralizado=True),
+            BlocoTexto("MESA 12", centralizado=True, ampliado=True),
             BlocoTexto(cupom.separador(largura)),
             BlocoTexto(cupom.regua(largura)),
         ])
@@ -1072,6 +1143,51 @@ class ImpressaoService:
         for linha in cupom.quebrar(
             f"Se a régua acima ocupou uma linha só, a largura de {largura} "
             "colunas está correta para esta bobina.",
+            largura,
+        ):
+            documento.append(BlocoTexto(linha))
+        documento.append(BlocoTexto(cupom.separador(largura)))
+        return documento
+
+    def _documento_teste_de_fonte(self, impressora: Impressora, agora: datetime) -> Documento:
+        """As quatro escalas do `GS !`, uma por linha, rotuladas no papel.
+
+        O rótulo vai DENTRO da linha ampliada ("2x MESA 12"), e não numa linha
+        normal acima: com as duas separadas, uma impressora que ignora o
+        `GS !` imprimiria quatro pares iguais e o gerente teria que contar
+        linhas para saber qual é qual. Junto, cada linha se identifica sozinha.
+
+        O texto de cada escala é quebrado na largura QUE ELA TEM (a largura da
+        bobina dividida pela escala): em 4x numa bobina de 32 colunas cabem 8
+        caracteres, e mandar mais que isso faria a impressora cortar justamente
+        no cupom que existe para conferir tamanho.
+        """
+        largura = cupom.largura_util(impressora.colunas)
+        escala_cadastrada = escala_de(impressora)
+
+        documento: Documento = [
+            BlocoTexto("TESTE DE FONTE", negrito=True, centralizado=True),
+        ]
+        for linha in cupom.quebrar(impressora.nome, largura):
+            documento.append(BlocoTexto(linha, centralizado=True))
+        documento.extend([
+            BlocoTexto(cupom.separador(largura)),
+            BlocoTexto(cupom.duas_colunas("Escala no cadastro", f"{escala_cadastrada}x", largura)),
+            BlocoTexto(cupom.duas_colunas("Data", cupom.data_hora(agora), largura)),
+            BlocoTexto(cupom.separador(largura)),
+        ])
+
+        for escala in ESCALAS_DO_TESTE_DE_FONTE:
+            for linha in cupom.quebrar(
+                f"{escala}x MESA 12", recibo.largura_ampliada(largura, escala)
+            ):
+                documento.append(BlocoTexto(linha, negrito=True, escala=escala))
+
+        documento.append(BlocoTexto(cupom.separador(largura)))
+        for linha in cupom.quebrar(
+            "Se as quatro linhas acima saíram de tamanhos diferentes, a "
+            "impressora aceita o comando de escala. Se saíram todas iguais, "
+            "ela ignora o comando e a letra do destaque não vai aumentar.",
             largura,
         ):
             documento.append(BlocoTexto(linha))
@@ -1134,17 +1250,59 @@ class ImpressaoService:
                 detalhe.append((ROTULO_FORMA_PAGAMENTO.get(forma, forma.value), dinheiro(total)))
         return detalhe
 
+    def _dados_da_loja(self) -> recibo.DadosDaLoja:
+        """O cabeçalho do recibo: uma leitura por chave primária da linha única."""
+        return recibo.DadosDaLoja.de(self.uow.loja_config.obter())
+
+    @staticmethod
+    def _itens_do_recibo(itens: list[ItemComanda]) -> list[recibo.ItemDoRecibo]:
+        return [
+            recibo.ItemDoRecibo(
+                codigo=item.produto.id,
+                descricao=item.produto.nome,
+                preco_unitario=dinheiro(item.preco_unit_congelado),
+                quantidade=item.quantidade,
+                observacao=item.observacao,
+            )
+            for item in itens
+        ]
+
     @staticmethod
     def _destino_da_comanda(comanda: Comanda) -> str:
-        """'MESA 12' ou 'BALCÃO' — para onde o pedido vai."""
+        """'MESA 12' ou 'BALCÃO' — para onde o pedido vai.
+
+        Sem dois-pontos porque quem a usa é o rodapé do cupom do cliente, que
+        já a prefixa com "LOCAL: " — o cupom de produção, que precisa do
+        rótulo pontuado, usa `_destino_rotulado`.
+        """
         mesa = getattr(comanda, "mesa", None)
         if mesa is None:
             return "BALCÃO"
         return f"MESA {mesa.numero}"
 
+    @classmethod
+    def _destino_rotulado(cls, comanda: Comanda) -> str:
+        """'MESA: 12' ou 'BALCÃO' — o destino como RÓTULO, para o cupom de produção.
+
+        Existe por causa da linha "MESA: 12 | Atendente: Ana" (§9.32): ali os
+        dois lados precisam se parecer com rótulo e valor. O balcão continua
+        sem dois-pontos porque não tem número — não é um rótulo com valor, é o
+        próprio lugar, e "BALCÃO:" pareceria um campo que ficou vazio.
+        """
+        destino = cls._destino_da_comanda(comanda)
+        numero = destino.removeprefix("MESA ")
+        return f"MESA: {numero}" if numero != destino else destino
+
     def _nome_do_atendente(self, comanda: Comanda) -> str:
-        """Quem abriu a comanda; na falta dele, quem está operando agora."""
+        """Quem abriu a comanda; na falta dele, quem está operando agora.
+
+        Sem nenhum dos dois, "Caixa" (§9.32): a comanda pode ter nascido de um
+        fluxo sem funcionário vinculado, e o cupom precisa de um responsável
+        impresso — uma linha "Atendente:" vazia faz o cozinheiro procurar o
+        nome que faltou em vez de fazer o prato.
+        """
         funcionario = getattr(comanda, "funcionario", None)
-        if funcionario is not None:
-            return funcionario.nome
-        return self.auth.usuario_atual().nome
+        nome = getattr(funcionario, "nome", None) if funcionario is not None else None
+        if not nome:
+            nome = getattr(self.auth.usuario_atual(), "nome", None)
+        return str(nome).strip() if nome and str(nome).strip() else ATENDENTE_PADRAO

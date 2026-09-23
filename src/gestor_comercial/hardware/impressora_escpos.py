@@ -49,6 +49,12 @@ COLUNAS_PADRAO = 48
 COLUNAS_NA_FONTE_NORMAL = {58: 32, 80: 48}
 BOBINA_PADRAO_MM = 80
 
+# A escala das linhas de destaque (§9.30). O `GS !` aceita de 1 a 8; o cadastro
+# só oferece 2, 3 e 4, e o que chegar fora disso (objeto de teste, valor mexido à
+# mão) cai no dobro, que é o tamanho que a mesa sempre teve.
+ESCALA_PADRAO = 2
+ESCALA_MAXIMA = 8
+
 # Pasta onde caem os cupons do modo ARQUIVO quando ninguém informa caminho.
 # Mesma raiz do banco, vinda de `core/` e não do repository: `hardware/` não deve
 # depender da camada de dados. No `.exe`, é a pasta de dados própria da versão —
@@ -62,16 +68,29 @@ TIPOS_SUPORTADOS = ("USB", "SERIAL", "REDE", "WINDOWS", "ARQUIVO")
 class BlocoTexto:
     """Uma linha (ou parágrafo) do cupom com os únicos estilos que uma térmica tem.
 
-    `dobro` liga altura e largura dupla ao mesmo tempo — é o estilo do número
-    da mesa na comanda de produção, que a cozinha precisa ler de longe. Ele
-    consome o dobro das colunas, então quem monta o documento deve contar com
-    metade da largura nesses blocos.
+    `ampliado` é a linha de DESTAQUE (título, mesa, TOTAL): sai na escala da
+    impressora (2x, 3x ou 4x, `Impressora.escala_fonte`, §9.30), e não numa
+    escala do documento — o mesmo recibo sai em 3x numa impressora e em 2x em
+    outra, e a fila de contingência reimprime com o que a impressora é HOJE.
+    Ela consome `escala` vezes as colunas, então quem monta o documento conta
+    com a largura dividida pela escala nesses blocos.
+
+    `dobro` é o destaque de antes da escala: 2x fixo. Continua existindo para os
+    cupons que já estão guardados na fila de contingência voltarem iguais.
+
+    `escala` é a exceção de `ampliado`: uma escala FIXA, só deste bloco,
+    ignorando a da impressora. Existe para o cupom de diagnóstico de fonte
+    (§9.31), que precisa mostrar 1x, 2x, 3x e 4x lado a lado no mesmo papel —
+    o único caso em que o documento, e não o cadastro, decide o tamanho. Fora
+    dele, continua `None`: quem manda na escala é a impressora.
     """
 
     texto: str
     negrito: bool = False
     centralizado: bool = False
     dobro: bool = False
+    ampliado: bool = False
+    escala: int | None = None
 
 
 Documento = list[BlocoTexto]
@@ -92,11 +111,20 @@ def documento_para_json(documento: Documento) -> str:
                 "negrito": bloco.negrito,
                 "centralizado": bloco.centralizado,
                 "dobro": bloco.dobro,
+                "ampliado": bloco.ampliado,
+                "escala": bloco.escala,
             }
             for bloco in documento
         ],
         ensure_ascii=False,
     )
+
+
+def _escala_do_bloco_json(bruto: object) -> int | None:
+    """A escala fixa de um bloco vinda do JSON da fila. Fora da faixa, `None`."""
+    if isinstance(bruto, int) and not isinstance(bruto, bool) and 1 <= bruto <= ESCALA_MAXIMA:
+        return bruto
+    return None
 
 
 def documento_de_json(bruto: str) -> Documento:
@@ -122,6 +150,11 @@ def documento_de_json(bruto: str) -> Documento:
                 negrito=bool(cru.get("negrito", False)),
                 centralizado=bool(cru.get("centralizado", False)),
                 dobro=bool(cru.get("dobro", False)),
+                ampliado=bool(cru.get("ampliado", False)),
+                # `None` (e não um int) quando o cupom foi guardado antes
+                # deste campo existir: a fila antiga reimprime na escala da
+                # impressora, como sempre reimprimiu.
+                escala=_escala_do_bloco_json(cru.get("escala")),
             )
         )
     return blocos
@@ -158,7 +191,7 @@ class ParametrosImpressora:
     nome_fila: str | None = None
     caminho_arquivo: str | None = None
     bobina_mm: int = BOBINA_PADRAO_MM
-    letra_grossa: bool = False
+    escala_fonte: int = ESCALA_PADRAO
 
     @classmethod
     def de(cls, impressora: "Impressora") -> "ParametrosImpressora":
@@ -168,7 +201,7 @@ class ParametrosImpressora:
             tipo_conexao=str(getattr(bruto, "value", bruto) or ""),
             colunas=_colunas_de(impressora),
             bobina_mm=_bobina_de(impressora),
-            letra_grossa=_letra_grossa_de(impressora),
+            escala_fonte=escala_de(impressora),
             vendor_id=getattr(impressora, "vendor_id", None),
             product_id=getattr(impressora, "product_id", None),
             porta_serial=getattr(impressora, "porta_serial", None),
@@ -235,13 +268,11 @@ def _sessao_de_impressao(
     tipo = _tipo_de_conexao(impressora)
     nome = _nome_da(impressora)
     colunas = _colunas_de(impressora)
-    letra_grossa = _letra_grossa_de(impressora)
+    escala = escala_de(impressora)
 
     if tipo == "ARQUIVO":
         # Não há conexão a fechar: cada impressão abre e fecha o arquivo.
-        yield _DriverArquivo(
-            _caminho_do_arquivo(impressora), colunas, nome, letra_grossa=letra_grossa
-        )
+        yield _DriverArquivo(_caminho_do_arquivo(impressora), colunas, nome, escala=escala)
         return
 
     conexao = _abrir_conexao_escpos(impressora, tipo, nome, timeout_s)
@@ -249,7 +280,7 @@ def _sessao_de_impressao(
         yield _DriverEscpos(
             conexao,
             nome,
-            letra_grossa=letra_grossa,
+            escala=escala,
             condensada=usa_fonte_condensada(colunas, _bobina_de(impressora)),
         )
     except BaseException:
@@ -279,18 +310,28 @@ def _sessao_de_impressao(
 class _DriverEscpos:
     """Adapta os `BlocoTexto` para os comandos ESC/POS da biblioteca.
 
-    `letra_grossa` e `condensada` são do cadastro da impressora, e não do
-    documento (§9.22): o mesmo recibo sai em letra grossa numa impressora e fina
-    em outra, e a fila de contingência reimprime com o que a impressora é HOJE.
+    `escala` e `condensada` são do cadastro da impressora, e não do documento
+    (§9.22, §9.30): o mesmo recibo sai com o TOTAL em 3x numa impressora e em
+    2x em outra, e a fila de contingência reimprime com o que a impressora é HOJE.
     """
 
     def __init__(
-        self, conexao: Any, nome: str, *, letra_grossa: bool = False, condensada: bool = False
+        self, conexao: Any, nome: str, *, escala: int = ESCALA_PADRAO, condensada: bool = False
     ) -> None:
         self._conexao = conexao
         self._nome = nome
-        self._letra_grossa = letra_grossa
+        self._escala = escala
         self._condensada = condensada
+
+    def _tamanho(self, bloco: BlocoTexto) -> int:
+        # A escala fixa do bloco vem na frente de tudo: é o cupom de
+        # diagnóstico dizendo "esta linha sai em 3x", independentemente do
+        # que a impressora tenha cadastrado — é justamente o que ele prova.
+        if bloco.escala is not None:
+            return max(1, min(int(bloco.escala), ESCALA_MAXIMA))
+        if bloco.ampliado:
+            return self._escala
+        return 2 if bloco.dobro else 1
 
     def imprimir(self, documento: Documento) -> None:
         try:
@@ -299,43 +340,33 @@ class _DriverEscpos:
             # ligado na memória dela. Sem o reset, o cupom novo herdaria isso.
             self._conexao.hw("INIT")
             for bloco in documento:
-                # `normal_textsize` é OBRIGATÓRIO aqui, não enfeite: o `set()` do
-                # python-escpos só emite comando de tamanho quando pelo menos um
-                # dos três (normal_textsize, double_width, double_height) é
-                # verdadeiro — com os três falsos ele não manda nada e a
-                # impressora CONTINUA no tamanho anterior. Sem esta linha, o
-                # bloco em dobro (o número da mesa) ligaria o tamanho duplo e
-                # nada o desligaria: o resto do cupom, e o cupom seguinte,
-                # sairiam todos dobrados e cortados pela largura da bobina.
+                tamanho = self._tamanho(bloco)
+                # O tamanho vai EM TODO BLOCO, e sempre pelo `GS !` (o
+                # `custom_size`), inclusive o 1x do texto comum. Não é enfeite:
+                # o `normal_textsize` do python-escpos só manda `ESC ! 0`, que
+                # não zera com segurança o tamanho que um `GS !` ligou — depois
+                # de um TOTAL em 3x, a linha seguinte (e o cupom seguinte)
+                # sairia ampliada e cortada pela largura da bobina. Com um
+                # comando só para o tamanho, cada linha diz o dela.
                 #
-                # A letra grossa e a fonte condensada vão EM TODO BLOCO, e não uma
-                # vez no cabeçalho, pelo mesmo motivo: o `ESC ! 0` que o
-                # `normal_textsize` manda zera a ênfase e volta à fonte A, e o
-                # `bold=False` de um bloco comum manda `ESC E 0`. Um `ESC E 1`
-                # só no começo morreria na primeira linha. O `set()` emite o
-                # tamanho antes da ênfase e da fonte, então elas sobrevivem.
+                # Negrito e fonte também vão em todo bloco: o `bold=False` de uma
+                # linha comum manda `ESC E 0`, e o `GS !` não mexe em nenhum dos
+                # dois, então a condensada escolhida vale para o cupom inteiro.
                 self._conexao.set(
                     align="center" if bloco.centralizado else "left",
-                    bold=bloco.negrito or self._letra_grossa,
+                    bold=bloco.negrito,
                     # `None` quando não é condensada: nada é enviado, e o cupom
-                    # de quem cabe na fonte normal sai com os bytes de sempre.
+                    # de quem cabe na fonte normal não ganha bytes à toa.
                     font="b" if self._condensada else None,
-                    normal_textsize=not bloco.dobro,
-                    double_width=bloco.dobro,
-                    double_height=bloco.dobro,
+                    custom_size=True,
+                    width=tamanho,
+                    height=tamanho,
                 )
                 self._conexao.textln(bloco.texto)
             # Volta ao estado neutro antes de cortar: a impressora guarda o
             # último estilo entre trabalhos, e sem isso o próximo cupom sairia
-            # inteiro em negrito dobrado. É aqui o `ESC E 0` do fim da letra
-            # grossa, e o `ESC ! 0` do `normal_textsize` devolve a fonte A.
-            self._conexao.set(
-                align="left",
-                bold=False,
-                normal_textsize=True,
-                double_width=False,
-                double_height=False,
-            )
+            # inteiro em negrito ampliado.
+            self._conexao.set(align="left", bold=False, custom_size=True, width=1, height=1)
             self._conexao.cut()
         except Exception as erro:
             # `except Exception` largo é proposital e não é preguiça: o
@@ -364,16 +395,18 @@ class _DriverArquivo:
     não do documento — se o serviço mandar uma linha larga demais, o arquivo
     tem que mostrar o mesmo estrago que o papel mostraria.
 
-    A letra grossa (§9.22) segue a mesma simulação do negrito: o cupom inteiro
-    em MAIÚSCULA. É o que o papel mostra — com tudo em negrito, os títulos
-    deixam de se destacar do resto.
+    A linha `ampliado` (§9.30) é simulada como o `dobro`, na escala da
+    impressora: cabem `colunas // escala` caracteres, cada um seguido de
+    `escala - 1` espaços. A altura não tem como sair num `.txt`.
     """
 
-    def __init__(self, caminho: Path, colunas: int, nome: str, *, letra_grossa: bool = False) -> None:
+    def __init__(
+        self, caminho: Path, colunas: int, nome: str, *, escala: int = ESCALA_PADRAO
+    ) -> None:
         self._caminho = caminho
         self._colunas = colunas
         self._nome = nome
-        self._letra_grossa = letra_grossa
+        self._escala = escala
 
     def imprimir(self, documento: Documento) -> None:
         linhas: list[str] = [
@@ -401,19 +434,23 @@ class _DriverArquivo:
             ) from erro
 
     def _renderizar(self, bloco: BlocoTexto) -> list[str]:
-        texto = bloco.texto.upper() if bloco.negrito or self._letra_grossa else bloco.texto
-        # Bloco em dobro ocupa 2 colunas por caractere, então cabe metade.
-        largura_util = max(1, self._colunas // 2 if bloco.dobro else self._colunas)
+        texto = bloco.texto.upper() if bloco.negrito else bloco.texto
+        # Bloco ampliado ocupa `tamanho` colunas por caractere: cabe a fração.
+        if bloco.escala is not None:
+            tamanho = max(1, min(int(bloco.escala), ESCALA_MAXIMA))
+        else:
+            tamanho = self._escala if bloco.ampliado else 2 if bloco.dobro else 1
+        largura_util = max(1, self._colunas // tamanho)
 
         if not texto.strip():
             return [""]
 
         renderizadas = []
         for linha in textwrap.wrap(texto, width=largura_util) or [""]:
-            if bloco.dobro:
-                # Letra espaçada aproxima visualmente a largura dupla; o
-                # resultado tem 2n-1 caracteres para n caracteres impressos.
-                linha = " ".join(linha)
+            if tamanho > 1:
+                # Letra espaçada aproxima visualmente a largura ampliada; o
+                # resultado tem k·n-(k-1) caracteres para n impressos em k x.
+                linha = (" " * (tamanho - 1)).join(linha)
             renderizadas.append(linha.center(self._colunas) if bloco.centralizado else linha)
         return renderizadas
 
@@ -565,8 +602,12 @@ def _bobina_de(impressora: "Impressora") -> int:
     return bobina if bobina in COLUNAS_NA_FONTE_NORMAL else BOBINA_PADRAO_MM
 
 
-def _letra_grossa_de(impressora: "Impressora") -> bool:
-    return bool(getattr(impressora, "letra_grossa", False))
+def escala_de(impressora: "Impressora") -> int:
+    """2, 3 ou 4 do cadastro; fora da faixa do `GS !`, o dobro."""
+    escala = getattr(impressora, "escala_fonte", None)
+    if isinstance(escala, int) and not isinstance(escala, bool) and 1 <= escala <= ESCALA_MAXIMA:
+        return escala
+    return ESCALA_PADRAO
 
 
 def usa_fonte_condensada(colunas: int, bobina_mm: int) -> bool:

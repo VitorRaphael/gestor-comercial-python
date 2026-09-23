@@ -197,6 +197,20 @@ class ImpressorasView(QWidget):
         self._botao_teste.clicked.connect(self._imprimir_teste)
         layout_acoes.addWidget(self._botao_teste)
 
+        # Botão separado, e não uma opção dentro do teste comum: o teste de
+        # fonte (§9.31) é gasto de papel para responder UMA pergunta — "esta
+        # impressora obedece ao comando de escala?" —, que só se faz quando o
+        # destaque não aumentou. Embutido no teste de todo dia, ele imprimiria
+        # quatro linhas grandes em toda conferência de cabo.
+        self._botao_teste_fonte = QPushButton("Testar fonte")
+        self._botao_teste_fonte.setProperty("variante", "secundario")
+        self._botao_teste_fonte.setToolTip(
+            "Imprime as escalas 1x, 2x, 3x e 4x no mesmo cupom. Se saírem "
+            "todas do mesmo tamanho, a impressora ignora o comando de escala."
+        )
+        self._botao_teste_fonte.clicked.connect(self._imprimir_teste_de_fonte)
+        layout_acoes.addWidget(self._botao_teste_fonte)
+
         self._botao_excluir = QPushButton("Excluir")
         self._botao_excluir.setProperty("variante", "perigo")
         self._botao_excluir.clicked.connect(self._excluir)
@@ -623,6 +637,23 @@ class ImpressorasView(QWidget):
             self._mostrar_erro(str(erro))
             return
         self._aviso.mostrar_um(resultado, contexto="Teste")
+
+    def _imprimir_teste_de_fonte(self) -> None:
+        """Cupom de diagnóstico da escala (§9.31). Mesmo caminho do teste comum."""
+        impressora = self._impressora_selecionada()
+        if impressora is None:
+            self._mostrar_erro("Selecione uma impressora na lista.")
+            return
+
+        self._mostrar_erro("")
+        try:
+            resultado = executar_impressao(
+                lambda: self._impressao.imprimir_teste_de_fonte(impressora.id)
+            )
+        except _ERROS_SERVICE as erro:
+            self._mostrar_erro(str(erro))
+            return
+        self._aviso.mostrar_um(resultado, contexto="Teste de fonte")
 
     # ------------------------------------------------------------------
     # Fila de contingência (Fase 3 de `Mitigação de Falhas.md`)
